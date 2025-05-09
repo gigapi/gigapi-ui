@@ -8,6 +8,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
-      # run any `bun` or `bunx` command
-      - run: bun install
+      # Clean up node_modules and package-lock.json
+      - run: rm -rf node_modules package-lock.json
+      # Install dependencies with --no-optional to skip problematic optional dependencies
+      - run: bun install --no-optional
+      # Build the project
       - run: bun run build
