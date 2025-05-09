@@ -22,10 +22,7 @@ jobs:
         with:
           type: 'zip'
           filename: 'release.zip'
-<<<<<<< HEAD
-=======
           path: 'dist'
->>>>>>> origin/main
       - name: Upload Release
         uses: ncipollo/release-action@v1.16.0
         with:
