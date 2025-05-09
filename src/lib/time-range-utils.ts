@@ -57,13 +57,17 @@ export function identifyTimeFields(schema: any): string[] {
 
 // Generate SQL time filters based on the selected time range
 export function generateTimeFilter(timeRange: TimeRange, timeField: string): string {
+  // Check if time filtering is enabled
+  if (!timeRange || !timeField || timeRange.enabled === false || !timeRange.from || !timeRange.to) {
+    return '';
+  }
+  
   const { from, to } = timeRange;
   let fromSql = '';
   let toSql = '';
   
   // Process the 'from' time value
   if (from === 'now') {
-    // Special case for 'now', typically not used for 'from'
     fromSql = 'NOW()';
   } else if (from.startsWith('now-')) {
     // Relative time in the past
@@ -84,7 +88,6 @@ export function generateTimeFilter(timeRange: TimeRange, timeField: string): str
       
       // If snapTo is defined, use truncate/date_trunc function (syntax varies by database)
       if (snapTo) {
-        // This is a generic approach - might need customization per DB
         fromSql = `DATE_TRUNC('${getSnapUnit(snapTo)}', NOW() - INTERVAL '${interval}')`;
       } else {
         fromSql = `NOW() - INTERVAL '${interval}'`;
@@ -156,15 +159,13 @@ export function generateTimeFilter(timeRange: TimeRange, timeField: string): str
     }
   }
   
-  // Build the SQL WHERE conditions
-  // Check if the time field is a numeric timestamp or a datetime field
+  // Build the SQL WHERE conditions based on field type
   if (timeField.toLowerCase().includes('timestamp') || 
-      timeField.toLowerCase().includes('time_sec') ||
-      timeField.toLowerCase().includes('time_usec') ||
-      timeField === 'time' ||
+      timeField.toLowerCase().includes('time') ||
+      timeField.toLowerCase().includes('_sec') ||
+      timeField.toLowerCase().includes('_usec') ||
       timeField === 'create_date') {
-    // For numeric timestamp fields, need to use timestamp conversion
-    // This handles most SQL dialects, may need customization
+    // For numeric timestamp fields (milliseconds since epoch)
     return `${timeField} >= CAST(EXTRACT(EPOCH FROM ${fromSql}) AS BIGINT) * 1000 AND ${timeField} <= CAST(EXTRACT(EPOCH FROM ${toSql}) AS BIGINT) * 1000`;
   } else {
     // For datetime fields
@@ -175,6 +176,8 @@ export function generateTimeFilter(timeRange: TimeRange, timeField: string): str
 // Helper function to convert unit character to SQL date_trunc unit
 function getSnapUnit(unit: string): string {
   switch (unit) {
+    case 'm': return 'minute';
+    case 'h': return 'hour';
     case 'd': return 'day';
     case 'w': return 'week';
     case 'M': return 'month';
@@ -185,6 +188,8 @@ function getSnapUnit(unit: string): string {
 
 // Adapt SQL time filter based on database dialect
 export function adaptTimeFilterForDbType(filter: string, dbType: string): string {
+  if (!filter) return '';
+  
   switch (dbType.toLowerCase()) {
     case 'mysql':
       // MySQL uses different timestamp functions
@@ -216,96 +221,75 @@ export function adaptTimeFilterForDbType(filter: string, dbType: string): string
 }
 
 // Modify a SQL query to add a time filter if needed
-export function addTimeFilterToQuery(query: string, timeFilter: string): string {
-  const trimmedQuery = query.trim();
+export function addTimeFilterToQuery(query: string, timeFilter: string, timeRange?: TimeRange, selectedTimeField?: string | null): string {
+  // Skip if no query or no time filter or time filtering is disabled
+  if (!query || !timeFilter || (timeRange && timeRange.enabled === false) || !selectedTimeField) {
+    console.log("Skipping time filter - disabled or no field selected");
+    return query;
+  }
   
-  // Check if query already has a WHERE clause
+  // Check if a time filter already exists
+  if (hasTimeFilter(query)) {
+    console.log("Query already has time filter, not adding");
+    return query;
+  }
+  
+  const trimmedQuery = query.trim();
+  console.log("Adding time filter for field:", selectedTimeField);
+  
+  // Extract components of the query
   const whereIndex = trimmedQuery.toUpperCase().indexOf(' WHERE ');
+  const groupByIndex = trimmedQuery.toUpperCase().indexOf(' GROUP BY ');
+  const orderByIndex = trimmedQuery.toUpperCase().indexOf(' ORDER BY ');
+  const limitIndex = trimmedQuery.toUpperCase().indexOf(' LIMIT ');
+  
+  // Store all clauses that should come after the WHERE
+  const clauses = [];
+  let queryBase = "";
   
   if (whereIndex !== -1) {
-    // Check if there are existing time conditions to avoid duplication
-    if (trimmedQuery.includes('__timestamp') || 
-        trimmedQuery.includes('time ') ||
-        trimmedQuery.includes(' date ') ||
-        trimmedQuery.includes('create_date')) {
-      // Query already has time conditions, return as-is to avoid potential conflicts
-      return query;
-    }
+    // Add time filter to existing WHERE clause
+    queryBase = trimmedQuery.substring(0, whereIndex + 7); // +7 for " WHERE "
+    let whereClause = "";
     
-    // Add the time filter as an additional condition
-    const beforeWhere = trimmedQuery.substring(0, whereIndex + 7); // +7 for " WHERE "
-    let afterWhere = trimmedQuery.substring(whereIndex + 7);
-    
-    // Check if there's a LIMIT clause within the WHERE part
-    const limitIndex = afterWhere.toUpperCase().indexOf(' LIMIT ');
-    let limitClause = '';
-    
-    if (limitIndex !== -1) {
-      // Extract the LIMIT clause
-      limitClause = afterWhere.substring(limitIndex);
-      // Remove the LIMIT from the WHERE part
-      afterWhere = afterWhere.substring(0, limitIndex);
-    }
-    
-    // Now build the modified query with LIMIT at the end
-    return `${beforeWhere}${timeFilter} AND (${afterWhere})${limitClause}`;
-  } else {
-    // No WHERE clause found, check for other clauses
-    const fromIndex = trimmedQuery.toUpperCase().indexOf(' FROM ');
-    if (fromIndex === -1) {
-      // Can't identify a proper SQL structure, return as-is
-      return query;
-    }
-    
-    // Look for GROUP BY, ORDER BY, LIMIT after FROM
-    const groupByIndex = trimmedQuery.toUpperCase().indexOf(' GROUP BY ');
-    const orderByIndex = trimmedQuery.toUpperCase().indexOf(' ORDER BY ');
-    const limitIndex = trimmedQuery.toUpperCase().indexOf(' LIMIT ');
-    
-    let insertIndex;
-    let limitClause = '';
-    
-    if (limitIndex !== -1) {
-      // Extract the LIMIT clause
-      limitClause = trimmedQuery.substring(limitIndex);
-      
-      // Check if there are other clauses before LIMIT
-      if (groupByIndex !== -1 && groupByIndex < limitIndex) {
-        insertIndex = groupByIndex;
-      } else if (orderByIndex !== -1 && orderByIndex < limitIndex) {
-        insertIndex = orderByIndex;
-      } else {
-        // No other clauses before LIMIT, insert WHERE just before LIMIT
-        insertIndex = limitIndex;
-      }
-      
-      // Build the query with WHERE before any other clauses and LIMIT at the end
-      const beforeInsert = trimmedQuery.substring(0, insertIndex);
-      const middleInsert = trimmedQuery.substring(insertIndex, limitIndex);
-      
-      return `${beforeInsert} WHERE ${timeFilter}${middleInsert}${limitClause}`;
+    if (groupByIndex !== -1 && groupByIndex > whereIndex) {
+      whereClause = trimmedQuery.substring(whereIndex + 7, groupByIndex);
+      clauses.push(trimmedQuery.substring(groupByIndex));
+    } else if (orderByIndex !== -1 && orderByIndex > whereIndex) {
+      whereClause = trimmedQuery.substring(whereIndex + 7, orderByIndex);
+      clauses.push(trimmedQuery.substring(orderByIndex));
+    } else if (limitIndex !== -1 && limitIndex > whereIndex) {
+      whereClause = trimmedQuery.substring(whereIndex + 7, limitIndex);
+      clauses.push(trimmedQuery.substring(limitIndex));
     } else {
-      // No LIMIT clause, handle other clauses
-      if (groupByIndex !== -1) {
-        insertIndex = groupByIndex;
-      } else if (orderByIndex !== -1) {
-        insertIndex = orderByIndex;
-      } else {
-        // No other clauses, add WHERE at the end
-        insertIndex = trimmedQuery.length;
-      }
-      
-      const beforeInsert = trimmedQuery.substring(0, insertIndex);
-      const afterInsert = trimmedQuery.substring(insertIndex);
-      
-      return `${beforeInsert} WHERE ${timeFilter}${afterInsert}`;
+      whereClause = trimmedQuery.substring(whereIndex + 7);
     }
+    
+    return `${queryBase}${timeFilter} AND (${whereClause.trim()})${clauses.join('')}`;
+  } else {
+    // Need to add a new WHERE clause
+    let insertPos = trimmedQuery.length;
+    
+    // Find the position to insert the WHERE clause
+    if (groupByIndex !== -1) {
+      insertPos = groupByIndex;
+      clauses.push(trimmedQuery.substring(groupByIndex));
+    } else if (orderByIndex !== -1) {
+      insertPos = orderByIndex;
+      clauses.push(trimmedQuery.substring(orderByIndex));
+    } else if (limitIndex !== -1) {
+      insertPos = limitIndex;
+      clauses.push(trimmedQuery.substring(limitIndex));
+    }
+    
+    queryBase = trimmedQuery.substring(0, insertPos);
+    return `${queryBase} WHERE ${timeFilter}${clauses.join('')}`;
   }
 }
 
 // Find the best time field to use for a given table name
 export function findBestTimeField(schema: any, tableName: string): string | null {
-  if (!schema) return null;
+  if (!schema || !tableName) return null;
   
   // Look through the tables in schema
   for (const dbName in schema) {
@@ -331,7 +315,7 @@ export function findBestTimeField(schema: any, tableName: string): string | null
       // First check for priority fields
       for (const fieldName of priorityFields) {
         const found = table.columns.find((col: any) => 
-          col.columnName?.toLowerCase() === fieldName
+          col.columnName?.toLowerCase() === fieldName.toLowerCase()
         );
         if (found) return found.columnName;
       }
@@ -361,10 +345,14 @@ export function findBestTimeField(schema: any, tableName: string): string | null
 
 // Extract table name from a SQL query (basic implementation)
 export function extractTableName(query: string): string | null {
-  // This is a simplified approach and might not work for complex queries
-  const fromMatch = query.match(/\sFROM\s+(\w+)/i);
+  if (!query) return null;
+  
+  // Look for FROM clause followed by table name
+  const fromMatch = query.match(/\sFROM\s+([a-zA-Z0-9_\.]+)/i);
   if (fromMatch && fromMatch[1]) {
-    return fromMatch[1];
+    // Remove any schema prefix (e.g., "schema.table" -> "table")
+    const parts = fromMatch[1].split('.');
+    return parts[parts.length - 1];
   }
   return null;
 }
@@ -381,6 +369,7 @@ export function hasTimeFilter(query: string): boolean {
   // First, check if there's a WHERE clause
   const whereIndex = lowerQuery.indexOf(' where ');
   if (whereIndex === -1) {
+    console.log("No WHERE clause detected");
     return false; // No WHERE clause means no time filter
   }
   
@@ -388,27 +377,20 @@ export function hasTimeFilter(query: string): boolean {
   const whereClause = lowerQuery.substring(whereIndex);
   
   // More specific checks for time-related conditions
-  // Look for patterns that indicate a WHERE clause with time conditions
-  return (
-    // Look for specific time field references in WHERE conditions with operators
-    /where\s+[^\s]+\.?(timestamp|time|date|datetime|created_at|updated_at|__timestamp|time_sec|time_usec|create_date)\s*(>|<|=|>=|<=|between|!=)/i.test(whereClause) ||
+  const hasTimeCondition = (
+    // Check for common time field names in WHERE conditions with operators
+    /where\s+.*?(timestamp|time|date|datetime|created_at|updated_at|__timestamp|time_sec|time_usec|create_date)\s*(>=|<=|>|<|=|between|!=)/i.test(whereClause) ||
     
-    // Look for time functions
-    /where.*\bnow\s*\(\)/i.test(whereClause) ||
-    /where.*\bcurrent_timestamp\b/i.test(whereClause) ||
-    /where.*\binterval\b/i.test(whereClause) ||
-    /where.*\bextract\s*\(\s*epoch\b/i.test(whereClause) ||
-    /where.*\bdate_trunc\b/i.test(whereClause) ||
+    // Check for time functions
+    /where.*?\b(now|current_timestamp|date_trunc|extract\s*\(\s*epoch)\b/i.test(whereClause) ||
     
-    // Check for date literals in WHERE clause
-    /where.*'\d{4}-\d{2}-\d{2}'/i.test(whereClause) ||
+    // Check for date literals
+    /where.*?'\d{4}-\d{2}-\d{2}'/i.test(whereClause) ||
     
-    // Check for SQL timestamp functions
-    /where.*\bto_timestamp\b/i.test(whereClause) ||
-    /where.*\bdate_format\b/i.test(whereClause) ||
-    /where.*\bunix_timestamp\b/i.test(whereClause) ||
-    
-    // Check for epoch_ns function (used in some databases)
-    /where.*\bepoch_ns\b/i.test(whereClause)
+    // Check for epoch timestamps
+    /where.*?\b\d{10,13}\b/i.test(whereClause)
   );
+  
+  console.log("Time filter detection result:", hasTimeCondition);
+  return hasTimeCondition;
 } 

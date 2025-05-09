@@ -8,6 +8,8 @@ import { cn } from "@/lib/utils";
 import { format } from "date-fns";
 import { Card } from "./ui/card";
 import { ScrollArea } from "./ui/scroll-area";
+import { DEFAULT_TIME_RANGE, NO_TIME_FILTER, QUICK_RANGES } from "@/lib/time-constants";
+import { Badge } from "./ui/badge";
 
 export interface TimeRange {
   from: string; // ISO string or relative time like 'now-24h'
@@ -17,42 +19,22 @@ export interface TimeRange {
     from: Date | string;
     to: Date | string;
   };
+  enabled?: boolean; // Whether time filtering is enabled
 }
 
 interface TimeRangeSelectorProps {
   timeRange: TimeRange;
   onTimeRangeChange: (range: TimeRange) => void;
   className?: string;
+  disabled?: boolean; // Whether the selector should be disabled
+  fieldName?: string; // The name of the field being filtered
+  tableName?: string; // The name of the table being filtered
 }
 
-// Quick range options
-const QUICK_RANGES = [
-  { display: "Last 5 minutes", from: "now-5m", to: "now" },
-  { display: "Last 15 minutes", from: "now-15m", to: "now" },
-  { display: "Last 30 minutes", from: "now-30m", to: "now" },
-  { display: "Last 1 hour", from: "now-1h", to: "now" },
-  { display: "Last 3 hours", from: "now-3h", to: "now" },
-  { display: "Last 6 hours", from: "now-6h", to: "now" },
-  { display: "Last 12 hours", from: "now-12h", to: "now" },
-  { display: "Last 24 hours", from: "now-24h", to: "now" },
-  { display: "Last 2 days", from: "now-2d", to: "now" },
-  { display: "Last 7 days", from: "now-7d", to: "now" },
-  { display: "Last 30 days", from: "now-30d", to: "now" },
-  { display: "Last 90 days", from: "now-90d", to: "now" },
-  { display: "Last 6 months", from: "now-6M", to: "now" },
-  { display: "Last 1 year", from: "now-1y", to: "now" },
-  { display: "Today", from: "now/d", to: "now" },
-  { display: "Yesterday", from: "now-1d/d", to: "now/d" },
-  { display: "This week", from: "now/w", to: "now" },
-  { display: "Previous week", from: "now-1w/w", to: "now/w" },
-  { display: "This month", from: "now/M", to: "now" },
-  { display: "Previous month", from: "now-1M/M", to: "now/M" },
-  { display: "This year", from: "now/y", to: "now" },
-  { display: "Previous year", from: "now-1y/y", to: "now/y" },
-];
-
 // Parse relative time expressions into timestamp
-function parseRelativeTime(relativeTime: string): number {
+export function parseRelativeTime(relativeTime: string): number {
+  if (!relativeTime) return Date.now();
+  
   if (relativeTime === "now") {
     return Date.now();
   }
@@ -77,6 +59,8 @@ function parseRelativeTime(relativeTime: string): number {
           return now - value * 30 * 24 * 60 * 60 * 1000;
         case "y": // years (approximate)
           return now - value * 365 * 24 * 60 * 60 * 1000;
+        default:
+          return now;
       }
     }
 
@@ -95,6 +79,7 @@ function parseRelativeTime(relativeTime: string): number {
         case "w": timestamp -= value * 7 * 24 * 60 * 60 * 1000; break;
         case "M": timestamp -= value * 30 * 24 * 60 * 60 * 1000; break;
         case "y": timestamp -= value * 365 * 24 * 60 * 60 * 1000; break;
+        default: break;
       }
 
       // Then snap to the unit boundary
@@ -116,6 +101,7 @@ function parseRelativeTime(relativeTime: string): number {
           date.setMonth(0, 1);
           date.setHours(0, 0, 0, 0);
           break;
+        default: break;
       }
       return date.getTime();
     }
@@ -142,8 +128,19 @@ function parseRelativeTime(relativeTime: string): number {
         date.setMonth(0, 1);
         date.setHours(0, 0, 0, 0);
         break;
+      default: break;
     }
     return date.getTime();
+  }
+
+  // Try to parse as ISO date or timestamp
+  try {
+    const timestamp = Date.parse(relativeTime);
+    if (!isNaN(timestamp)) {
+      return timestamp;
+    }
+  } catch (e) {
+    console.error("Error parsing time:", e);
   }
 
   // If cannot parse, return current time
@@ -152,6 +149,8 @@ function parseRelativeTime(relativeTime: string): number {
 
 // Convert relative expressions to display format
 function getDisplayTime(timeStr: string): string {
+  if (!timeStr) return "now";
+  
   if (timeStr === "now") {
     return "now";
   }
@@ -178,85 +177,158 @@ export default function TimeRangeSelector({
   timeRange,
   onTimeRangeChange,
   className,
+  disabled = false,
+  fieldName,
+  tableName
 }: TimeRangeSelectorProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<"quick" | "relative" | "absolute">("quick");
-  const [fromInput, setFromInput] = useState(timeRange.from);
-  const [toInput, setToInput] = useState(timeRange.to);
+  const [fromInput, setFromInput] = useState(timeRange?.from || DEFAULT_TIME_RANGE.from);
+  const [toInput, setToInput] = useState(timeRange?.to || DEFAULT_TIME_RANGE.to);
   const [searchQuick, setSearchQuick] = useState("");
+
+  // Ensure time range is valid
+  const safeTimeRange = useMemo(() => {
+    return timeRange || DEFAULT_TIME_RANGE;
+  }, [timeRange]);
 
   // Filter quick ranges based on search
   const filteredQuickRanges = useMemo(() => {
-    if (!searchQuick) return QUICK_RANGES;
+    // Add "No time filter" option at the beginning
+    const allRanges = [NO_TIME_FILTER, ...QUICK_RANGES];
+    
+    if (!searchQuick) return allRanges;
+    
     const search = searchQuick.toLowerCase();
-    return QUICK_RANGES.filter(range => 
-      range.display.toLowerCase().includes(search)
+    return allRanges.filter(range => 
+      range.display?.toLowerCase().includes(search)
     );
   }, [searchQuick]);
 
   // Update the input fields when timeRange changes
   useEffect(() => {
-    setFromInput(timeRange.from);
-    setToInput(timeRange.to);
-  }, [timeRange]);
+    if (safeTimeRange) {
+      setFromInput(safeTimeRange.from);
+      setToInput(safeTimeRange.to);
+    }
+  }, [safeTimeRange]);
 
   // Get display for the current time range
   const currentRangeDisplay = useMemo(() => {
+    // Safety check
+    if (!safeTimeRange) return "Select time range";
+    
+    // Check if time filtering is disabled
+    if (safeTimeRange.enabled === false) {
+      return "No time filter";
+    }
+    
     const quickRange = QUICK_RANGES.find(
-      r => r.from === timeRange.from && r.to === timeRange.to
+      r => r.from === safeTimeRange.from && r.to === safeTimeRange.to
     );
     
     if (quickRange) {
       return quickRange.display;
     }
     
-    const fromDisplay = getDisplayTime(timeRange.from);
-    const toDisplay = getDisplayTime(timeRange.to);
+    const fromDisplay = getDisplayTime(safeTimeRange.from);
+    const toDisplay = getDisplayTime(safeTimeRange.to);
     
     return `${fromDisplay} to ${toDisplay}`;
-  }, [timeRange]);
+  }, [safeTimeRange]);
 
   // Apply quick range selection
   const applyQuickRange = (range: TimeRange) => {
-    onTimeRangeChange(range);
+    console.log("Applying time range:", range);
+    
+    // Special handling for "No time filter" option
+    if (range.display === "No time filter") {
+      console.log("Disabling time filtering");
+      onTimeRangeChange({...NO_TIME_FILTER, raw: undefined});
+      setIsOpen(false);
+      return;
+    }
+    
+    // Add raw timestamps for better handling
+    const newRange = {
+      ...range,
+      enabled: true, // Explicitly set to true for all other options
+      raw: {
+        from: new Date(parseRelativeTime(range.from)),
+        to: new Date(parseRelativeTime(range.to))
+      }
+    };
+    
+    onTimeRangeChange(newRange);
     setIsOpen(false);
   };
 
   // Apply custom range from inputs
   const applyCustomRange = () => {
-    onTimeRangeChange({
+    // Validate inputs before applying
+    if (!fromInput || !toInput) {
+      console.error("Invalid time range inputs");
+      return;
+    }
+    
+    const newRange = {
       from: fromInput,
       to: toInput,
-    });
+      enabled: true,
+      raw: {
+        from: new Date(parseRelativeTime(fromInput)),
+        to: new Date(parseRelativeTime(toInput))
+      }
+    };
+    onTimeRangeChange(newRange);
     setIsOpen(false);
+  };
+
+  // Toggle time filtering on/off
+  const toggleTimeFiltering = (enabled: boolean) => {
+    if (!enabled) {
+      // Disable time filtering
+      onTimeRangeChange({...NO_TIME_FILTER});
+    } else {
+      // Enable with default range
+      applyQuickRange(DEFAULT_TIME_RANGE);
+    }
   };
 
   // Refresh to current time (keeps the same relative range)
   const refreshToNow = () => {
     // Find the current quick range if it exists
     const quickRange = QUICK_RANGES.find(
-      r => r.from === timeRange.from && r.to === timeRange.to
+      r => r.from === safeTimeRange.from && r.to === safeTimeRange.to
     );
     
     if (quickRange) {
       onTimeRangeChange({
         ...quickRange,
+        enabled: true,
         raw: {
           from: new Date(parseRelativeTime(quickRange.from)),
           to: new Date(parseRelativeTime(quickRange.to))
         }
       });
-    } else if (timeRange.from.startsWith("now-") && timeRange.to === "now") {
+    } else if (safeTimeRange.from.startsWith("now-") && safeTimeRange.to === "now") {
       // For custom relative ranges that end with 'now', just trigger a refresh
       onTimeRangeChange({
-        ...timeRange,
+        ...safeTimeRange,
+        enabled: true,
         raw: {
-          from: new Date(parseRelativeTime(timeRange.from)),
+          from: new Date(parseRelativeTime(safeTimeRange.from)),
           to: new Date()
         }
       });
     }
   };
+  
+  // If time range filtering is disabled, don't render the component
+  // NOTE: Moved below all hooks to maintain hook order consistency
+  if (disabled || timeRange?.enabled === false) {
+    return null;
+  }
 
   return (
     <div className={cn("relative", className)}>
@@ -271,6 +343,12 @@ export default function TimeRangeSelector({
               <div className="flex items-center gap-2">
                 <Calendar className="h-4 w-4 shrink-0" />
                 <span className="text-sm truncate font-normal">{currentRangeDisplay}</span>
+                {fieldName && (
+                  <Badge variant="outline" className="ml-1 text-xs">
+                    {fieldName}
+                    {tableName && ` (${tableName})`}
+                  </Badge>
+                )}
               </div>
               <Clock className="h-4 w-4 shrink-0 opacity-70" />
             </Button>
@@ -296,12 +374,12 @@ export default function TimeRangeSelector({
                       <div className="space-y-1">
                         {filteredQuickRanges.map((range) => (
                           <Button
-                            key={range.display}
+                            key={range.display || 'no-filter'}
                             variant="ghost"
                             className="w-full justify-start text-sm font-normal"
                             onClick={() => applyQuickRange(range)}
                           >
-                            {range.display}
+                            {range.display || 'No time filter'}
                           </Button>
                         ))}
                       </div>

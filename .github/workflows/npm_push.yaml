@@ -22,7 +22,6 @@ jobs:
         with:
           type: 'zip'
           filename: 'release.zip'
-          exclusions: 'dist/*'
       - name: Upload Release
         uses: ncipollo/release-action@v1.16.0
         with:

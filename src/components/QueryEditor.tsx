@@ -22,6 +22,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "./ui/tooltip";
+import { extractTableName } from "@/lib/time-range-utils";
 
 export default function QueryEditor() {
   const {
@@ -44,6 +45,7 @@ export default function QueryEditor() {
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   const monacoRef = useRef<typeof monaco | null>(null);
   const [isEditorReady, setIsEditorReady] = useState(false);
+  const [detectedTableName, setDetectedTableName] = useState<string | undefined>(undefined);
 
   // Use refs instead of state for disposables to avoid re-render cycles
   const completionDisposableRef = useRef<monaco.IDisposable | null>(null);
@@ -75,14 +77,53 @@ export default function QueryEditor() {
     (_) => selectedDb && schema && schema[selectedDb]
   );
 
+  // Detect table name from query
+  useEffect(() => {
+    if (query) {
+      const tableName = extractTableName(query);
+      setDetectedTableName(tableName || undefined);
+    } else {
+      setDetectedTableName(undefined);
+    }
+  }, [query]);
+
   // Handle time field selection
   const handleTimeFieldChange = (value: string) => {
     console.log("Time field changed to:", value);
     if (value === "_NONE_") {
       setSelectedTimeField(null);
+      
+      // When disabling time field, also ensure time range is disabled
+      if (timeRange && timeRange.enabled !== false) {
+        setTimeRange({
+          ...timeRange,
+          enabled: false
+        });
+      }
     } else {
       setSelectedTimeField(value);
+      
+      // When enabling time field, ensure time range is enabled
+      if (timeRange && timeRange.enabled === false) {
+        setTimeRange({
+          ...timeRange,
+          enabled: true
+        });
+      }
     }
+  };
+
+  // Handle time range changes from TimeRangeSelector
+  const handleTimeRangeChange = (newTimeRange: any) => {
+    console.log("Time range changed:", newTimeRange);
+    
+    // If the user disables time filtering from the TimeRangeSelector,
+    // also clear the selected time field
+    if (newTimeRange.enabled === false) {
+      setSelectedTimeField(null);
+    }
+    
+    setTimeRange(newTimeRange);
   };
 
   // Setup keyboard shortcut
@@ -356,8 +397,10 @@ export default function QueryEditor() {
                 {selectedTimeField && (
                   <TimeRangeSelector
                     timeRange={timeRange}
-                    onTimeRangeChange={setTimeRange}
+                    onTimeRangeChange={handleTimeRangeChange}
                     className="min-w-[280px]"
+                    fieldName={selectedTimeField}
+                    tableName={detectedTableName}
                   />
                 )}
               </div>

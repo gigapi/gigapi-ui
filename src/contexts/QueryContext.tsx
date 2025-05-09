@@ -96,7 +96,7 @@ export function QueryProvider({ children }: { children: ReactNode }) {
   // API configuration
   const [apiUrl, setApiUrl] = useState(() => {
     return (
-      localStorage.getItem("apiUrl") || `http://de5.sipcapture.io:7972/query`
+      localStorage.getItem("apiUrl") || `http://${window.location.hostname}:${window.location.port}/query `
     );
   });
 
@@ -400,49 +400,36 @@ export function QueryProvider({ children }: { children: ReactNode }) {
   // Enhanced query execution with time range support
   const executeQuery = useCallback(async () => {
     if (!selectedDb) {
-      setError("No database selected");
+      toast.error("Please select a database first");
       return;
     }
-
-    if (!query.trim()) {
-      setError("Query is empty");
-      return;
-    }
-
-    console.log("executeQuery - selectedTimeField:", selectedTimeField);
 
     setIsLoading(true);
     setError(null);
     setStartTime(Date.now());
 
     try {
-      // Save the query to localStorage
-      localStorage.setItem("lastQuery", query);
-
-      // Check if we have a valid time field and should add time filtering
-      let queryToExecute = query;
-
-      console.log("Original query:", queryToExecute);
-      console.log("Has time filter already?", hasTimeFilter(queryToExecute));
-
-      if (selectedTimeField && !hasTimeFilter(queryToExecute)) {
-        console.log("Adding time filter for field:", selectedTimeField);
-        // Generate the time filter SQL
-        const filter = generateTimeFilter(timeRange, selectedTimeField);
-        console.log("Generated filter:", filter);
-
-        // Adapt filter based on database type (if known)
-        // For now we'll use generic SQL, could enhance this later with DB detection
-        const adaptedFilter = adaptTimeFilterForDbType(filter, "generic");
-        console.log("Adapted filter:", adaptedFilter);
-
+      let queryToExecute = query.trim();
+      
+      // Only add time filter if:
+      // 1. A time field is selected
+      // 2. Time filtering is enabled in the timeRange
+      // 3. The query doesn't already have a time filter
+      if (
+        selectedTimeField && 
+        timeRange && 
+        timeRange.enabled !== false &&
+        !hasTimeFilter(queryToExecute)
+      ) {
+        console.log("Applying time filter for field:", selectedTimeField);
+        const timeFilter = generateTimeFilter(timeRange, selectedTimeField);
+        const adaptedFilter = adaptTimeFilterForDbType(timeFilter, "sql");
+        
         // Add filter to the query
-        queryToExecute = addTimeFilterToQuery(queryToExecute, adaptedFilter);
+        queryToExecute = addTimeFilterToQuery(queryToExecute, adaptedFilter, timeRange, selectedTimeField);
         console.log("Query with time filter:", queryToExecute);
       } else {
-        console.log(
-          "Skipping time filter - either no selectedTimeField or query already has a filter"
-        );
+        console.log("Not applying time filter, using raw query");
       }
 
       const response = await axios.post(
