@@ -1,0 +1,43 @@
+.animated-logo .animated-path {
+  stroke: #7d12ff;
+  stroke-width: 15;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+
+  stroke-dasharray: var(--path-length);
+
+  stroke-dashoffset: var(--path-length);
+
+  fill: transparent;
+
+  animation: drawAndFill 3s ease-in-out infinite;
+}
+
+@keyframes drawAndFill {
+  0% {
+    stroke-dashoffset: var(--path-length);
+    fill: transparent;
+    stroke-opacity: 1;
+  }
+  45% {
+    stroke-dashoffset: 0;
+    fill: transparent;
+    stroke-opacity: 1;
+  }
+  55% {
+    stroke-dashoffset: 0;
+    fill: #7d12ff;
+    stroke-opacity: 1;
+  }
+  75% {
+    stroke-dashoffset: 0;
+    fill: #7d12ff;
+    stroke-opacity: 0;
+  }
+
+  100% {
+    stroke-dashoffset: var(--path-length);
+    fill: #7d12ff;
+    stroke-opacity: 0;
+  }
+}
