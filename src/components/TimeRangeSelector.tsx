@@ -284,16 +284,6 @@ export default function TimeRangeSelector({
     setIsOpen(false);
   };
 
-  // Toggle time filtering on/off
-  const toggleTimeFiltering = (enabled: boolean) => {
-    if (!enabled) {
-      // Disable time filtering
-      onTimeRangeChange({...NO_TIME_FILTER});
-    } else {
-      // Enable with default range
-      applyQuickRange(DEFAULT_TIME_RANGE);
-    }
-  };
 
   // Refresh to current time (keeps the same relative range)
   const refreshToNow = () => {
