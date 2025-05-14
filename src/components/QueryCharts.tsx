@@ -22,7 +22,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "./ui/tooltip";
-import { isDateTimeField, isTimestamp, isDateString } from "@/lib/date-utils";
+import { isDateTimeField, isDateString } from "@/lib/date-utils";
 
 // Define chart type options
 type ChartType = "bar" | "line" | "area";
@@ -64,26 +64,41 @@ const isISODateString = (value: string): boolean => {
   return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(value);
 };
 
-const isLargeTimestamp = (value: string | number): boolean => {
+// Check if a value is likely a timestamp in various formats
+const isTimestamp = (value: string | number): boolean => {
   const numValue = typeof value === 'string' ? Number(value) : value;
-  return !isNaN(numValue) && numValue > 1000000000000; // At least milliseconds (13+ digits)
+  if (isNaN(numValue)) return false;
+  
+  // Check for various timestamp formats
+  if (numValue > 1e18) return true; // Nanoseconds (19+ digits) - e.g. 1620000000000000000
+  if (numValue > 1e15) return true; // Microseconds (16+ digits) - e.g. 1620000000000000
+  if (numValue > 1e12) return true; // Milliseconds (13+ digits) - e.g. 1620000000000
+  if (numValue > 1e9 && numValue < 1e11) return true; // Seconds (10 digits) - e.g. 1620000000
+  
+  return false;
 };
 
 const normalizeTimestamp = (value: string | number, targetUnit: 'ms' | 's' = 'ms'): number | string => {
   if (value === null || value === undefined) return value;
   
-  // If it's already a ISO date string, return as is
-  if (typeof value === 'string' && isISODateString(value)) {
-    return value;
+  // If it's already an ISO date string, parse it to timestamp and then normalize
+  if (typeof value === 'string') {
+    if (isISODateString(value)) {
+      try {
+        return new Date(value).toISOString();
+      } catch (e) {
+        return value;
+      }
+    }
   }
   
   const numValue = typeof value === 'string' ? Number(value) : value;
   if (isNaN(numValue)) return value;
   
-  // Handle different timestamp scales
+  // Handle different timestamp scales to convert to milliseconds
   let normalizedValue = numValue;
   
-  // Convert to milliseconds first
+  // Detect scale and normalize to milliseconds
   if (numValue > 1e18) { // Nanoseconds (19+ digits)
     normalizedValue = Math.floor(numValue / 1000000);
   } else if (numValue > 1e15) { // Microseconds (16+ digits)
@@ -92,13 +107,28 @@ const normalizeTimestamp = (value: string | number, targetUnit: 'ms' | 's' = 'ms
     normalizedValue = numValue * 1000;
   }
   
-  // Convert to target unit
-  if (targetUnit === 's' && normalizedValue > 1e12) {
+  // Convert to target unit or ISO string
+  if (targetUnit === 's') {
     return Math.floor(normalizedValue / 1000);
+  }
+  
+  // Try to convert to ISO string for better readability if requested
+  try {
+    const date = new Date(normalizedValue);
+    if (!isNaN(date.getTime())) {
+      // Check if year is reasonable before returning date
+      const year = date.getFullYear();
+      if (year > 1970 && year < 2100) {
+        return date.toISOString();
+      }
+    }
+  } catch (e) {
+    // If conversion fails, just return the normalized value
   }
   
   return normalizedValue;
 };
+
 
 export default function QueryDataChart() {
   const { 
@@ -310,8 +340,7 @@ export default function QueryDataChart() {
                             (typeof value === "string" && 
                             (isTimestamp(value) || 
                              isDateString(value) || 
-                             isISODateString(value) || 
-                             isLargeTimestamp(value)));
+                             isISODateString(value)));
 
           if (isDateTime) {
             // Store temporal values as strings for proper handling
@@ -448,8 +477,7 @@ export default function QueryDataChart() {
               (typeof value === "string" &&
               (isTimestamp(value) || 
                isDateString(value) || 
-               isISODateString(value) || 
-               isLargeTimestamp(value)));
+               isISODateString(value)));
   
             if (isDateTime) {
               isField_DateTime = true;

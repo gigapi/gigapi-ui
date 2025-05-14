@@ -8,6 +8,9 @@ import {
   Edit,
   Save,
   ExternalLink,
+  FilePlus,
+  RefreshCw,
+  MessageSquareHeart
 } from "lucide-react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -32,7 +35,7 @@ import Logo from "../assets/logo.svg";
 import { toast } from "sonner";
 
 export default function QueryNav() {
-  const { apiUrl, setApiUrl, loadDatabases, selectedDb } = useQuery();
+  const { apiUrl, setApiUrl, loadDatabases, selectedDb, clearQuery, setSelectedTable } = useQuery();
   const [isEndpointEditing, setIsEndpointEditing] = useState(false);
   const [tempApiUrl, setTempApiUrl] = useState(apiUrl);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -66,6 +69,13 @@ export default function QueryNav() {
       setTempApiUrl(apiUrl);
       setIsEndpointEditing(false);
     }
+  };
+
+  // Handle starting a new query
+  const handleNewQuery = () => {
+    clearQuery();
+    setSelectedTable(null);
+    toast.success("Started new query");
   };
 
   return (
@@ -158,13 +168,17 @@ export default function QueryNav() {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={handleNewQuery}>
+                <FilePlus className="h-4 w-4 mr-2" />
+                New Query
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => loadDatabases()}>
+                <RefreshCw className="h-4 w-4 mr-2" />
+                Refresh Schema
+              </DropdownMenuItem>
               <DropdownMenuItem onClick={() => setIsEndpointEditing(true)}>
                 <Edit className="h-4 w-4 mr-2" />
                 Edit API Endpoint
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => loadDatabases()}>
-                <Database className="h-4 w-4 mr-2" />
-                Refresh Databases
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem
@@ -173,6 +187,13 @@ export default function QueryNav() {
               >
                 <ExternalLink className="h-4 w-4 mr-2" />
                 About Gigapipe
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => window.open("https://github.com/gigapipe/gigapi-ui/issues", "_blank")}
+                className="text-muted-foreground"
+              >
+                <MessageSquareHeart className="h-4 w-4 mr-2" />
+                Feedback & Issues
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -228,14 +249,23 @@ export default function QueryNav() {
                   <Button
                     variant="outline"
                     size="sm"
+                    onClick={handleNewQuery}
+                    className="flex-1"
+                  >
+                    <FilePlus className="h-4 w-4 mr-2" />
+                    New Query
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
                     onClick={() => {
                       loadDatabases();
                       setIsMobileMenuOpen(false);
                     }}
                     className="flex-1"
                   >
-                    <Database className="h-4 w-4 mr-2" />
-                    Refresh Databases
+                    <RefreshCw className="h-4 w-4 mr-2" />
+                    Refresh Schema
                   </Button>
                   <Button
                     variant="outline"
