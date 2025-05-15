@@ -39,7 +39,7 @@ jobs:
       # Install dependencies with --no-optional to skip problematic optional dependencies
       - run: bun install --no-optional
       # Build the project
-      - run: bun run build
+      - run: tsc && vite build --base=/gigapi-ui
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
