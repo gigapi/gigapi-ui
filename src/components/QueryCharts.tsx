@@ -130,7 +130,7 @@ const normalizeTimestamp = (value: string | number, targetUnit: 'ms' | 's' = 'ms
 };
 
 
-export default function QueryDataChart() {
+export default function QueryCharts() {
   const { 
     results: rawQueryResults, 
     isLoading,

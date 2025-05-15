@@ -24,6 +24,14 @@ export function formatDuration(ms: number) {
   } else if (ms < 60000) {
     return `${(ms / 1000).toFixed(2)}s`
   } else {
-    return `${(ms / 60000).toFixed(2)}m`
+    // Format as minutes:seconds for clearer display
+    const minutes = Math.floor(ms / 60000);
+    const seconds = Math.floor((ms % 60000) / 1000);
+    
+    if (seconds === 0) {
+      return `${minutes}m`;
+    } else {
+      return `${minutes}m ${seconds}s`;
+    }
   }
 }

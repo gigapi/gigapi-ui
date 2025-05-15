@@ -2,7 +2,19 @@ import { useRef, useEffect, useState, useCallback, useMemo } from "react";
 import { useQuery } from "../contexts/QueryContext";
 import Editor, { type OnChange } from "@monaco-editor/react";
 import { Button } from "./ui/button";
-import { Play, Copy, Calendar, Wand, HelpCircle } from "lucide-react";
+import {
+  Play,
+  Copy,
+  Wand,
+  HelpCircle,
+  Clock,
+  ListFilter,
+  ArrowDownUp,
+  BarChart4,
+  Scissors,
+  Undo,
+  Database,
+} from "lucide-react";
 import { useTheme } from "./theme-provider";
 import { Skeleton } from "./ui/skeleton";
 import { toast } from "sonner";
@@ -23,7 +35,6 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "./ui/tooltip";
-import { Switch } from "@/components/ui/switch";
 import { extractTableName } from "@/lib/time-range-utils";
 import { Badge } from "./ui/badge";
 
@@ -208,26 +219,42 @@ export default function QueryEditor() {
     // Insert time filter variable instead of actual filter
     let newQuery = currentQuery;
 
+    // Check if we need to add the time filter
+    const hasTimeFilter = newQuery.includes("$__timeFilter");
+    const hasWhereClause = /\bWHERE\b/i.test(newQuery);
+    const hasAndClause = /\bAND\b/i.test(newQuery);
+
     // Use variables approach instead of direct SQL injection
-    // First check if the query already has a WHERE clause
-    if (!/\bWHERE\b/i.test(newQuery) && !newQuery.includes("$__timeFilter")) {
-      // No WHERE clause and no time variable, add WHERE with variable
-      const orderByMatch = /\bORDER BY\b/i.exec(newQuery);
-      const groupByMatch = /\bGROUP BY\b/i.exec(newQuery);
-      const limitMatch = /\bLIMIT\b/i.exec(newQuery);
+    if (!hasTimeFilter) {
+      if (!hasWhereClause) {
+        // No WHERE clause and no time variable, add WHERE with variable
+        const orderByMatch = /\bORDER BY\b/i.exec(newQuery);
+        const groupByMatch = /\bGROUP BY\b/i.exec(newQuery);
+        const limitMatch = /\bLIMIT\b/i.exec(newQuery);
 
-      let insertPosition = newQuery.length;
-      if (orderByMatch) insertPosition = orderByMatch.index;
-      else if (groupByMatch) insertPosition = groupByMatch.index;
-      else if (limitMatch) insertPosition = limitMatch.index;
+        let insertPosition = newQuery.length;
+        if (orderByMatch) insertPosition = orderByMatch.index;
+        else if (groupByMatch) insertPosition = groupByMatch.index;
+        else if (limitMatch) insertPosition = limitMatch.index;
 
-      newQuery =
-        newQuery.substring(0, insertPosition) +
-        ` WHERE $__timeFilter ` +
-        newQuery.substring(insertPosition);
+        newQuery =
+          newQuery.substring(0, insertPosition) +
+          ` WHERE $__timeFilter ` +
+          newQuery.substring(insertPosition);
+      } else if (!hasAndClause && !/WHERE\s+\$/i.test(newQuery)) {
+        // Has WHERE but no AND and not already using a variable
+        // Find the position right after WHERE
+        const whereMatch = /\bWHERE\b\s+/i.exec(newQuery);
+        if (whereMatch) {
+          // Add the time filter variable after WHERE
+          const insertPosition = whereMatch.index + whereMatch[0].length;
+          newQuery =
+            newQuery.substring(0, insertPosition) +
+            `$__timeFilter AND ` +
+            newQuery.substring(insertPosition);
+        }
+      }
     }
-    // If there's a WHERE clause but no time variable, we don't modify the query automatically
-    // The user needs to add the variable manually in the right position
 
     // Update editor and context
     editorRef.current.setValue(newQuery);
@@ -270,49 +297,95 @@ export default function QueryEditor() {
     }
   };
 
-  // Auto-generate simple query when a table is selected
+  // Auto-generate or update query when database, table, or time field changes
   useEffect(() => {
-    // Only generate a query if:
-    // 1. Query builder is enabled
-    // 2. A table is selected
-    // 3. The table name is not "_NONE_"
-    // 4. A database is selected
-    // 5. The editor is ready
-    // 6. The editor is empty or contains default text
+    // Only update query if query builder is enabled and editor is ready
+    if (!queryBuilderEnabled || !editorRef.current) return;
+
+    // Get current query from editor
+    const currentQuery = editorRef.current.getValue();
+
+    // Case 1: Empty query or basic SELECT - completely regenerate with selected table
     if (
-      queryBuilderEnabled &&
       selectedTable &&
-      selectedTable !== "_NONE_" &&
       selectedDb &&
-      editorRef.current &&
-      (!query.trim() ||
-        query.trim().toUpperCase() === "SELECT * FROM" ||
-        query.trim().toUpperCase() === "SELECT")
+      (!currentQuery.trim() ||
+        currentQuery.trim().toUpperCase() === "SELECT * FROM" ||
+        currentQuery.trim().toUpperCase() === "SELECT")
     ) {
       console.log("Auto-generating query for table:", selectedTable);
       const newQuery = `SELECT * FROM ${selectedTable}`;
 
       // Update the editor content
       editorRef.current.setValue(newQuery);
-
-      // Also update the context query state
       setQuery(newQuery);
 
-      // If we have a time field selected, add time filter
+      // If we have a time field selected, add time filter with small delay
       if (selectedTimeField) {
         setTimeout(() => {
           updateEditorQueryWithTimeFilter(selectedTimeField);
         }, 100);
       }
+      return;
     }
-  }, [
-    selectedTable,
-    selectedDb,
-    query,
-    setQuery,
-    queryBuilderEnabled,
-    selectedTimeField,
-  ]);
+
+    // Case 2: Table changed but query exists - try to update the FROM clause
+    if (
+      selectedTable &&
+      selectedDb &&
+      currentQuery.trim() &&
+      editorRef.current
+    ) {
+      // Check if the current query contains the selected table
+      if (!currentQuery.toLowerCase().includes(selectedTable.toLowerCase())) {
+        // Try to update the FROM clause if it exists
+        const fromMatch = /\bFROM\s+(\w+)/i.exec(currentQuery);
+        if (fromMatch) {
+          const oldTable = fromMatch[1];
+          // Only replace if old table is different from current selection
+          if (oldTable.toLowerCase() !== selectedTable.toLowerCase()) {
+            const newQuery = currentQuery.replace(
+              new RegExp(`\\bFROM\\s+${oldTable}\\b`, "i"),
+              `FROM ${selectedTable}`
+            );
+
+            if (newQuery !== currentQuery) {
+              console.log(
+                `Updating query FROM clause: ${oldTable} -> ${selectedTable}`
+              );
+              editorRef.current.setValue(newQuery);
+              setQuery(newQuery);
+            }
+          }
+        }
+      }
+    }
+
+    // Case 3: Time field selected or changed - update/add time filter
+    if (selectedTimeField && selectedDb && selectedTable) {
+      // Check if we need to add/update time filter
+      if (!currentQuery.includes("$__timeFilter")) {
+        updateEditorQueryWithTimeFilter(selectedTimeField);
+      }
+    }
+  }, [selectedTable, selectedDb, queryBuilderEnabled, selectedTimeField]);
+
+  // Listen for time range changes and update query if needed
+  useEffect(() => {
+    if (
+      queryBuilderEnabled &&
+      selectedTimeField &&
+      timeRange &&
+      timeRange.enabled !== false &&
+      editorRef.current
+    ) {
+      const currentQuery = editorRef.current.getValue();
+      if (currentQuery && !currentQuery.includes("$__timeFilter")) {
+        // Add time filter if not present
+        updateEditorQueryWithTimeFilter(selectedTimeField, timeRange);
+      }
+    }
+  }, [timeRange, queryBuilderEnabled, selectedTimeField]);
 
   // Setup keyboard shortcut
   const setupKeyboardShortcut = useCallback(() => {
@@ -597,76 +670,125 @@ export default function QueryEditor() {
     }
   }, [queryBuilderEnabled]);
 
-
   return (
-    <div className="flex flex-col h-full">
-      <div className="flex flex-col gap-2 mb-2">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2 flex-grow flex-wrap">
+    <div className="flex flex-col h-full space-y-2">
+      {/* Grafana-like query header with toolbar */}
+      <div className="flex flex-col gap-2">
+        <div className="flex items-center justify-between bg-card rounded-md border p-2">
+          <div className="flex items-center gap-2">
             <Button
               onClick={handleExecuteQuery}
               disabled={isLoading || !selectedDb}
-              className="w-24"
+              className="h-8 px-3"
+              variant="default"
             >
               {isLoading ? (
                 <Loader className="h-4 w-4" />
               ) : (
                 <>
-                  <Play className="mr-1 h-3 w-3" /> Run
+                  <Play className="mr-1.5 h-3.5 w-3.5" /> Run Query
                 </>
               )}
             </Button>
 
-            <Button
-              variant="outline"
-              size="icon"
-              onClick={copyQuery}
-              title="Copy query"
-              className="flex-shrink-0"
-            >
-              <Copy className="h-4 w-4" />
-            </Button>
+            <div className="h-5 w-[1px] bg-border mx-1"></div>
 
-            {/* Query Builder Toggle */}
-            <div className="flex items-center gap-2 ml-2">
+            {/* Query Builder Mode Toggle */}
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant={queryBuilderEnabled ? "secondary" : "ghost"}
+                    size="sm"
+                    onClick={() =>
+                      handleQueryBuilderToggle(!queryBuilderEnabled)
+                    }
+                    className={`h-8 px-3 gap-1.5 ${
+                      queryBuilderEnabled ? "bg-primary/10" : ""
+                    }`}
+                  >
+                    <Wand className="h-3.5 w-3.5" />
+                    <span>Builder</span>
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">
+                  <p className="text-xs">Toggle query builder mode</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+
+            {/* Common Query Actions */}
+            <div className="flex items-center">
               <TooltipProvider>
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <div className="flex items-center gap-2">
-                      <Wand
-                        className={`h-4 w-4 ${
-                          queryBuilderEnabled
-                            ? "text-primary"
-                            : "text-muted-foreground"
-                        }`}
-                      />
-                      <span className="text-sm font-medium">Query Builder</span>
-                      <Switch
-                        checked={queryBuilderEnabled}
-                        onCheckedChange={handleQueryBuilderToggle}
-                      />
-                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={copyQuery}
+                      className="h-8 w-8 p-0"
+                    >
+                      <Copy className="h-3.5 w-3.5" />
+                    </Button>
                   </TooltipTrigger>
-                  <TooltipContent>
-                    <p>Toggle query builder mode</p>
+                  <TooltipContent side="bottom">
+                    <p className="text-xs">Copy query</p>
                   </TooltipContent>
                 </Tooltip>
               </TooltipProvider>
-            </div>
 
-            {/* Query builder tools - only show when enabled */}
-            {queryBuilderEnabled && (
-              <div className="flex items-center gap-2">
-                {/* Variables Help Button */}
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 w-8 p-0"
+                      onClick={() => {
+                        if (editorRef.current) {
+                          editorRef.current.setValue("");
+                          setQuery("");
+                        }
+                      }}
+                    >
+                      <Scissors className="h-3.5 w-3.5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">
+                    <p className="text-xs">Clear query</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 w-8 p-0"
+                      onClick={() => {
+                        if (editorRef.current && monacoRef.current) {
+                          editorRef.current.trigger("", "undo", {});
+                        }
+                      }}
+                    >
+                      <Undo className="h-3.5 w-3.5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">
+                    <p className="text-xs">Undo</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+
+              {/* Query variables help */}
+              {queryBuilderEnabled && (
                 <TooltipProvider>
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 text-muted-foreground"
-                      >
-                        <HelpCircle className="h-4 w-4" />
+                      <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                        <HelpCircle className="h-3.5 w-3.5" />
                       </Button>
                     </TooltipTrigger>
                     <TooltipContent
@@ -712,92 +834,213 @@ export default function QueryEditor() {
                     </TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
-              </div>
+              )}
+            </div>
+          </div>
+
+          {/* Right side - Query metadata */}
+          <div className="flex items-center gap-3">
+            {/* Time filter indicator */}
+            {queryBuilderEnabled && hasVariablesInQuery && (
+              <Badge variant="outline" className="bg-primary/10 gap-1.5">
+                <Clock className="h-3 w-3" />
+                <span>Time filtered</span>
+              </Badge>
             )}
 
-            {/* Time and Table Controls - Only show when query builder is enabled */}
-            {selectedDb && queryBuilderEnabled && (
-              <div className="flex items-center gap-2 ml-2 flex-wrap">
-                {/* Table Selector */}
-                <TableSelector />
-
-                {/* Time Field Selector - only show if table is selected and has time fields */}
-                {selectedTable && (
-                  <>
-                    <TooltipProvider>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <div className="flex items-center">
-                            <Calendar className="h-4 w-4 mr-1 text-primary" />
-                          </div>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          <p>Time field to filter by</p>
-                        </TooltipContent>
-                      </Tooltip>
-                    </TooltipProvider>
-
-                    {hasTimeFields ? (
-                      <div className="flex items-center gap-2">
-                        <Select
-                          value={selectedTimeField || "_NONE_"}
-                          onValueChange={handleTimeFieldChange}
-                        >
-                          <SelectTrigger className="w-[220px] h-9 text-sm">
-                            <SelectValue placeholder="Select time field">
-                              {selectedTimeField || "No time filter"}
-                            </SelectValue>
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="_NONE_">
-                              No time filter
-                            </SelectItem>
-                            {timeFieldOptions.map((field) => (
-                              <SelectItem
-                                key={field}
-                                value={field}
-                                className="text-sm"
-                              >
-                                {field}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-
-                        {/* Variable usage indicator */}
-                        {queryBuilderEnabled && hasVariablesInQuery && (
-                          <Badge
-                            variant="outline"
-                            className="bg-primary/10 text-xs"
-                          >
-                            Time filter applied
-                          </Badge>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="text-sm text-muted-foreground px-3 py-1 border rounded-md bg-muted/20">
-                        No time fields detected
-                      </div>
-                    )}
-
-                    {/* Time Range Selector - only show if time field is selected */}
-                    {selectedTimeField && (
-                      <TimeRangeSelector
-                        timeRange={timeRange}
-                        onTimeRangeChange={handleTimeRangeChange}
-                        className="min-w-[280px]"
-                        fieldName={selectedTimeField}
-                        tableName={selectedTable}
-                      />
-                    )}
-                  </>
-                )}
-              </div>
+            {/* Current table indicator */}
+            {selectedTable && (
+              <Badge variant="outline" className="bg-card gap-1.5">
+                <Database className="h-3 w-3" />
+                <span>{selectedTable}</span>
+              </Badge>
             )}
           </div>
         </div>
+
+        {/* Query Builder Panel - Grafana style */}
+        {queryBuilderEnabled && selectedDb && (
+          <div className="flex flex-wrap items-center gap-2 bg-muted/40 rounded-md border p-2">
+            {/* Table Selector - First element */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-muted-foreground">FROM</span>
+              <TableSelector />
+            </div>
+
+            {/* Time controls - Show when table is selected */}
+            {selectedTable && (
+              <>
+                {/* Time Field Selector */}
+                {hasTimeFields && (
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs text-muted-foreground">
+                      TIME BY
+                    </span>
+                    <Select
+                      value={selectedTimeField || "_NONE_"}
+                      onValueChange={handleTimeFieldChange}
+                    >
+                      <SelectTrigger className="h-8 w-[180px] text-xs">
+                        <SelectValue placeholder="Select time field">
+                          {selectedTimeField || "No time filter"}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="_NONE_">No time filter</SelectItem>
+                        {timeFieldOptions.map((field) => (
+                          <SelectItem
+                            key={field}
+                            value={field}
+                            className="text-xs"
+                          >
+                            {field}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+
+                {/* Time Range Selector */}
+                {selectedTimeField && (
+                  <div className="flex items-center gap-1.5">
+                    <TimeRangeSelector
+                      timeRange={timeRange}
+                      onTimeRangeChange={handleTimeRangeChange}
+                      className="min-w-[220px]"
+                      fieldName={selectedTimeField}
+                      tableName={selectedTable}
+                    />
+                  </div>
+                )}
+
+                {/* Query builder action buttons */}
+                <div className="flex items-center ml-auto gap-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 text-xs gap-1 px-2"
+                    onClick={() => {
+                      // Add simple WHERE clause if not present
+                      if (editorRef.current) {
+                        const currentQuery = editorRef.current.getValue();
+                        if (!currentQuery.includes(" WHERE ")) {
+                          // Insert a WHERE clause before any ORDER BY, GROUP BY, or LIMIT
+                          const insertPosition = currentQuery.search(
+                            /\b(ORDER BY|GROUP BY|LIMIT)\b/i
+                          );
+                          if (insertPosition !== -1) {
+                            // Insert before the clause
+                            const newQuery =
+                              currentQuery.slice(0, insertPosition) +
+                              " WHERE your_column = 'value' " +
+                              currentQuery.slice(insertPosition);
+                            editorRef.current.setValue(newQuery);
+                          } else {
+                            // Append at the end
+                            editorRef.current.setValue(
+                              currentQuery + " WHERE your_column = 'value'"
+                            );
+                          }
+                        } else {
+                          // Add AND condition to existing clause
+                          const wherePos =
+                            currentQuery.indexOf(" WHERE ") + " WHERE ".length;
+                          const restQuery = currentQuery.slice(wherePos);
+                          const newQuery =
+                            currentQuery.slice(0, wherePos) +
+                            "your_column = 'value' AND " +
+                            restQuery;
+                          editorRef.current.setValue(newQuery);
+                        }
+                      }
+                    }}
+                  >
+                    <ListFilter className="h-3 w-3" />
+                    <span>Filters</span>
+                  </Button>
+
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 text-xs gap-1 px-2"
+                    onClick={() => {
+                      // Add ORDER BY clause if not present
+                      if (editorRef.current) {
+                        const currentQuery = editorRef.current.getValue();
+                        if (!currentQuery.includes(" ORDER BY ")) {
+                          // Insert an ORDER BY before any LIMIT
+                          const limitPos = currentQuery.search(/\bLIMIT\b/i);
+                          if (limitPos !== -1) {
+                            // Insert before the LIMIT
+                            const newQuery =
+                              currentQuery.slice(0, limitPos) +
+                              " ORDER BY your_column DESC " +
+                              currentQuery.slice(limitPos);
+                            editorRef.current.setValue(newQuery);
+                          } else {
+                            // Append at the end
+                            editorRef.current.setValue(
+                              currentQuery + " ORDER BY your_column DESC"
+                            );
+                          }
+                        }
+                      }
+                    }}
+                  >
+                    <ArrowDownUp className="h-3 w-3" />
+                    <span>Order By</span>
+                  </Button>
+
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 text-xs gap-1 px-2"
+                    onClick={() => {
+                      // Add GROUP BY clause if not present
+                      if (editorRef.current) {
+                        const currentQuery = editorRef.current.getValue();
+                        if (!currentQuery.includes(" GROUP BY ")) {
+                          // Insert a GROUP BY before any ORDER BY or LIMIT
+                          const insertPos =
+                            currentQuery.search(/\b(ORDER BY|LIMIT)\b/i);
+                          if (insertPos !== -1) {
+                            // Insert before the clause
+                            const newQuery =
+                              currentQuery.slice(0, insertPos) +
+                              " GROUP BY your_column " +
+                              currentQuery.slice(insertPos);
+                            editorRef.current.setValue(newQuery);
+                          } else {
+                            // Append at the end
+                            editorRef.current.setValue(
+                              currentQuery + " GROUP BY your_column"
+                            );
+                          }
+
+                          // If the query doesn't start with SELECT, but uses SELECT *, modify it to add aggregation
+                          if (currentQuery.includes("SELECT *")) {
+                            const newQuery = currentQuery.replace(
+                              "SELECT *",
+                              "SELECT your_column, COUNT(*) as count"
+                            );
+                            editorRef.current.setValue(newQuery);
+                          }
+                        }
+                      }
+                    }}
+                  >
+                    <BarChart4 className="h-3 w-3" />
+                    <span>Group By</span>
+                  </Button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
       </div>
 
+      {/* Monaco SQL Editor */}
       <div className="flex-grow relative min-h-[200px] border rounded-md overflow-hidden">
         {!isEditorReady && <Skeleton className="h-full w-full" />}
         <Editor

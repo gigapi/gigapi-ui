@@ -5,7 +5,7 @@ import type { TimeRange } from "@/components/TimeRangeSelector";
  * 
  * Utility functions for encoding and decoding query parameters in URL hash fragments
  * to facilitate query sharing and bookmarking.
- * Uses base64 encoding to store all parameters as a single chunk.
+ * Uses base64 encoding to store all parameters as a single chunk for efficient URL sharing.
  */
 
 export interface HashQueryParams {

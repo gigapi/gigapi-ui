@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef } from "react";
-import { AlertCircle, CheckCircle2, Clock, Database, Copy, Share } from "lucide-react";
+import { useState, useEffect, useRef, useLayoutEffect } from "react";
+import { AlertCircle, CheckCircle2, Clock, Database, Copy, Share, Timer, Zap, Server, MonitorPlay, Wifi, FileJson } from "lucide-react";
 import { toast } from "sonner";
 import { ScrollArea } from "./ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
@@ -10,6 +10,7 @@ import GigTable from "./GigTable";
 import Loader from "./Loader";
 import { Button } from "./ui/button";
 import HashQueryUtils from "@/lib/hash-query-utils";
+import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 
 export default function QueryResults() {
   const { 
@@ -27,10 +28,45 @@ export default function QueryResults() {
     queryHistory
   } = useQuery();
 
+  // Performance metrics
+  const [performanceMetrics, setPerformanceMetrics] = useState({
+    apiResponseTime: 0,
+    renderTime: 0,
+    totalTime: 0,
+    clientProcessingTime: 0,
+    networkTime: 0,
+    parseTime: 0
+  });
+  
   // Store the executed query separately from the editor query
   const [executedQuery, setExecutedQuery] = useState(query);
   const [activeTab, setActiveTab] = useState("results");
   const [chartsLoaded, setChartsLoaded] = useState(false);
+  
+  // Ref for render timing
+  const renderStartTime = useRef(0);
+  
+  // Measure render time
+  useLayoutEffect(() => {
+    if (results && !isLoading) {
+      const now = performance.now();
+      if (renderStartTime.current > 0) {
+        const renderTime = now - renderStartTime.current;
+        setPerformanceMetrics(prev => ({
+          ...prev,
+          renderTime,
+          // Estimate client processing as the difference between total time and API response time
+          clientProcessingTime: Math.max(0, (executionTime || 0) - prev.apiResponseTime),
+          // Estimate network time (rough approximation)
+          networkTime: Math.max(0, (executionTime || 0) - prev.apiResponseTime - renderTime),
+          // Total time is the full execution time
+          totalTime: executionTime || 0
+        }));
+      }
+    } else if (isLoading) {
+      renderStartTime.current = performance.now();
+    }
+  }, [results, isLoading, executionTime]);
   
   // Update executed query when new query is executed (track by queryHistory changes)
   const prevQueryHistoryLength = useRef(queryHistory.length);
@@ -50,6 +86,23 @@ export default function QueryResults() {
       setChartsLoaded(true);
     }
   }, [activeTab]);
+
+  // Performance timing for query execution
+  useEffect(() => {
+    if (rawJson && rawJson.metrics) {
+      // Try to extract server-side metrics if available
+      const serverMetrics = rawJson.metrics;
+      
+      // Update performance metrics with server-side data
+      setPerformanceMetrics(prev => ({
+        ...prev,
+        apiResponseTime: serverMetrics.queryTime || 0,
+        parseTime: serverMetrics.parseTime || 0,
+        // Update other metrics based on server data
+        ...serverMetrics
+      }));
+    }
+  }, [rawJson]);
 
   // Format execution time properly
   const formatExecutionTime = (timeMs: number | null) => {
@@ -150,11 +203,17 @@ export default function QueryResults() {
             >
               Query
             </TabsTrigger>
+            <TabsTrigger
+              value="performance"
+              className="px-3 py-1 rounded-md text-sm data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=inactive]:text-muted-foreground"
+            >
+              Performance
+            </TabsTrigger>
           </TabsList>
 
           {error && !error.includes("databases") && (
-            <div className="flex items-center text-red-500 text-sm">
-              <AlertCircle className="h-4 w-4 mr-1" />
+            <div className="flex items-center text-red-500 text-sm max-w-[80%] bg-red-500/15 rounded-md p-2 border border-red-500">
+              <AlertCircle className="h-8 w-8 mr-3" />
               {error}
             </div>
           )}
@@ -187,7 +246,7 @@ export default function QueryResults() {
         </TabsContent>
 
         <TabsContent value="charts" className="flex-1 overflow-auto min-h-0">
-          {chartsLoaded ? <QueryCharts /> : (
+          {activeTab === "charts" ? <QueryCharts /> : (
             <div className="flex flex-col items-center justify-center h-full">
               <p className="text-muted-foreground">Charts will load when this tab is selected</p>
             </div>
@@ -282,6 +341,67 @@ export default function QueryResults() {
                   </div>
                 )}
               </div>
+            </div>
+          </ScrollArea>
+        </TabsContent>
+
+        <TabsContent value="performance" className="flex-1 overflow-auto min-h-0 p-4">
+          <ScrollArea className="h-full">
+            <div className="space-y-4">
+              <h3 className="text-xl font-semibold mb-6">Performance Metrics</h3>
+              {isLoading ? (
+                <Card><CardContent className="pt-6 text-center text-muted-foreground">Loading metrics...</CardContent></Card>
+              ) : executionTime === null || executionTime === undefined ? (
+                <Card><CardContent className="pt-6 text-center text-muted-foreground">No query executed yet, or metrics not available.</CardContent></Card>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {[
+                    { title: "Total Execution Time", value: performanceMetrics.totalTime, icon: Timer, unit: "time" },
+                    { title: "API Response Time", value: performanceMetrics.apiResponseTime, icon: Server, unit: "time" },
+                    { title: "Client Processing Time", value: performanceMetrics.clientProcessingTime, icon: Zap, unit: "time" },
+                    { title: "Render Time (UI)", value: performanceMetrics.renderTime, icon: MonitorPlay, unit: "time" },
+                    { title: "Network Time (Estimated)", value: performanceMetrics.networkTime, icon: Wifi, unit: "time" },
+                    { title: "JSON Parse Time (Server)", value: performanceMetrics.parseTime, icon: FileJson, unit: "time" },
+                  ].map((metric, idx) => (
+                    <Card key={idx}>
+                      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                        <CardTitle className="text-sm font-medium text-muted-foreground">
+                          {metric.title}
+                        </CardTitle>
+                        {metric.icon && <metric.icon className="h-4 w-4 text-muted-foreground" />}
+                      </CardHeader>
+                      <CardContent>
+                        <div className="text-2xl font-bold">
+                          {metric.unit === "time" ? formatExecutionTime(metric.value as number) : metric.value}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                  
+                  {rawJson?.metrics && Object.entries(rawJson.metrics).map(([key, value]) => {
+                    if (['queryTime', 'parseTime', 'totalTime'].includes(key) || 
+                        performanceMetrics.hasOwnProperty(key)
+                    ) return null;
+                    
+                    const formattedKey = key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase());
+                    
+                    return (
+                      <Card key={key}>
+                        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                          <CardTitle className="text-sm font-medium text-muted-foreground">
+                            {formattedKey}
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="text-2xl font-bold">
+                            {typeof value === 'number' ? formatExecutionTime(value) : String(value)}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </ScrollArea>
         </TabsContent>

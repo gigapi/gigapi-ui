@@ -2,7 +2,6 @@ import { useState, useMemo, useEffect } from "react";
 import { Calendar, Clock, RefreshCw } from "lucide-react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
-import { Tabs, TabsList, TabsTrigger } from "./ui/tabs";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
@@ -182,10 +181,24 @@ export default function TimeRangeSelector({
   tableName
 }: TimeRangeSelectorProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<"quick" | "relative" | "absolute">("quick");
   const [fromInput, setFromInput] = useState(timeRange?.from || DEFAULT_TIME_RANGE.from);
   const [toInput, setToInput] = useState(timeRange?.to || DEFAULT_TIME_RANGE.to);
   const [searchQuick, setSearchQuick] = useState("");
+  const [browserTimezone, setBrowserTimezone] = useState("");
+  const [currentTime, setCurrentTime] = useState("");
+
+  // Get browser timezone and current time
+  useEffect(() => {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    setBrowserTimezone(tz);
+
+    const updateTime = () => {
+      setCurrentTime(format(new Date(), "HH:mm:ss zzz"));
+    };
+    updateTime();
+    const timerId = setInterval(updateTime, 1000);
+    return () => clearInterval(timerId);
+  }, []);
 
   // Ensure time range is valid
   const safeTimeRange = useMemo(() => {
@@ -284,6 +297,27 @@ export default function TimeRangeSelector({
     setIsOpen(false);
   };
 
+  // Helper to get display for Browser Time footer
+  const getBrowserTimeDisplay = () => {
+    try {
+      const { timeZone } = Intl.DateTimeFormat().resolvedOptions();
+      const parts = timeZone.split('/');
+      const city = parts.length > 1 ? parts[parts.length - 1].replace('_', ' ') : timeZone;
+      const country = parts.length > 1 ? parts[0].replace('_', ' ') : ''; // Basic country name
+      
+      const offset = format(new Date(), "zzz"); // Get UTC offset like UTC+02:00
+
+      return {
+        display: `${country ? country + ", " : ""}${city}`,
+        offset: offset,
+      };
+    } catch (e) {
+      console.error("Error getting browser time display:", e);
+      return { display: "N/A", offset: ""};
+    }
+  };
+
+  const browserTimeInfo = getBrowserTimeDisplay();
 
   // Refresh to current time (keeps the same relative range)
   const refreshToNow = () => {
@@ -343,102 +377,78 @@ export default function TimeRangeSelector({
               <Clock className="h-4 w-4 shrink-0 opacity-70" />
             </Button>
           </PopoverTrigger>
-          <PopoverContent className="w-[350px] p-0" align="start">
+          <PopoverContent className="w-[550px] p-0" align="start">
             <Card className="border-0 shadow-none">
-              <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)}>
-                <TabsList className="grid grid-cols-3 mb-2">
-                  <TabsTrigger value="quick">Quick</TabsTrigger>
-                  <TabsTrigger value="relative">Relative</TabsTrigger>
-                  <TabsTrigger value="absolute">Absolute</TabsTrigger>
-                </TabsList>
-
-                {activeTab === "quick" && (
-                  <div className="space-y-2 p-2">
+              <div className="flex">
+                {/* Left Pane: Absolute Time Range & Settings */}
+                <div className="flex-1 p-4 space-y-4 border-r">
+                  <div className="font-semibold text-sm">Absolute time range</div>
+                  <div className="space-y-2">
+                    <label htmlFor="from-input" className="text-xs text-muted-foreground">From</label>
                     <Input
-                      placeholder="Search quick ranges..."
-                      value={searchQuick}
-                      onChange={(e) => setSearchQuick(e.target.value)}
-                      className="mb-2"
+                      id="from-input"
+                      placeholder="e.g., now-24h or YYYY-MM-DD HH:mm:ss"
+                      value={fromInput}
+                      onChange={(e) => setFromInput(e.target.value)}
+                      className="h-9"
                     />
-                    <ScrollArea className="h-[300px]">
-                      <div className="space-y-1">
-                        {filteredQuickRanges.map((range) => (
-                          <Button
-                            key={range.display || 'no-filter'}
-                            variant="ghost"
-                            className="w-full justify-start text-sm font-normal"
-                            onClick={() => applyQuickRange(range)}
-                          >
-                            {range.display || 'No time filter'}
-                          </Button>
-                        ))}
-                      </div>
-                    </ScrollArea>
                   </div>
-                )}
+                  <div className="space-y-2">
+                    <label htmlFor="to-input" className="text-xs text-muted-foreground">To</label>
+                    <Input
+                      id="to-input"
+                      placeholder="e.g., now or YYYY-MM-DD HH:mm:ss"
+                      value={toInput}
+                      onChange={(e) => setToInput(e.target.value)}
+                      className="h-9"
+                    />
+                  </div>
+                  <Button onClick={applyCustomRange} className="w-full h-9">
+                    Apply time range
+                  </Button>
 
-                {activeTab === "relative" && (
-                  <div className="space-y-4 p-4">
-                    <div className="space-y-2">
-                      <div className="text-sm">From</div>
-                      <Input
-                        placeholder="e.g., now-24h"
-                        value={fromInput}
-                        onChange={(e) => setFromInput(e.target.value)}
-                      />
-                      <div className="text-xs text-muted-foreground">
-                        Example: now-1h, now-1d, now-7d
-                      </div>
-                    </div>
-                    <div className="space-y-2">
-                      <div className="text-sm">To</div>
-                      <Input
-                        placeholder="e.g., now"
-                        value={toInput}
-                        onChange={(e) => setToInput(e.target.value)}
-                      />
-                      <div className="text-xs text-muted-foreground">
-                        Usually "now" for current time
-                      </div>
-                    </div>
-                    <Button onClick={applyCustomRange} className="w-full">
-                      Apply
-                    </Button>
-                  </div>
-                )}
 
-                {activeTab === "absolute" && (
-                  <div className="space-y-4 p-4">
-                    <div className="space-y-2">
-                      <div className="text-sm">From</div>
-                      <Input
-                        placeholder="e.g., 2023-01-01 00:00:00"
-                        value={fromInput}
-                        onChange={(e) => setFromInput(e.target.value)}
-                        className="h-9"
-                      />
-                      <div className="text-xs text-muted-foreground">
-                        YYYY-MM-DD HH:MM:SS format
-                      </div>
-                    </div>
-                    <div className="space-y-2">
-                      <div className="text-sm">To</div>
-                      <Input
-                        placeholder="e.g., 2023-01-02 00:00:00"
-                        value={toInput}
-                        onChange={(e) => setToInput(e.target.value)}
-                        className="h-9"
-                      />
-                      <div className="text-xs text-muted-foreground">
-                        YYYY-MM-DD HH:MM:SS format
-                      </div>
-                    </div>
-                    <Button onClick={applyCustomRange} className="w-full">
-                      Apply
-                    </Button>
+                  
+                  {/* Browser Time and Timezone Settings Footer */}
+                  <div className="border-t pt-2 mt-auto absolute bottom-0 left-0 right-0 p-2 bg-background">
+                     <div className="flex justify-between items-center text-xs text-muted-foreground">
+                       <div>
+                         Browser Time: {browserTimeInfo.display}
+                       </div>
+                       <div className="flex items-center">
+                         <span>{browserTimeInfo.offset}</span>
+                         
+                       </div>
+                     </div>
+                   
                   </div>
-                )}
-              </Tabs>
+
+                </div>
+
+                {/* Right Pane: Quick Ranges */}
+                <div className="w-[200px] p-2 space-y-2">
+                  <Input
+                    placeholder="Search quick ranges..."
+                    value={searchQuick}
+                    onChange={(e) => setSearchQuick(e.target.value)}
+                    className="mb-2 h-9"
+                  />
+                  <ScrollArea className="h-[300px]"> {/* Adjust height as needed */}
+                    <div className="space-y-1">
+                      {filteredQuickRanges.map((range) => (
+                        <Button
+                          key={range.display || 'no-filter'}
+                          variant="ghost"
+                          className="w-full justify-start text-sm font-normal h-8"
+                          onClick={() => applyQuickRange(range)}
+                        >
+                          {range.display || 'No time filter'}
+                        </Button>
+                      ))}
+                    </div>
+                  </ScrollArea>
+                </div>
+              </div>
             </Card>
           </PopoverContent>
         </Popover>

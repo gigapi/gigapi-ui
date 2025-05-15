@@ -124,7 +124,7 @@ export function QueryProvider({ children }: { children: ReactNode }) {
   const [apiUrl, setApiUrl] = useState(() => {
     return (
       localStorage.getItem("apiUrl") ||
-      `http://${window.location.hostname}:${window.location.port}/query `
+      `http://${window.location.hostname}:${window.location.port}/query`
     );
   });
 

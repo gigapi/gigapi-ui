@@ -23,6 +23,8 @@ export default function TableSelector() {
     availableTables,
     isLoadingSchema,
     selectedDb,
+    query,
+    setQuery
   } = useQuery();
 
   const [searchQuery, setSearchQuery] = useState("");
@@ -33,6 +35,12 @@ export default function TableSelector() {
       setSelectedTable(null);
     } else {
       setSelectedTable(value);
+      // Generate a basic query with the selected table
+      // Only update if the query is empty or doesn't contain the table name
+      if (!query || !query.toLowerCase().includes(value.toLowerCase())) {
+        const newQuery = `SELECT * FROM ${value}`;
+        setQuery(newQuery);
+      }
     }
   };
 

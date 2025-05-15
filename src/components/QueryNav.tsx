@@ -10,7 +10,7 @@ import {
   ExternalLink,
   FilePlus,
   RefreshCw,
-  MessageSquareHeart
+  MessageSquareHeart,
 } from "lucide-react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -35,7 +35,14 @@ import Logo from "../assets/logo.svg";
 import { toast } from "sonner";
 
 export default function QueryNav() {
-  const { apiUrl, setApiUrl, loadDatabases, selectedDb, clearQuery, setSelectedTable } = useQuery();
+  const {
+    apiUrl,
+    setApiUrl,
+    loadDatabases,
+    selectedDb,
+    clearQuery,
+    setSelectedTable,
+  } = useQuery();
   const [isEndpointEditing, setIsEndpointEditing] = useState(false);
   const [tempApiUrl, setTempApiUrl] = useState(apiUrl);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -51,10 +58,10 @@ export default function QueryNav() {
       setIsEndpointEditing(false);
       return;
     }
-    
+
     // Notice about endpoint change
     toast.info("Changing API endpoint and refreshing connections...");
-    
+
     // Update the API URL - this will trigger the useEffect in QueryContext
     // that clears state and reloads databases
     setApiUrl(tempApiUrl);
@@ -85,9 +92,7 @@ export default function QueryNav() {
         <div className="flex items-center space-x-2">
           <img src={Logo} alt="GigAPI Logo" className="h-6 w-6 text-primary" />
           <h1 className="text-lg font-semibold hidden sm:inline-block">
-          GigAPI Query UI
-
-
+            GigAPI Query UI
           </h1>
         </div>
 
@@ -182,14 +187,24 @@ export default function QueryNav() {
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem
-                onClick={() => window.open("https://gigapipe.com", "_blank")}
+                onClick={() =>
+                  window.open(
+                    "https://gigapipe.com?utm_source=gigapi-ui&utm_medium=nav_link",
+                    "_blank"
+                  )
+                }
                 className="text-muted-foreground"
               >
                 <ExternalLink className="h-4 w-4 mr-2" />
                 About Gigapipe
               </DropdownMenuItem>
               <DropdownMenuItem
-                onClick={() => window.open("https://github.com/gigapipe/gigapi-ui/issues", "_blank")}
+                onClick={() =>
+                  window.open(
+                    "https://github.com/gigapi/gigapi-ui/issues",
+                    "_blank"
+                  )
+                }
                 className="text-muted-foreground"
               >
                 <MessageSquareHeart className="h-4 w-4 mr-2" />
@@ -232,7 +247,9 @@ export default function QueryNav() {
                   <Button
                     size="sm"
                     onClick={() => {
-                      toast.info("Changing API endpoint and refreshing connections...");
+                      toast.info(
+                        "Changing API endpoint and refreshing connections..."
+                      );
                       setApiUrl(tempApiUrl);
                       setIsMobileMenuOpen(false);
                     }}
