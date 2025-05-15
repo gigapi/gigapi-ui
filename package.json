@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "build-pages": "tsc && vite build --base=/gigapi-ui/"
     "preview": "vite preview",
     "build:go": "npm run build && echo 'UI built and integrated with Go backend'"
   },
