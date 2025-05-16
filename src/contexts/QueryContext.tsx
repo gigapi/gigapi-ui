@@ -194,23 +194,21 @@ export function QueryProvider({ children }: { children: ReactNode }) {
     setError(null);
 
     try {
-      // Always use current apiUrl state value directly
       const response = await axios.post(
         apiUrl,
         {
           query: "SHOW DATABASES",
         },
         {
-          // Add timeout to prevent long-running requests
           timeout: 10000,
         }
       );
 
-      if (response.data.results && response.data.results.length > 0) {
+      if (response.data && Array.isArray(response.data.results) && response.data.results.length > 0) {
         const dbList = response.data.results as Database[];
         setDatabases(dbList);
+        setError(null);
 
-        // Load saved database from localStorage if it exists in the list
         const savedDb = localStorage.getItem("selectedDb");
         if (savedDb && dbList.some((db) => db.database_name === savedDb)) {
           setSelectedDb(savedDb);
@@ -218,9 +216,9 @@ export function QueryProvider({ children }: { children: ReactNode }) {
 
         toast.success(`Loaded ${dbList.length} databases`);
       } else {
-        setDatabases([]); // Clear databases if results are empty
-        setSelectedDb(""); // Reset selected DB
-        toast.warning("No databases found");
+        setDatabases([]);
+        setSelectedDb("");
+        toast.warning("No databases found from server. Select an endpoint if this is unexpected.");
       }
     } catch (err: any) {
       console.error("Failed to load databases:", err);
@@ -229,8 +227,8 @@ export function QueryProvider({ children }: { children: ReactNode }) {
         err.message ||
         "Unknown error loading databases";
       setError(`Failed to load databases: ${errorMsg}`);
-      setDatabases([]); // Clear databases on error
-      setSelectedDb(""); // Reset selected DB on error
+      setDatabases([]);
+      setSelectedDb("");
       toast.error(`Failed to load databases: ${errorMsg}`);
     } finally {
       setIsLoading(false);

@@ -20,13 +20,6 @@ export default function DatabaseSelector() {
     isLoading,
   } = useQuery();
 
-  useEffect(() => {
-    // Only load databases initially if not already loading and no error
-    if (!databases.length && !isLoading && !error?.includes("databases")) {
-      loadDatabases();
-    }
-  }, [loadDatabases, databases.length, isLoading, error]);
-
   function getPlaceholderText() {
     if (error?.includes("databases")) {
       return "Error loading databases";

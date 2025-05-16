@@ -357,10 +357,9 @@ export default function QueryResults() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   {[
                     { title: "Total Execution Time", value: performanceMetrics.totalTime, icon: Timer, unit: "time" },
-                    { title: "API Response Time", value: performanceMetrics.apiResponseTime, icon: Server, unit: "time" },
-                    { title: "Client Processing Time", value: performanceMetrics.clientProcessingTime, icon: Zap, unit: "time" },
+                    { title: "Server DB Query Time", value: performanceMetrics.apiResponseTime, icon: Server, unit: "time" },
                     { title: "Render Time (UI)", value: performanceMetrics.renderTime, icon: MonitorPlay, unit: "time" },
-                    { title: "Network Time (Estimated)", value: performanceMetrics.networkTime, icon: Wifi, unit: "time" },
+                    { title: "Network & Other Processing", value: performanceMetrics.networkTime, icon: Wifi, unit: "time" },
                     { title: "JSON Parse Time (Server)", value: performanceMetrics.parseTime, icon: FileJson, unit: "time" },
                   ].map((metric, idx) => (
                     <Card key={idx}>
