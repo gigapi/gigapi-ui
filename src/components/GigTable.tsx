@@ -5,7 +5,6 @@ import {
   getFilteredRowModel,
   getPaginationRowModel,
   useReactTable,
-  // getSortedRowModel, // REMOVED: No client-side sorting
 } from "@tanstack/react-table";
 import type {
   ColumnDef,
@@ -14,7 +13,6 @@ import type {
   ColumnResizeMode,
   PaginationState,
   ColumnSizingState,
-  // SortingState, // REMOVED
 } from "@tanstack/react-table";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { formatBytes, formatDuration } from "../lib/utils"; // Assuming these are still needed for stats
@@ -158,6 +156,9 @@ const GigTable: React.FC<GigTableProps> = ({
               displayValue = columnRenderers[key](value);
             } else if (value === null || value === undefined) {
               displayValue = <span className="text-neutral-400 italic text-xs opacity-50">null</span>;
+            } else if (typeof value === "object") {
+              // Properly stringify objects for display
+              displayValue = <span className="font-mono text-xs text-blue-500">{JSON.stringify(value)}</span>;
             } else {
               displayValue = String(value); // Default to string
             }

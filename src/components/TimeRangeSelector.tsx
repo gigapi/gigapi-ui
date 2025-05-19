@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from "react";
-import { Calendar, Clock, RefreshCw } from "lucide-react";
+import { Calendar, Clock, Play } from "lucide-react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -9,6 +9,8 @@ import { Card } from "./ui/card";
 import { ScrollArea } from "./ui/scroll-area";
 import { DEFAULT_TIME_RANGE, NO_TIME_FILTER, QUICK_RANGES } from "@/lib/time-constants";
 import { Badge } from "./ui/badge";
+import { useQuery } from "../contexts/QueryContext";
+import { toast } from "sonner";
 
 export interface TimeRange {
   from: string; // ISO string or relative time like 'now-24h'
@@ -186,6 +188,7 @@ export default function TimeRangeSelector({
   const [searchQuick, setSearchQuick] = useState("");
   const [browserTimezone, setBrowserTimezone] = useState("");
   const [currentTime, setCurrentTime] = useState("");
+  const { query, setQuery, executeQuery } = useQuery();
 
   // Get browser timezone and current time
   useEffect(() => {
@@ -252,11 +255,8 @@ export default function TimeRangeSelector({
 
   // Apply quick range selection
   const applyQuickRange = (range: TimeRange) => {
-    console.log("Applying time range:", range);
-    
     // Special handling for "No time filter" option
     if (range.display === "No time filter") {
-      console.log("Disabling time filtering");
       onTimeRangeChange({...NO_TIME_FILTER, raw: undefined});
       setIsOpen(false);
       return;
@@ -319,33 +319,11 @@ export default function TimeRangeSelector({
 
   const browserTimeInfo = getBrowserTimeDisplay();
 
-  // Refresh to current time (keeps the same relative range)
-  const refreshToNow = () => {
-    // Find the current quick range if it exists
-    const quickRange = QUICK_RANGES.find(
-      r => r.from === safeTimeRange.from && r.to === safeTimeRange.to
-    );
-    
-    if (quickRange) {
-      onTimeRangeChange({
-        ...quickRange,
-        enabled: true,
-        raw: {
-          from: new Date(parseRelativeTime(quickRange.from)),
-          to: new Date(parseRelativeTime(quickRange.to))
-        }
-      });
-    } else if (safeTimeRange.from.startsWith("now-") && safeTimeRange.to === "now") {
-      // For custom relative ranges that end with 'now', just trigger a refresh
-      onTimeRangeChange({
-        ...safeTimeRange,
-        enabled: true,
-        raw: {
-          from: new Date(parseRelativeTime(safeTimeRange.from)),
-          to: new Date()
-        }
-      });
-    }
+  // Execute the query with the current time filters
+  const executeQueryWithFilters = () => {
+    // This applies the query with time variables replaced by actual values
+    executeQuery();
+    toast.success("Query executed with time filters");
   };
   
   // If time range filtering is disabled, don't render the component
@@ -456,10 +434,10 @@ export default function TimeRangeSelector({
           variant="outline"
           size="icon"
           className="h-9 w-9"
-          onClick={refreshToNow}
-          title="Refresh to current time"
+          onClick={executeQueryWithFilters}
+          title="Execute query with time filters"
         >
-          <RefreshCw className="h-4 w-4" />
+          <Play className="h-4 w-4" />
         </Button>
       </div>
     </div>

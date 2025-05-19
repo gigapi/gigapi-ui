@@ -4,6 +4,7 @@ import {
   useState,
   useCallback,
   useEffect,
+  useRef,
   type ReactNode,
 } from "react";
 import axios from "axios";
@@ -79,12 +80,16 @@ interface QueryContextType {
   getColumnsForTable: (tableName: string) => ColumnSchema[] | null;
   queryBuilderEnabled: boolean;
   setQueryBuilderEnabled: (enabled: boolean) => void;
-  
+
   // Query history methods
   queryHistory: QueryHistoryEntry[];
-  addToQueryHistory: (entry: Omit<QueryHistoryEntry, 'id' | 'timestamp'>) => void;
+  addToQueryHistory: (
+    entry: Omit<QueryHistoryEntry, "id" | "timestamp">
+  ) => void;
   clearQueryHistory: () => void;
   getShareableUrlForQuery: (query: string) => string;
+  format: string;
+  setFormat: (format: string) => void;
 }
 
 const QueryContext = createContext<QueryContextType | undefined>(undefined);
@@ -128,6 +133,11 @@ export function QueryProvider({ children }: { children: ReactNode }) {
     );
   });
 
+  // Format state
+  const [format, setFormat] = useState(() => {
+    return localStorage.getItem("queryFormat") || "ndjson";
+  });
+
   // Time range state
   const [timeRange, setTimeRange] = useState<TimeRange>(() => {
     // Try to load from localStorage or use default (last 24 hours)
@@ -151,7 +161,7 @@ export function QueryProvider({ children }: { children: ReactNode }) {
 
   // Query builder state
   const [queryBuilderEnabled, setQueryBuilderEnabled] = useState(true);
-  
+
   // Query history state
   const [queryHistory, setQueryHistory] = useState<QueryHistoryEntry[]>(() => {
     try {
@@ -164,6 +174,11 @@ export function QueryProvider({ children }: { children: ReactNode }) {
     }
     return [];
   });
+
+  // Retry tracking refs
+  const retryCountRef = useRef(0); // For database loading
+  const schemaRetryCountRef = useRef(0); // For schema loading
+  const MAX_RETRIES = 2;
 
   // Helper function to save connection state
   const saveConnectionState = (url: string, db: string) => {
@@ -188,78 +203,127 @@ export function QueryProvider({ children }: { children: ReactNode }) {
     [selectedDb, schema]
   );
 
-  // Define loadDatabases function declaration first
-  const loadDatabases = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
+  // Define loadDatabases function declaration first without retry logic
+  const loadDatabases = useCallback(
+    async (isRetry = false) => {
+      // Stop if we've hit max retries
+      if (isRetry && retryCountRef.current >= MAX_RETRIES) {
+        setError(
+          "Failed to load databases after multiple attempts. Please check your API endpoint and try again."
+        );
+        setIsLoading(false);
+        return;
+      }
 
-    try {
-      const response = await axios.post(
-        apiUrl,
-        {
-          query: "SHOW DATABASES",
-        },
-        {
-          timeout: 10000,
-        }
-      );
-
-      if (response.data && Array.isArray(response.data.results) && response.data.results.length > 0) {
-        const dbList = response.data.results as Database[];
-        setDatabases(dbList);
-        setError(null);
-
-        const savedDb = localStorage.getItem("selectedDb");
-        if (savedDb && dbList.some((db) => db.database_name === savedDb)) {
-          setSelectedDb(savedDb);
-        }
-
-        toast.success(`Loaded ${dbList.length} databases`);
+      if (isRetry) {
+        retryCountRef.current += 1; // Increment retry count if this is a retry attempt
       } else {
+        retryCountRef.current = 0; // Reset retry count if this is a fresh load
+      }
+
+      setIsLoading(true);
+      setError(null);
+
+      try {
+        const response = await axios.post(
+          `${apiUrl}${apiUrl.includes("?") ? "&" : "?"}format=${format}`,
+          {
+            query: "SHOW DATABASES",
+          },
+          {
+            timeout: 10000,
+            responseType: format === "ndjson" ? "text" : "json",
+          }
+        );
+
+        let dbList: Database[] = [];
+
+        if (format === "ndjson") {
+          dbList = response.data
+            .split(/\r?\n/)
+            .filter((line: string) => line.trim().length > 0)
+            .map((line: string) => {
+              try {
+                return JSON.parse(line);
+              } catch {
+                return null;
+              }
+            })
+            .filter(Boolean);
+        } else if (
+          response.data &&
+          Array.isArray(response.data.results) &&
+          response.data.results.length > 0
+        ) {
+          dbList = response.data.results as Database[];
+        }
+
+        if (dbList.length > 0) {
+          setDatabases(dbList);
+          setError(null);
+          const savedDb = localStorage.getItem("selectedDb");
+          if (savedDb && dbList.some((db) => db.database_name === savedDb)) {
+            setSelectedDb(savedDb);
+          }
+          toast.success(`Loaded ${dbList.length} databases`);
+          retryCountRef.current = 0; // Reset on success
+        } else {
+          setDatabases([]);
+          setSelectedDb("");
+          toast.warning(
+            "No databases found from server. Select an endpoint if this is unexpected."
+          );
+
+          // Schedule a retry without updating state
+          if (retryCountRef.current < MAX_RETRIES) {
+            setTimeout(() => {
+              loadDatabases(true); // Pass true to indicate this is a retry
+            }, 1000);
+          }
+        }
+      } catch (err: any) {
+        console.error("Failed to load databases:", err);
+        const errorMsg =
+          err.response?.data?.error ||
+          err.message ||
+          "Unknown error loading databases";
+        setError(`Failed to load databases: ${errorMsg}`);
         setDatabases([]);
         setSelectedDb("");
-        toast.warning("No databases found from server. Select an endpoint if this is unexpected.");
-      }
-    } catch (err: any) {
-      console.error("Failed to load databases:", err);
-      const errorMsg =
-        err.response?.data?.error ||
-        err.message ||
-        "Unknown error loading databases";
-      setError(`Failed to load databases: ${errorMsg}`);
-      setDatabases([]);
-      setSelectedDb("");
-      toast.error(`Failed to load databases: ${errorMsg}`);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [apiUrl]);
+        toast.error(`Failed to load databases: ${errorMsg}`);
 
-  // Handle API URL changes and reset state
+        // Schedule a retry without updating state
+        if (retryCountRef.current < MAX_RETRIES) {
+          setTimeout(() => {
+            loadDatabases(true); // Pass true to indicate this is a retry
+          }, 1000);
+        }
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [apiUrl, format, setDatabases, setError, setIsLoading, setSelectedDb]
+  );
+
+  // Handle API URL or format changes and reset state
   useEffect(() => {
     localStorage.setItem("apiUrl", apiUrl);
-    // Clear cached state to force refresh with new endpoint
     setDatabases([]);
     setSelectedDb("");
     setSelectedTable(null);
     setResults(null);
     setRawJson(null);
     setError(null);
-
-    // Save connection state with empty DB (since we're changing endpoints)
+    retryCountRef.current = 0; // Reset retry count on apiUrl or format change
     saveConnectionState(apiUrl, "");
 
-    // Trigger a fresh database load with a slight delay to ensure state is reset
-    const timer = setTimeout(() => {
-      loadDatabases().catch(console.error);
-    }, 100);
-
-    return () => clearTimeout(timer);
-  }, [apiUrl]);
+    // Initial load - not a retry
+    loadDatabases(false).catch(console.error);
+  }, [apiUrl, format]);
 
   // Load schema for a specific database
   const loadSchemaForDb = useCallback(
-    async (dbName: string) => {
+    async (dbName: string, isRetry = false) => {
       if (!dbName) return;
 
       // If we already have the schema for this DB, don't reload
@@ -270,45 +334,113 @@ export function QueryProvider({ children }: { children: ReactNode }) {
         return;
       }
 
+      // Retry logic like loadDatabases
+      if (isRetry) {
+        schemaRetryCountRef.current += 1;
+      } else {
+        schemaRetryCountRef.current = 0;
+      }
+
+      if (isRetry && schemaRetryCountRef.current >= MAX_RETRIES) {
+        toast.error(`Failed to load schema after multiple attempts.`);
+        setIsLoadingSchema(false);
+        return;
+      }
+
       setIsLoadingSchema(true);
       try {
         // First get all tables
         const tablesResponse = await axios.post(
-          `${apiUrl}?db=${encodeURIComponent(dbName)}`,
-          { query: "SHOW TABLES" }
+          `${apiUrl}?db=${encodeURIComponent(dbName)}&format=${format}`,
+          { query: "SHOW TABLES" },
+          { responseType: format === "ndjson" ? "text" : "json" }
         );
 
         const dbSchema: TableSchema[] = [];
-        const tableNames: string[] = [];
+        let tableNames: string[] = [];
 
-        // If we have tables, get details for each
-        if (
-          tablesResponse.data.results &&
+        // Process tables response based on format
+        if (format === "ndjson") {
+          // Parse NDJSON response
+          const tableObjects = tablesResponse.data
+            .split(/\r?\n/)
+            .filter((line: string) => line.trim().length > 0)
+            .map((line: string) => {
+              try {
+                return JSON.parse(line);
+              } catch {
+                return null;
+              }
+            })
+            .filter(Boolean);
+
+          // Extract table names from each object
+          tableObjects.forEach((table: any) => {
+            const tableName = table.table_name || Object.values(table)[0];
+            if (tableName) tableNames.push(tableName);
+          });
+        } else if (
+          tablesResponse.data &&
+          Array.isArray(tablesResponse.data.results) &&
           tablesResponse.data.results.length > 0
         ) {
           const tables = tablesResponse.data.results;
-
-          // Extract table names first and update state immediately
+          // Extract table names
           tables.forEach((table: any) => {
             const tableName = table.table_name || Object.values(table)[0];
             if (tableName) tableNames.push(tableName);
           });
+        }
 
-          // Update available tables immediately so UI is responsive
-          setAvailableTables(tableNames);
+        // Update available tables immediately so UI is responsive
+        setAvailableTables(tableNames);
 
+        if (tableNames.length > 0) {
           // Load table columns in parallel using Promise.all
           const tablePromises = tableNames.map(async (tableName) => {
             try {
               // First try DESCRIBE SELECT
               const columnsResponse = await axios.post(
-                `${apiUrl}?db=${encodeURIComponent(dbName)}`,
+                `${apiUrl}?db=${encodeURIComponent(dbName)}&format=${format}`,
                 { query: `DESCRIBE SELECT * FROM ${tableName} LIMIT 1` },
-                { timeout: 5000 } // Add timeout to avoid long waits
+                {
+                  timeout: 5000,
+                  responseType: format === "ndjson" ? "text" : "json",
+                }
               );
 
               const columns: ColumnSchema[] = [];
-              if (
+
+              if (format === "ndjson") {
+                // Parse NDJSON response for columns
+                columnsResponse.data
+                  .split(/\r?\n/)
+                  .filter((line: string) => line.trim().length > 0)
+                  .map((line: string) => {
+                    try {
+                      return JSON.parse(line);
+                    } catch {
+                      return null;
+                    }
+                  })
+                  .filter(Boolean)
+                  .forEach((col: any) => {
+                    columns.push({
+                      columnName:
+                        col.Field ||
+                        col.column_name ||
+                        col.name ||
+                        Object.values(col)[0],
+                      dataType:
+                        col.Type ||
+                        col.data_type ||
+                        col.type ||
+                        Object.values(col)[1] ||
+                        "unknown",
+                    });
+                  });
+              } else if (
+                columnsResponse.data &&
                 columnsResponse.data.results &&
                 columnsResponse.data.results.length > 0
               ) {
@@ -335,13 +467,46 @@ export function QueryProvider({ children }: { children: ReactNode }) {
               // Fallback to simple DESCRIBE command
               try {
                 const columnsResponse = await axios.post(
-                  `${apiUrl}?db=${encodeURIComponent(dbName)}`,
+                  `${apiUrl}?db=${encodeURIComponent(dbName)}&format=${format}`,
                   { query: `DESCRIBE ${tableName}` },
-                  { timeout: 5000 }
+                  {
+                    timeout: 5000,
+                    responseType: format === "ndjson" ? "text" : "json",
+                  }
                 );
 
                 const columns: ColumnSchema[] = [];
-                if (
+
+                if (format === "ndjson") {
+                  // Parse NDJSON response for columns
+                  columnsResponse.data
+                    .split(/\r?\n/)
+                    .filter((line: string) => line.trim().length > 0)
+                    .map((line: string) => {
+                      try {
+                        return JSON.parse(line);
+                      } catch {
+                        return null;
+                      }
+                    })
+                    .filter(Boolean)
+                    .forEach((col: any) => {
+                      columns.push({
+                        columnName:
+                          col.Field ||
+                          col.column_name ||
+                          col.name ||
+                          Object.values(col)[0],
+                        dataType:
+                          col.Type ||
+                          col.data_type ||
+                          col.type ||
+                          Object.values(col)[1] ||
+                          "unknown",
+                      });
+                    });
+                } else if (
+                  columnsResponse.data &&
                   columnsResponse.data.results &&
                   columnsResponse.data.results.length > 0
                 ) {
@@ -385,21 +550,40 @@ export function QueryProvider({ children }: { children: ReactNode }) {
               console.error("Failed to load table schema:", result.reason);
             }
           });
-        }
 
-        // Update schema state
-        setSchema((prev) => ({ ...prev, [dbName]: dbSchema }));
+          // Update schema state
+          setSchema((prev) => ({ ...prev, [dbName]: dbSchema }));
+          schemaRetryCountRef.current = 0; // Reset on success
+        } else {
+          // No tables found
+          setSchema((prev) => ({ ...prev, [dbName]: [] }));
+          setAvailableTables([]);
+
+          // Schedule a retry for empty tables
+          if (schemaRetryCountRef.current < MAX_RETRIES) {
+            setTimeout(() => {
+              loadSchemaForDb(dbName, true);
+            }, 1000);
+          }
+        }
       } catch (err: any) {
         console.error(`Failed to load schema for ${dbName}:`, err);
         toast.error(`Failed to load schema: ${err.message}`);
         // Set empty schema for this DB to avoid repeated loading attempts
         setSchema((prev) => ({ ...prev, [dbName]: [] }));
         setAvailableTables([]);
+
+        // Schedule a retry
+        if (schemaRetryCountRef.current < MAX_RETRIES) {
+          setTimeout(() => {
+            loadSchemaForDb(dbName, true);
+          }, 1000);
+        }
       } finally {
         setIsLoadingSchema(false);
       }
     },
-    [apiUrl, schema]
+    [apiUrl, schema, format]
   );
 
   // Effect to load initial state from localStorage
@@ -444,7 +628,7 @@ export function QueryProvider({ children }: { children: ReactNode }) {
     if (selectedDb) {
       // Save selected database to localStorage
       localStorage.setItem("selectedDb", selectedDb);
-      loadSchemaForDb(selectedDb).catch(console.error);
+      loadSchemaForDb(selectedDb, false).catch(console.error);
 
       // Clear results when DB changes
       setResults(null);
@@ -598,9 +782,9 @@ export function QueryProvider({ children }: { children: ReactNode }) {
       table: selectedTable || undefined,
       timeField: selectedTimeField || undefined,
       timeFrom: timeRange?.from,
-      timeTo: timeRange?.to
+      timeTo: timeRange?.to,
     };
-    
+
     // Update browser URL with query parameters
     HashQueryUtils.updateBrowserUrlWithParams(params);
 
@@ -615,96 +799,123 @@ export function QueryProvider({ children }: { children: ReactNode }) {
       if (queryBuilderEnabled) {
         // Process time variables when time filtering is enabled
         if (selectedTimeField && timeRange && timeRange.enabled !== false) {
-          console.log("Processing time variables for field:", selectedTimeField);
-
           // Initialize database type for proper SQL generation
           let dbType = "unknown";
-          
+
           // Make sure we identify DuckDB case-insensitively and with different possible names
-          if (selectedDb.toLowerCase().includes('duck') || 
-              selectedDb.toLowerCase().includes('duckdb') || 
-              selectedDb.toLowerCase() === 'hep') {  // Special case for this database
+          if (
+            selectedDb.toLowerCase().includes("duck") ||
+            selectedDb.toLowerCase().includes("duckdb") ||
+            selectedDb.toLowerCase() === "hep"
+          ) {
+            // Special case for this database
             dbType = "duckdb";
-            console.log("Using DuckDB SQL dialect for database:", selectedDb);
-          } else if (selectedDb.toLowerCase().includes('click')) {
+          } else if (selectedDb.toLowerCase().includes("click")) {
             dbType = "clickhouse";
-          } else if (selectedDb.toLowerCase().includes('postgres') || selectedDb.toLowerCase().includes('pg')) {
+          } else if (
+            selectedDb.toLowerCase().includes("postgres") ||
+            selectedDb.toLowerCase().includes("pg")
+          ) {
             dbType = "postgres";
           }
-          
+
           // Generate SQL for the time filter
           if (dbType === "duckdb") {
             // Format the query with correct DuckDB syntax - DuckDB requires specific spacing and syntax
             const timeRangeAmount = getTimeRangeAmount(timeRange.from);
             const timeRangeUnit = getTimeRangeUnit(timeRange.from);
-            
+
             // Get field data type from schema if available to determine how to handle the time
             let fieldDataType = "unknown";
-            const columns = getColumnsForTable(selectedTable || extractTableName(queryToExecute) || '');
+            const columns = getColumnsForTable(
+              selectedTable || extractTableName(queryToExecute) || ""
+            );
             if (columns) {
-              const fieldInfo = columns.find(col => col.columnName === selectedTimeField);
+              const fieldInfo = columns.find(
+                (col) => col.columnName === selectedTimeField
+              );
               if (fieldInfo) {
                 fieldDataType = fieldInfo.dataType.toLowerCase();
-                console.log(`Time field '${selectedTimeField}' has type: ${fieldDataType}`);
               }
             }
-            
+
             // Check if this field stores timestamps in milliseconds or seconds
-            const isMillisTimestamp = fieldDataType.includes('bigint') || 
-                                    selectedTimeField.toLowerCase() === 'create_date' || 
-                                    selectedTimeField.toLowerCase() === '__timestamp';
-                                    
-            const isDateTimeField = fieldDataType.includes('timestamp') || 
-                                   fieldDataType.includes('date') || 
-                                   fieldDataType.includes('time');
-            
+            const isMillisTimestamp =
+              fieldDataType.includes("bigint") ||
+              selectedTimeField.toLowerCase() === "create_date" ||
+              selectedTimeField.toLowerCase() === "__timestamp";
+
+            const isDateTimeField =
+              fieldDataType.includes("timestamp") ||
+              fieldDataType.includes("date") ||
+              fieldDataType.includes("time");
+
             // Generate appropriate SQL based on field type
             if (isMillisTimestamp) {
               // For millisecond timestamps stored as BIGINT (e.g., create_date, __timestamp)
-              queryToExecute = queryToExecute.replace(/\$__timeFilter/g, 
+              queryToExecute = queryToExecute.replace(
+                /\$__timeFilter/g,
                 `${selectedTimeField} >= (EXTRACT(EPOCH FROM now() - INTERVAL ${timeRangeAmount} ${timeRangeUnit}) * 1000)::BIGINT AND ` +
-                `${selectedTimeField} <= (EXTRACT(EPOCH FROM now()) * 1000)::BIGINT`);
-                
-              queryToExecute = queryToExecute.replace(/\$__timeFrom/g, 
-                `(EXTRACT(EPOCH FROM now() - INTERVAL ${timeRangeAmount} ${timeRangeUnit}) * 1000)::BIGINT`);
-                
-              queryToExecute = queryToExecute.replace(/\$__timeTo/g, 
-                `(EXTRACT(EPOCH FROM now()) * 1000)::BIGINT`);
-            } 
-            else if (isDateTimeField) {
+                  `${selectedTimeField} <= (EXTRACT(EPOCH FROM now()) * 1000)::BIGINT`
+              );
+
+              queryToExecute = queryToExecute.replace(
+                /\$__timeFrom/g,
+                `(EXTRACT(EPOCH FROM now() - INTERVAL ${timeRangeAmount} ${timeRangeUnit}) * 1000)::BIGINT`
+              );
+
+              queryToExecute = queryToExecute.replace(
+                /\$__timeTo/g,
+                `(EXTRACT(EPOCH FROM now()) * 1000)::BIGINT`
+              );
+            } else if (isDateTimeField) {
               // For proper date/time fields in DuckDB
-              queryToExecute = queryToExecute.replace(/\$__timeFilter/g, 
+              queryToExecute = queryToExecute.replace(
+                /\$__timeFilter/g,
                 `${selectedTimeField} >= now() - INTERVAL ${timeRangeAmount} ${timeRangeUnit} AND ` +
-                `${selectedTimeField} <= now()`);
-                
-              queryToExecute = queryToExecute.replace(/\$__timeFrom/g, `now() - INTERVAL ${timeRangeAmount} ${timeRangeUnit}`);
+                  `${selectedTimeField} <= now()`
+              );
+
+              queryToExecute = queryToExecute.replace(
+                /\$__timeFrom/g,
+                `now() - INTERVAL ${timeRangeAmount} ${timeRangeUnit}`
+              );
               queryToExecute = queryToExecute.replace(/\$__timeTo/g, `now()`);
-            }
-            else {
+            } else {
               // Default case for fields we're not sure about - assume epoch milliseconds
-              queryToExecute = queryToExecute.replace(/\$__timeFilter/g, 
+              queryToExecute = queryToExecute.replace(
+                /\$__timeFilter/g,
                 `${selectedTimeField} >= (EXTRACT(EPOCH FROM now() - INTERVAL ${timeRangeAmount} ${timeRangeUnit}) * 1000)::BIGINT AND ` +
-                `${selectedTimeField} <= (EXTRACT(EPOCH FROM now()) * 1000)::BIGINT`);
-                
-              queryToExecute = queryToExecute.replace(/\$__timeFrom/g, 
-                `(EXTRACT(EPOCH FROM now() - INTERVAL ${timeRangeAmount} ${timeRangeUnit}) * 1000)::BIGINT`);
-                
-              queryToExecute = queryToExecute.replace(/\$__timeTo/g, 
-                `(EXTRACT(EPOCH FROM now()) * 1000)::BIGINT`);
+                  `${selectedTimeField} <= (EXTRACT(EPOCH FROM now()) * 1000)::BIGINT`
+              );
+
+              queryToExecute = queryToExecute.replace(
+                /\$__timeFrom/g,
+                `(EXTRACT(EPOCH FROM now() - INTERVAL ${timeRangeAmount} ${timeRangeUnit}) * 1000)::BIGINT`
+              );
+
+              queryToExecute = queryToExecute.replace(
+                /\$__timeTo/g,
+                `(EXTRACT(EPOCH FROM now()) * 1000)::BIGINT`
+              );
             }
-            
-            queryToExecute = queryToExecute.replace(/\$__timeField/g, selectedTimeField);
+
+            queryToExecute = queryToExecute.replace(
+              /\$__timeField/g,
+              selectedTimeField
+            );
           } else {
             // Use the complex logic for other database types
             let timeFilterSql = "";
-            
+
             // Initialize epoch conversion function and multiplier variables
             let epochFunction = "CAST(EXTRACT(EPOCH FROM ";
             let epochMultiplier = "* 1000"; // Default to milliseconds
-            
+
             // Check if field is 'create_date' which we know is a BIGINT in milliseconds
-            const isCreateDateField = selectedTimeField.toLowerCase() === 'create_date';
-            
+            const isCreateDateField =
+              selectedTimeField.toLowerCase() === "create_date";
+
             // Override for create_date which we know is milliseconds
             if (isCreateDateField) {
               epochFunction = "CAST(EXTRACT(EPOCH FROM ";
@@ -716,7 +927,7 @@ export function QueryProvider({ children }: { children: ReactNode }) {
               epochFunction = "toUnixTimestamp64Nano";
               epochMultiplier = "";
             } else if (dbType === "postgres") {
-              // PostgreSQL 
+              // PostgreSQL
               epochFunction = "CAST(EXTRACT(EPOCH FROM ";
               epochMultiplier = "* 1000000000)::BIGINT"; // Convert to nanoseconds
             } else if (dbType === "influx") {
@@ -728,36 +939,54 @@ export function QueryProvider({ children }: { children: ReactNode }) {
               epochFunction = "CAST(EXTRACT(EPOCH FROM ";
               epochMultiplier = "* 1000)"; // Convert to milliseconds
             }
-            
+
             // Process time range and build SQL conditions
             if (timeRange.from.startsWith("now-")) {
               const match = timeRange.from.match(/^now-(\d+)([mhdwMy])$/);
               if (match) {
                 const [, amount, unit] = match;
                 let interval = "";
-                
+
                 switch (unit) {
-                  case "m": interval = `${amount} minute`; break;
-                  case "h": interval = `${amount} hour`; break;
-                  case "d": interval = `${amount} day`; break;
-                  case "w": interval = `${amount} week`; break;
-                  case "M": interval = `${amount} month`; break;
-                  case "y": interval = `${amount} year`; break;
+                  case "m":
+                    interval = `${amount} minute`;
+                    break;
+                  case "h":
+                    interval = `${amount} hour`;
+                    break;
+                  case "d":
+                    interval = `${amount} day`;
+                    break;
+                  case "w":
+                    interval = `${amount} week`;
+                    break;
+                  case "M":
+                    interval = `${amount} month`;
+                    break;
+                  case "y":
+                    interval = `${amount} year`;
+                    break;
                 }
-                
+
                 timeFilterSql = `${selectedTimeField} >= ${epochFunction}now() - interval '${interval}') ${epochMultiplier}`;
               }
             }
-            
+
             // Replace variables in query
-            if (timeFilterSql && typeof queryToExecute === 'string') {
-              queryToExecute = queryToExecute.replace(/\$__timeFilter/g, timeFilterSql);
+            if (timeFilterSql && typeof queryToExecute === "string") {
+              queryToExecute = queryToExecute.replace(
+                /\$__timeFilter/g,
+                timeFilterSql
+              );
             }
-            
-            if (typeof queryToExecute === 'string') {
-              queryToExecute = queryToExecute.replace(/\$__timeField/g, selectedTimeField);
+
+            if (typeof queryToExecute === "string") {
+              queryToExecute = queryToExecute.replace(
+                /\$__timeField/g,
+                selectedTimeField
+              );
             }
-            
+
             // Handle $__timeFrom
             let timeFromSql = "";
             if (timeRange.from.startsWith("now-")) {
@@ -765,61 +994,92 @@ export function QueryProvider({ children }: { children: ReactNode }) {
               if (match) {
                 const [, amount, unit] = match;
                 let interval = "";
-                
+
                 switch (unit) {
-                  case "m": interval = `${amount} minute`; break;
-                  case "h": interval = `${amount} hour`; break;
-                  case "d": interval = `${amount} day`; break;
-                  case "w": interval = `${amount} week`; break;
-                  case "M": interval = `${amount} month`; break;
-                  case "y": interval = `${amount} year`; break;
+                  case "m":
+                    interval = `${amount} minute`;
+                    break;
+                  case "h":
+                    interval = `${amount} hour`;
+                    break;
+                  case "d":
+                    interval = `${amount} day`;
+                    break;
+                  case "w":
+                    interval = `${amount} week`;
+                    break;
+                  case "M":
+                    interval = `${amount} month`;
+                    break;
+                  case "y":
+                    interval = `${amount} year`;
+                    break;
                 }
-                
+
                 timeFromSql = `${epochFunction}now() - interval '${interval}') ${epochMultiplier}`;
               }
             } else if (timeRange.from === "now") {
               timeFromSql = `${epochFunction}now()) ${epochMultiplier}`;
             }
-            
-            if (timeFromSql && typeof queryToExecute === 'string') {
-              queryToExecute = queryToExecute.replace(/\$__timeFrom/g, timeFromSql);
+
+            if (timeFromSql && typeof queryToExecute === "string") {
+              queryToExecute = queryToExecute.replace(
+                /\$__timeFrom/g,
+                timeFromSql
+              );
             }
-            
+
             // Handle $__timeTo
             let timeToSql = "";
             if (timeRange.to === "now") {
               timeToSql = `${epochFunction}now()) ${epochMultiplier}`;
             }
-            
-            if (timeToSql && typeof queryToExecute === 'string') {
+
+            if (timeToSql && typeof queryToExecute === "string") {
               queryToExecute = queryToExecute.replace(/\$__timeTo/g, timeToSql);
             }
           }
-          
-          console.log("Query with variables replaced:", queryToExecute);
         }
       }
 
       const response = await axios.post(
-        `${apiUrl}?db=${encodeURIComponent(selectedDb)}`,
-        { query: queryToExecute }
+        `${apiUrl}?db=${encodeURIComponent(selectedDb)}&format=${format}`,
+        { query: queryToExecute },
+        { responseType: format === "ndjson" ? "text" : "json" }
       );
 
-      const responseSize = JSON.stringify(response.data).length;
-      setResponseSize(responseSize);
-
-      if (response.data && response.data.results) {
+      let parsedResults = [];
+      if (format === "ndjson") {
+        // Parse NDJSON: split by newlines, parse each line as JSON
+        parsedResults = response.data
+          .split(/\r?\n/)
+          .filter((line: string) => line.trim().length > 0)
+          .map((line: string) => {
+            try {
+              return JSON.parse(line);
+            } catch {
+              return null;
+            }
+          })
+          .filter(Boolean);
         setRawJson(response.data);
-        setResults(response.data.results);
+        setResults(parsedResults);
       } else {
         setRawJson(response.data);
-        setResults([]);
+        setResults(
+          response.data && response.data.results ? response.data.results : []
+        );
       }
-      
+      const responseSize =
+        typeof response.data === "string"
+          ? response.data.length
+          : JSON.stringify(response.data).length;
+      setResponseSize(responseSize);
+
       // Calculate execution time
       const executionTimeMs = Date.now() - (startTime || Date.now());
       setExecutionTime(executionTimeMs);
-      
+
       // Add successful query to history
       addToQueryHistory({
         query: queryToExecute,
@@ -829,26 +1089,27 @@ export function QueryProvider({ children }: { children: ReactNode }) {
         timeRange: timeRange.enabled !== false ? timeRange : null,
         success: true,
         executionTime: executionTimeMs,
-        rowCount: response.data.results?.length || 0
+        rowCount: parsedResults.length || response.data.results?.length || 0,
       });
-      
+
       // Also save the query to localStorage for persistence
       localStorage.setItem("lastQuery", query);
     } catch (err: any) {
       console.error("Query execution error:", err);
-      const errorMessage = err.response?.data?.error ||
+      const errorMessage =
+        err.response?.data?.error ||
         err.response?.data?.message ||
         err.message ||
         "Error executing query";
-      
+
       setError(errorMessage);
       setResults(null);
       setRawJson(null);
-      
+
       // Calculate execution time for the failed query
       const executionTimeMs = Date.now() - (startTime || Date.now());
       setExecutionTime(executionTimeMs);
-      
+
       // Record the failed query in history
       addToQueryHistory({
         query,
@@ -858,7 +1119,7 @@ export function QueryProvider({ children }: { children: ReactNode }) {
         timeRange: timeRange.enabled !== false ? timeRange : null,
         success: false,
         error: errorMessage,
-        executionTime: executionTimeMs
+        executionTime: executionTimeMs,
       });
     } finally {
       setIsLoading(false);
@@ -871,6 +1132,7 @@ export function QueryProvider({ children }: { children: ReactNode }) {
     timeRange,
     selectedTimeField,
     queryBuilderEnabled,
+    format,
   ]);
 
   // Clear query
@@ -885,48 +1147,61 @@ export function QueryProvider({ children }: { children: ReactNode }) {
     // Clear localStorage query parameter
     localStorage.removeItem("lastQuery");
   }, []);
-  
+
   // Query history methods
   const saveQueryHistory = useCallback((history: QueryHistoryEntry[]) => {
     try {
-      localStorage.setItem(QUERY_HISTORY_KEY, JSON.stringify(history.slice(0, 50))); // Keep only last 50 entries
+      localStorage.setItem(
+        QUERY_HISTORY_KEY,
+        JSON.stringify(history.slice(0, 50))
+      ); // Keep only last 50 entries
     } catch (e) {
       console.error("Failed to save query history", e);
     }
   }, []);
-  
-  const addToQueryHistory = useCallback((entry: Omit<QueryHistoryEntry, 'id' | 'timestamp'>) => {
-    const newEntry: QueryHistoryEntry = {
-      ...entry,
-      id: crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(),
-      timestamp: new Date().toISOString()
-    };
-    
-    setQueryHistory(prev => {
-      const newHistory = [newEntry, ...prev].slice(0, 50); // Limit history to 50 entries
-      saveQueryHistory(newHistory);
-      return newHistory;
-    });
-  }, [saveQueryHistory]);
-  
+
+  const addToQueryHistory = useCallback(
+    (entry: Omit<QueryHistoryEntry, "id" | "timestamp">) => {
+      const newEntry: QueryHistoryEntry = {
+        ...entry,
+        id: crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(),
+        timestamp: new Date().toISOString(),
+      };
+
+      setQueryHistory((prev) => {
+        const newHistory = [newEntry, ...prev].slice(0, 50); // Limit history to 50 entries
+        saveQueryHistory(newHistory);
+        return newHistory;
+      });
+    },
+    [saveQueryHistory]
+  );
+
   const clearQueryHistory = useCallback(() => {
     setQueryHistory([]);
     localStorage.removeItem(QUERY_HISTORY_KEY);
   }, []);
-  
-  const getShareableUrlForQuery = useCallback((queryText: string) => {
-    // Create hash params from current state
-    const params = {
-      query: queryText,
-      db: selectedDb,
-      table: selectedTable || undefined,
-      timeField: selectedTimeField || undefined,
-      timeFrom: timeRange?.from,
-      timeTo: timeRange?.to
-    };
-    
-    return HashQueryUtils.generateShareableUrl(params);
-  }, [selectedDb, selectedTable, selectedTimeField, timeRange]);
+
+  const getShareableUrlForQuery = useCallback(
+    (queryText: string) => {
+      // Create hash params from current state
+      const params = {
+        query: queryText,
+        db: selectedDb,
+        table: selectedTable || undefined,
+        timeField: selectedTimeField || undefined,
+        timeFrom: timeRange?.from,
+        timeTo: timeRange?.to,
+      };
+
+      return HashQueryUtils.generateShareableUrl(params);
+    },
+    [selectedDb, selectedTable, selectedTimeField, timeRange]
+  );
+
+  useEffect(() => {
+    localStorage.setItem("queryFormat", format);
+  }, [format]);
 
   return (
     <QueryContext.Provider
@@ -967,7 +1242,9 @@ export function QueryProvider({ children }: { children: ReactNode }) {
         queryHistory,
         addToQueryHistory,
         clearQueryHistory,
-        getShareableUrlForQuery
+        getShareableUrlForQuery,
+        format,
+        setFormat,
       }}
     >
       {children}
@@ -1001,13 +1278,20 @@ function getTimeRangeUnit(timeRangeStr: string): string {
     if (match) {
       const unit = match[2];
       switch (unit) {
-        case "m": return "MINUTE";
-        case "h": return "HOUR";
-        case "d": return "DAY";
-        case "w": return "WEEK";
-        case "M": return "MONTH";
-        case "y": return "YEAR";
-        default: return "MINUTE";
+        case "m":
+          return "MINUTE";
+        case "h":
+          return "HOUR";
+        case "d":
+          return "DAY";
+        case "w":
+          return "WEEK";
+        case "M":
+          return "MONTH";
+        case "y":
+          return "YEAR";
+        default:
+          return "MINUTE";
       }
     }
   }

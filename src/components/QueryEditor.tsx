@@ -11,9 +11,8 @@ import {
   ListFilter,
   ArrowDownUp,
   BarChart4,
-  Scissors,
-  Undo,
   Database,
+  Eraser,
 } from "lucide-react";
 import { useTheme } from "./theme-provider";
 import { Skeleton } from "./ui/skeleton";
@@ -152,7 +151,6 @@ export default function QueryEditor() {
 
   // Handle time field selection
   const handleTimeFieldChange = (value: string) => {
-    console.log("Time field changed to:", value);
     if (value === "_NONE_") {
       setSelectedTimeField(null);
 
@@ -184,8 +182,6 @@ export default function QueryEditor() {
 
   // Handle time range changes from TimeRangeSelector
   const handleTimeRangeChange = (newTimeRange: any) => {
-    console.log("Time range changed:", newTimeRange);
-
     // If the user disables time filtering from the TimeRangeSelector,
     // also clear the selected time field
     if (newTimeRange.enabled === false) {
@@ -207,7 +203,6 @@ export default function QueryEditor() {
   ) => {
     // Check if query builder is enabled
     if (!queryBuilderEnabled) {
-      console.log("Query builder is disabled, not applying time filter");
       return;
     }
 
@@ -297,95 +292,72 @@ export default function QueryEditor() {
     }
   };
 
-  // Auto-generate or update query when database, table, or time field changes
+  // Real-time sync: update query in editor whenever builder controls change
   useEffect(() => {
-    // Only update query if query builder is enabled and editor is ready
     if (!queryBuilderEnabled || !editorRef.current) return;
 
     // Get current query from editor
     const currentQuery = editorRef.current.getValue();
 
-    // Case 1: Empty query or basic SELECT - completely regenerate with selected table
-    if (
-      selectedTable &&
-      selectedDb &&
-      (!currentQuery.trim() ||
-        currentQuery.trim().toUpperCase() === "SELECT * FROM" ||
-        currentQuery.trim().toUpperCase() === "SELECT")
-    ) {
-      console.log("Auto-generating query for table:", selectedTable);
-      const newQuery = `SELECT * FROM ${selectedTable}`;
+    // If no table selected, do nothing
+    if (!selectedTable || !selectedDb) return;
 
-      // Update the editor content
+    // If query is empty or basic, generate new query
+    if (
+      !currentQuery.trim() ||
+      currentQuery.trim().toUpperCase() === "SELECT * FROM" ||
+      currentQuery.trim().toUpperCase() === "SELECT"
+    ) {
+      let newQuery = `SELECT * FROM ${selectedTable}`;
       editorRef.current.setValue(newQuery);
       setQuery(newQuery);
-
-      // If we have a time field selected, add time filter with small delay
       if (selectedTimeField) {
-        setTimeout(() => {
-          updateEditorQueryWithTimeFilter(selectedTimeField);
-        }, 100);
+        setTimeout(
+          () => updateEditorQueryWithTimeFilter(selectedTimeField),
+          100
+        );
       }
       return;
     }
 
-    // Case 2: Table changed but query exists - try to update the FROM clause
-    if (
-      selectedTable &&
-      selectedDb &&
-      currentQuery.trim() &&
-      editorRef.current
-    ) {
-      // Check if the current query contains the selected table
-      if (!currentQuery.toLowerCase().includes(selectedTable.toLowerCase())) {
-        // Try to update the FROM clause if it exists
-        const fromMatch = /\bFROM\s+(\w+)/i.exec(currentQuery);
-        if (fromMatch) {
-          const oldTable = fromMatch[1];
-          // Only replace if old table is different from current selection
-          if (oldTable.toLowerCase() !== selectedTable.toLowerCase()) {
-            const newQuery = currentQuery.replace(
-              new RegExp(`\\bFROM\\s+${oldTable}\\b`, "i"),
-              `FROM ${selectedTable}`
-            );
-
-            if (newQuery !== currentQuery) {
-              console.log(
-                `Updating query FROM clause: ${oldTable} -> ${selectedTable}`
-              );
-              editorRef.current.setValue(newQuery);
-              setQuery(newQuery);
-            }
-          }
+    // If table changed, update FROM clause
+    if (!currentQuery.toLowerCase().includes(selectedTable.toLowerCase())) {
+      const fromMatch = /\bFROM\s+(\w+)/i.exec(currentQuery);
+      if (fromMatch) {
+        const oldTable = fromMatch[1];
+        if (oldTable.toLowerCase() !== selectedTable.toLowerCase()) {
+          let newQuery = currentQuery.replace(
+            new RegExp(`\\bFROM\\s+${oldTable}\\b`, "i"),
+            `FROM ${selectedTable}`
+          );
+          editorRef.current.setValue(newQuery);
+          setQuery(newQuery);
+          return;
         }
       }
     }
 
-    // Case 3: Time field selected or changed - update/add time filter
-    if (selectedTimeField && selectedDb && selectedTable) {
-      // Check if we need to add/update time filter
-      if (!currentQuery.includes("$__timeFilter")) {
-        updateEditorQueryWithTimeFilter(selectedTimeField);
-      }
+    // If time field changed, update/add/remove time filter
+    if (selectedTimeField && !currentQuery.includes("$__timeFilter")) {
+      updateEditorQueryWithTimeFilter(selectedTimeField);
+      return;
     }
-  }, [selectedTable, selectedDb, queryBuilderEnabled, selectedTimeField]);
+    if (!selectedTimeField && currentQuery.includes("$__timeFilter")) {
+      updateEditorQueryWithoutTimeFilter();
+      return;
+    }
 
-  // Listen for time range changes and update query if needed
-  useEffect(() => {
-    if (
-      queryBuilderEnabled &&
-      selectedTimeField &&
-      timeRange &&
-      timeRange.enabled !== false &&
-      editorRef.current
-    ) {
-      const currentQuery = editorRef.current.getValue();
-      if (currentQuery && !currentQuery.includes("$__timeFilter")) {
-        // Add time filter if not present
-        updateEditorQueryWithTimeFilter(selectedTimeField, timeRange);
-      }
+    // If time range changes and time filter is present, update query
+    if (selectedTimeField && currentQuery.includes("$__timeFilter")) {
+      updateEditorQueryWithTimeFilter(selectedTimeField, timeRange);
     }
-  }, [timeRange, queryBuilderEnabled, selectedTimeField]);
+  }, [
+    selectedTable,
+    selectedDb,
+    selectedTimeField,
+    timeRange,
+    queryBuilderEnabled,
+  ]);
 
   // Setup keyboard shortcut
   const setupKeyboardShortcut = useCallback(() => {
@@ -665,7 +637,6 @@ export default function QueryEditor() {
   useEffect(() => {
     // If query builder is disabled, remove any time filters from the query
     if (!queryBuilderEnabled && editorRef.current) {
-      console.log("Query builder disabled, removing time filters");
       updateEditorQueryWithoutTimeFilter();
     }
   }, [queryBuilderEnabled]);
@@ -751,33 +722,11 @@ export default function QueryEditor() {
                         }
                       }}
                     >
-                      <Scissors className="h-3.5 w-3.5" />
+                      <Eraser className="h-3.5 w-3.5" />
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent side="bottom">
                     <p className="text-xs">Clear query</p>
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-8 w-8 p-0"
-                      onClick={() => {
-                        if (editorRef.current && monacoRef.current) {
-                          editorRef.current.trigger("", "undo", {});
-                        }
-                      }}
-                    >
-                      <Undo className="h-3.5 w-3.5" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom">
-                    <p className="text-xs">Undo</p>
                   </TooltipContent>
                 </Tooltip>
               </TooltipProvider>

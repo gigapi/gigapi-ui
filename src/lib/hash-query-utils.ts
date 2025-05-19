@@ -56,10 +56,7 @@ class HashQueryUtils {
         const jsonString = decodeURIComponent(atob(hashContent));
         const params = JSON.parse(jsonString);
         return params as HashQueryParams;
-      } catch (firstError) {
-        // Fallback to old URL parameters format for backward compatibility
-        console.log("Hash not in base64 format, trying legacy format");
-        
+      } catch (firstError) {        
         const searchParams = new URLSearchParams(hashContent);
         
         // Extract params using old format

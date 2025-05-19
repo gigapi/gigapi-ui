@@ -30,61 +30,48 @@ import { Badge } from "./ui/badge";
 import { Input } from "./ui/input";
 import { toast } from "sonner";
 
+// Use the same type as in QueryContext
 type HistoryItem = {
+  id: string;
   query: string;
-  database: string;
+  db: string;
+  table: string | null;
   timestamp: string;
+  timeField: string | null;
+  timeRange: any | null;
+  success: boolean;
+  error?: string;
+  executionTime?: number;
+  rowCount?: number;
 };
 
 export default function QueryHistory() {
-  const { setQuery, setSelectedDb } = useQuery();
-  const [history, setHistory] = useState<HistoryItem[]>([]);
+  const { setQuery, setSelectedDb, queryHistory, clearQueryHistory } =
+    useQuery();
+  const [localHistory, setLocalHistory] = useState<HistoryItem[]>([]);
   const [isOpen, setIsOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
 
-  // Load query history on mount and when sheet opens
+  // Load query history from context when sheet opens
   useEffect(() => {
     if (isOpen) {
-      loadQueryHistory();
+      setLocalHistory(queryHistory || []);
     }
-
-    // Set up storage event listener to update history when it changes
-    const handleStorageChange = (e: StorageEvent) => {
-      if (e.key === "queryHistory" && e.newValue) {
-        loadQueryHistory();
-      }
-    };
-
-    window.addEventListener("storage", handleStorageChange);
-    return () => window.removeEventListener("storage", handleStorageChange);
-  }, [isOpen]);
-
-  // Load query history from localStorage
-  function loadQueryHistory() {
-    try {
-      const savedHistory = localStorage.getItem("queryHistory");
-      if (savedHistory) {
-        setHistory(JSON.parse(savedHistory));
-      }
-    } catch (err) {
-      console.error("Failed to load query history", err);
-      toast.error("Failed to load history");
-    }
-  }
+  }, [isOpen, queryHistory]);
 
   // Load a query from history
   function loadQueryFromHistory(item: HistoryItem) {
-    setSelectedDb(item.database);
+    setSelectedDb(item.db);
     setQuery(item.query);
     setIsOpen(false);
     toast.success("Query loaded");
   }
 
-  // Clear all history
+  // Clear all history using context method
   function clearHistory() {
-    localStorage.removeItem("queryHistory");
-    setHistory([]);
+    clearQueryHistory();
+    setLocalHistory([]);
     toast.success("History cleared");
     setConfirmDialogOpen(false);
   }
@@ -131,13 +118,13 @@ export default function QueryHistory() {
   }
 
   // Filter the history based on search term
-  const filteredHistory = history.filter((item) => {
+  const filteredHistory = localHistory.filter((item) => {
     if (!searchTerm) return true;
 
     const searchLower = searchTerm.toLowerCase();
     return (
       item.query.toLowerCase().includes(searchLower) ||
-      item.database.toLowerCase().includes(searchLower)
+      item.db.toLowerCase().includes(searchLower)
     );
   });
 
@@ -175,7 +162,7 @@ export default function QueryHistory() {
               variant="outline"
               size="sm"
               onClick={() => setConfirmDialogOpen(true)}
-              disabled={history.length === 0}
+              disabled={localHistory.length === 0}
               title="Clear history"
               className="text-destructive hover:bg-destructive/10 hover:text-destructive"
             >
@@ -188,7 +175,7 @@ export default function QueryHistory() {
             <div className="space-y-2">
               {filteredHistory.length === 0 && (
                 <div className="text-center py-8 text-muted-foreground">
-                  {history.length === 0 ? (
+                  {localHistory.length === 0 ? (
                     <>
                       <History className="h-8 w-8 mx-auto mb-2 opacity-50" />
                       <p>No query history yet</p>
@@ -207,7 +194,7 @@ export default function QueryHistory() {
 
               {filteredHistory.map((item, index) => (
                 <div
-                  key={index}
+                  key={item.id || index}
                   className="border rounded-md p-2 hover:bg-muted/40 cursor-pointer transition-colors group"
                   onClick={() => loadQueryFromHistory(item)}
                 >
@@ -218,7 +205,7 @@ export default function QueryHistory() {
                         className="h-5 px-1.5 flex items-center gap-1 font-normal bg-primary/5 hover:bg-primary/10 text-xs"
                       >
                         <DbIcon className="h-3 w-3" />
-                        {item.database}
+                        {item.db}
                       </Badge>
                       <span className="text-xs flex items-center gap-1 text-muted-foreground">
                         <Calendar className="h-3 w-3" />

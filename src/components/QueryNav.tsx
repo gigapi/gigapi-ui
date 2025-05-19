@@ -11,6 +11,7 @@ import {
   FilePlus,
   RefreshCw,
   MessageSquareHeart,
+  FileJson2,
 } from "lucide-react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -33,6 +34,14 @@ import QueryHistory from "./QueryHistory";
 import { ModeToggle } from "./mode-toggle";
 import Logo from "../assets/logo.svg";
 import { toast } from "sonner";
+import SettingsContent from "./Settings";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "./ui/dialog";
 
 export default function QueryNav() {
   const {
@@ -46,6 +55,7 @@ export default function QueryNav() {
   const [isEndpointEditing, setIsEndpointEditing] = useState(false);
   const [tempApiUrl, setTempApiUrl] = useState(apiUrl);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   // Update temp URL when apiUrl changes
   useEffect(() => {
@@ -91,8 +101,8 @@ export default function QueryNav() {
       <div className="flex items-center space-x-2 md:space-x-4">
         <div className="flex items-center space-x-2">
           <img src={Logo} alt="GigAPI Logo" className="h-6 w-6 text-primary" />
-          <h1 className="text-lg font-semibold hidden sm:inline-block">
-            GigAPI Query UI
+          <h1 className="text-lg font-semibold hidden sm:inline-block md:hidden">
+            Gigapi Query UI
           </h1>
         </div>
 
@@ -164,7 +174,24 @@ export default function QueryNav() {
         </div>
         <ModeToggle />
 
-        {/* Settings menu for larger screens */}
+        {/* Settings modal trigger for desktop */}
+        <div className="hidden md:block">
+          <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
+            <DialogTrigger asChild>
+              <Button variant="outline" size="icon" title="Settings">
+                <FileJson2 className="h-4 w-4" />
+              </Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Settings</DialogTitle>
+              </DialogHeader>
+              <SettingsContent />
+            </DialogContent>
+          </Dialog>
+        </div>
+
+        {/* Settings in dropdown for smaller screens (existing dropdown menu) */}
         <div className="hidden md:block">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -293,6 +320,21 @@ export default function QueryNav() {
                     <QueryHistory />
                     History
                   </Button>
+                  {/* Settings button for mobile */}
+                  <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
+                    <DialogTrigger asChild>
+                      <Button variant="outline" size="sm" className="flex-1">
+                        <Settings className="h-4 w-4 mr-2" />
+                        Settings
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent>
+                      <DialogHeader>
+                        <DialogTitle>Settings</DialogTitle>
+                      </DialogHeader>
+                      <SettingsContent />
+                    </DialogContent>
+                  </Dialog>
                 </div>
               </div>
             </div>
