@@ -89,7 +89,7 @@ interface QueryContextType {
   setQueryBuilderEnabled: (enabled: boolean) => void;
 
   // Connection state
-  connectionState: "connected" | "connecting" | "error" | "idle";
+  connectionState: "connected" | "connecting" | "error" | "idle" | "empty";
   connectionError: string | null;
 
   // Query history methods
@@ -168,7 +168,7 @@ export function QueryProvider({ children }: { children: ReactNode }) {
 
   // API connection state
   const [connectionState, setConnectionState] = useState<
-    "connected" | "connecting" | "error" | "idle"
+    "connected" | "connecting" | "error" | "idle" | "empty"
   >("idle");
   const [connectionError, setConnectionError] = useState<string | null>(null);
 
@@ -441,11 +441,17 @@ export function QueryProvider({ children }: { children: ReactNode }) {
           };
           localStorage.setItem(CONNECTION_KEY, JSON.stringify(connection));
         } else {
-          setConnectionState("error");
-          setConnectionError(
-            "No databases found. Check API endpoint and format."
-          );
-          toast.warning("No databases found. Check API endpoint and format.");
+          // Change this part to indicate "empty" state instead of error
+          setConnectionState("empty");
+          setConnectionError(null);
+          setDatabases([]);          
+          // Still save connection info
+          const connection = {
+            apiUrl: urlToConnect,
+            selectedDb: "",
+            lastConnected: new Date().toISOString(),
+          };
+          localStorage.setItem(CONNECTION_KEY, JSON.stringify(connection));
         }
       } catch (err: any) {
         console.error("Failed to connect to API:", err);

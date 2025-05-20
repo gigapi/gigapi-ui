@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useLayoutEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   AlertCircle,
   CheckCircle2,
@@ -65,7 +65,7 @@ export default function QueryResults() {
   const renderStartTime = useRef(0);
 
   // Measure render time
-  useLayoutEffect(() => {
+  useEffect(() => {
     if (results && !isLoading) {
       const now = performance.now();
       if (renderStartTime.current > 0) {
