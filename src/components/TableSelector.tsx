@@ -13,7 +13,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "./ui/tooltip";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Input } from "./ui/input";
 
 export default function TableSelector() {
@@ -29,18 +29,28 @@ export default function TableSelector() {
 
   const [searchQuery, setSearchQuery] = useState("");
 
-  // Handle table change
-  const handleTableChange = (value: string) => {
-    if (value === "_NONE_") {
-      setSelectedTable(null);
-    } else {
-      setSelectedTable(value);
+  // Auto-select the first table when available tables change and none is selected
+  useEffect(() => {
+    if (availableTables.length > 0 && !selectedTable) {
+      const firstTable = availableTables[0];
+      setSelectedTable(firstTable);
+      
       // Generate a basic query with the selected table
-      // Only update if the query is empty or doesn't contain the table name
-      if (!query || !query.toLowerCase().includes(value.toLowerCase())) {
-        const newQuery = `SELECT * FROM ${value}`;
+      if (!query || query.trim() === "") {
+        const newQuery = `SELECT * FROM ${firstTable}`;
         setQuery(newQuery);
       }
+    }
+  }, [availableTables, selectedTable, setSelectedTable, query, setQuery]);
+
+  // Handle table change
+  const handleTableChange = (value: string) => {
+    setSelectedTable(value);
+    // Generate a basic query with the selected table
+    // Only update if the query is empty or doesn't contain the table name
+    if (!query || !query.toLowerCase().includes(value.toLowerCase())) {
+      const newQuery = `SELECT * FROM ${value}`;
+      setQuery(newQuery);
     }
   };
 
@@ -71,7 +81,7 @@ export default function TableSelector() {
       </TooltipProvider>
 
       <Select
-        value={selectedTable || "_NONE_"}
+        value={selectedTable || ""}
         onValueChange={handleTableChange}
         disabled={isLoadingSchema}
       >
@@ -92,7 +102,7 @@ export default function TableSelector() {
               Loading tables...
             </div>
           ) : availableTables.length === 0 ? (
-            <SelectItem value="_NONE_" disabled>
+            <SelectItem value="" disabled>
               No tables available
             </SelectItem>
           ) : (
@@ -107,8 +117,6 @@ export default function TableSelector() {
                   />
                 </div>
               )}
-
-              <SelectItem value="_NONE_">None</SelectItem>
 
               {filteredTables.length === 0 ? (
                 <div className="p-2 text-sm text-center text-muted-foreground">

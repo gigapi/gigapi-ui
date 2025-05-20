@@ -155,13 +155,11 @@ export function identifyTimeFieldsForTable(schema: any, dbName: string, tableNam
 // Determine the type of timestamp based on field name and database type
 export function determineTimestampType(
   fieldName: string,
-  dataType: string = "",
-  dbName: string = ""
+  dataType: string = ""
 ): "milliseconds" | "seconds" | "datetime" {
   // Normalize inputs for case-insensitive checks
   const field = fieldName.toLowerCase();
   const type = dataType.toLowerCase();
-  const db = dbName.toLowerCase();
 
   // 1. Check if it's a known timestamp field by name
   if (field === "__timestamp" || field === "create_date") {
@@ -187,7 +185,7 @@ export function determineTimestampType(
   }
 
   // 4. For DuckDB, most bigint timestamp fields are milliseconds
-  if (db.includes("duck") && type.includes("bigint") &&
+  if (type.includes("bigint") &&
     (field.includes("time") || field.includes("date"))) {
     return "milliseconds";
   }
@@ -205,7 +203,6 @@ export function determineTimestampType(
 export function generateTimeFilter(
   timeRange: TimeRange,
   timeField: string,
-  dbType: string = 'duckdb',
   fieldDataType: string = ""
 ): string {
   // Check if time filtering is enabled
@@ -213,21 +210,25 @@ export function generateTimeFilter(
     return '';
   }
 
-  // Normalize database type
-  dbType = dbType.toLowerCase();
-  const isDuckDb = dbType.includes('duck') || dbType === 'duckdb';
-
   // Determine timestamp type
-  const timestampType = determineTimestampType(timeField, fieldDataType, dbType);
+  const timestampType = determineTimestampType(timeField, fieldDataType);
 
   const { from, to } = timeRange;
   let fromSql = '';
   let toSql = '';
 
-  // DuckDB has specific syntax requirements
-  if (isDuckDb) {
+  // Check if we're dealing with absolute dates
+  const isFromAbsolute = isAbsoluteDate(from);
+  const isToAbsolute = isAbsoluteDate(to);
+
+  if (isFromAbsolute) {
+    // Handle absolute from date
+    fromSql = formatDateForSql(from);
+  } else {
+    // Handle relative from time (now-based)
+    // DuckDB syntax
     const fromAmount = getTimeRangeAmount(from);
-    const fromUnit = getTimeRangeUnitForDatabase(from, dbType);
+    const fromUnit = getTimeRangeUnitForDatabase(from);
 
     if (from === 'now') {
       fromSql = 'NOW()';
@@ -238,29 +239,23 @@ export function generateTimeFilter(
       const unit = from.substring(4).toUpperCase();
       fromSql = `DATE_TRUNC('${unit}', NOW())`;
     } else {
-      // Try to parse as absolute datetime
-      try {
-        const date = new Date(from);
-        if (!isNaN(date.getTime())) {
-          // Format as ISO string for SQL
-          fromSql = `'${date.toISOString()}'`;
-        } else {
-          // Fallback
-          fromSql = `NOW() - INTERVAL 24 HOUR`;
-        }
-      } catch (e) {
-        // If parsing fails, use a default
-        fromSql = `NOW() - INTERVAL 24 HOUR`;
-      }
+      // Fallback
+      fromSql = `NOW() - INTERVAL 24 HOUR`;
     }
+  }
 
+  if (isToAbsolute) {
+    // Handle absolute to date
+    toSql = formatDateForSql(to);
+  } else {
+    // Handle relative to time (now-based)
     // To time is usually simpler
     if (to === 'now') {
       toSql = 'NOW()';
     } else {
       // Similar handling for other to time formats
       const toAmount = getTimeRangeAmount(to);
-      const toUnit = getTimeRangeUnitForDatabase(to, dbType);
+      const toUnit = getTimeRangeUnitForDatabase(to);
 
       if (to.startsWith('now-')) {
         toSql = `NOW() - INTERVAL ${toAmount} ${toUnit}`;
@@ -280,121 +275,26 @@ export function generateTimeFilter(
         }
       }
     }
-
-    // Format SQL based on timestamp type for DuckDB
-    if (timestampType === "milliseconds") {
-      return `${timeField} >= (EXTRACT(EPOCH FROM ${fromSql}) * 1000)::BIGINT AND ${timeField} <= (EXTRACT(EPOCH FROM ${toSql}) * 1000)::BIGINT`;
-    } else if (timestampType === "seconds") {
-      return `${timeField} >= EXTRACT(EPOCH FROM ${fromSql})::BIGINT AND ${timeField} <= EXTRACT(EPOCH FROM ${toSql})::BIGINT`;
-    } else {
-      // Datetime fields
-      return `${timeField} >= ${fromSql} AND ${timeField} <= ${toSql}`;
-    }
   }
-  else {
-    // Use standard PostgreSQL-like syntax for other databases
-    // Process the 'from' time value
-    if (from === 'now') {
-      fromSql = 'NOW()';
-    } else if (from.startsWith('now-')) {
-      // Relative time in the past
-      const match = from.match(/^now-(\d+)([mhdwMy])(?:\/([mhdwMy]))?$/);
-      if (match) {
-        const [, amount, unit, snapTo] = match;
-        let interval = '';
 
-        // Convert to SQL interval format
-        switch (unit) {
-          case 'm': interval = `${amount} MINUTE`; break;
-          case 'h': interval = `${amount} HOUR`; break;
-          case 'd': interval = `${amount} DAY`; break;
-          case 'w': interval = `${amount} WEEK`; break;
-          case 'M': interval = `${amount} MONTH`; break;
-          case 'y': interval = `${amount} YEAR`; break;
-        }
-
-        // If snapTo is defined, use truncate/date_trunc function (syntax varies by database)
-        if (snapTo) {
-          fromSql = `DATE_TRUNC('${getSnapUnit(snapTo)}', NOW() - INTERVAL '${interval}')`;
-        } else {
-          fromSql = `NOW() - INTERVAL '${interval}'`;
-        }
-      } else {
-        // Fallback if we can't parse the relative time
-        fromSql = `NOW() - INTERVAL '24 HOUR'`;
-      }
-    } else if (from.startsWith('now/')) {
-      // Time aligned to a boundary
-      const unit = from.substring(4);
-      fromSql = `DATE_TRUNC('${getSnapUnit(unit)}', NOW())`;
-    } else {
-      // Try to parse as absolute datetime
-      try {
-        const date = new Date(from);
-        if (!isNaN(date.getTime())) {
-          // Format as ISO string for SQL
-          fromSql = `'${date.toISOString()}'`;
-        } else {
-          // Fallback
-          fromSql = `NOW() - INTERVAL '24 HOUR'`;
-        }
-      } catch (e) {
-        // If parsing fails, use a default
-        fromSql = `NOW() - INTERVAL '24 HOUR'`;
-      }
-    }
-
-    // Process the 'to' time value using the same logic
-    if (to === 'now') {
-      toSql = 'NOW()';
-    } else if (to.startsWith('now-')) {
-      const match = to.match(/^now-(\d+)([mhdwMy])(?:\/([mhdwMy]))?$/);
-      if (match) {
-        const [, amount, unit, snapTo] = match;
-        let interval = '';
-
-        switch (unit) {
-          case 'm': interval = `${amount} MINUTE`; break;
-          case 'h': interval = `${amount} HOUR`; break;
-          case 'd': interval = `${amount} DAY`; break;
-          case 'w': interval = `${amount} WEEK`; break;
-          case 'M': interval = `${amount} MONTH`; break;
-          case 'y': interval = `${amount} YEAR`; break;
-        }
-
-        if (snapTo) {
-          toSql = `DATE_TRUNC('${getSnapUnit(snapTo)}', NOW() - INTERVAL '${interval}')`;
-        } else {
-          toSql = `NOW() - INTERVAL '${interval}'`;
-        }
-      } else {
-        toSql = 'NOW()';
-      }
-    } else if (to.startsWith('now/')) {
-      const unit = to.substring(4);
-      toSql = `DATE_TRUNC('${getSnapUnit(unit)}', NOW())`;
-    } else {
-      try {
-        const date = new Date(to);
-        if (!isNaN(date.getTime())) {
-          toSql = `'${date.toISOString()}'`;
-        } else {
-          toSql = 'NOW()';
-        }
-      } catch (e) {
-        toSql = 'NOW()';
-      }
-    }
-
-    // Generate SQL based on timestamp type
-    if (timestampType === "milliseconds") {
-      return `${timeField} >= CAST(EXTRACT(EPOCH FROM ${fromSql}) AS BIGINT) * 1000 AND ${timeField} <= CAST(EXTRACT(EPOCH FROM ${toSql}) AS BIGINT) * 1000`;
-    } else if (timestampType === "seconds") {
-      return `${timeField} >= CAST(EXTRACT(EPOCH FROM ${fromSql}) AS BIGINT) AND ${timeField} <= CAST(EXTRACT(EPOCH FROM ${toSql}) AS BIGINT)`;
-    } else {
-      // For datetime fields
-      return `${timeField} >= ${fromSql} AND ${timeField} <= ${toSql}`;
-    }
+  // Format SQL based on timestamp type for DuckDB
+  if (timestampType === "milliseconds") {
+    // For millisecond timestamps, use epoch_ms for now-based expressions
+    // For absolute dates, convert them to milliseconds
+    let fromEpoch = isFromAbsolute ? `epoch_ms(${fromSql})` : `epoch_ms(${fromSql})`;
+    let toEpoch = isToAbsolute ? `epoch_ms(${toSql})` : `epoch_ms(${toSql})`;
+    
+    return `${timeField} >= ${fromEpoch} AND ${timeField} <= ${toEpoch}`;
+  } else if (timestampType === "seconds") {
+    // For second timestamps, use epoch for now-based expressions
+    // For absolute dates, convert them to seconds
+    let fromEpoch = isFromAbsolute ? `epoch(${fromSql})` : `epoch(${fromSql})`;
+    let toEpoch = isToAbsolute ? `epoch(${toSql})` : `epoch(${toSql})`;
+    
+    return `${timeField} >= ${fromEpoch} AND ${timeField} <= ${toEpoch}`;
+  } else {
+    // Datetime fields - use the timestamp directly for comparison
+    return `${timeField} >= ${fromSql} AND ${timeField} <= ${toSql}`;
   }
 }
 
@@ -410,86 +310,31 @@ export function getTimeRangeAmount(timeRangeStr: string): string {
 }
 
 // Convert time unit to database-specific format
-export function getTimeRangeUnitForDatabase(timeRangeStr: string, dbType: string = 'duckdb'): string {
+export function getTimeRangeUnitForDatabase(timeRangeStr: string): string {
   if (timeRangeStr.startsWith("now-")) {
     const match = timeRangeStr.match(/^now-(\d+)([mhdwMy])(?:\/([mhdwMy]))?$/);
     if (match) {
       const unit = match[2];
 
       // DuckDB requires uppercase units
-      if (dbType.toLowerCase().includes('duck')) {
-        switch (unit) {
-          case "m": return "MINUTE";
-          case "h": return "HOUR";
-          case "d": return "DAY";
-          case "w": return "WEEK";
-          case "M": return "MONTH";
-          case "y": return "YEAR";
-          default: return "HOUR";
-        }
-      } else {
-        // PostgreSQL/standard SQL format
-        switch (unit) {
-          case "m": return "minute";
-          case "h": return "hour";
-          case "d": return "day";
-          case "w": return "week";
-          case "M": return "month";
-          case "y": return "year";
-          default: return "hour";
-        }
+      switch (unit) {
+        case "m": return "MINUTE";
+        case "h": return "HOUR";
+        case "d": return "DAY";
+        case "w": return "WEEK";
+        case "M": return "MONTH";
+        case "y": return "YEAR";
+        default: return "HOUR";
       }
     }
   }
 
-  return dbType.toLowerCase().includes('duck') ? "HOUR" : "hour"; // Default
+  return "HOUR"; // Default
 }
 
-// Helper function to convert unit character to SQL date_trunc unit
-function getSnapUnit(unit: string): string {
-  switch (unit) {
-    case 'm': return 'minute';
-    case 'h': return 'hour';
-    case 'd': return 'day';
-    case 'w': return 'week';
-    case 'M': return 'month';
-    case 'y': return 'year';
-    default: return 'hour';
-  }
-}
-
-// Adapt SQL time filter based on database dialect
-export function adaptTimeFilterForDbType(filter: string, dbType: string): string {
-  if (!filter) return '';
-
-  switch (dbType.toLowerCase()) {
-    case 'mysql':
-      // MySQL uses different timestamp functions
-      return filter
-        .replace(/DATE_TRUNC\('(\w+)', ([^)]+)\)/g, 'DATE_FORMAT($2, "%Y-%m-%d %H:%i:%s")')
-        .replace(/EXTRACT\(EPOCH FROM ([^)]+)\)/g, 'UNIX_TIMESTAMP($1)');
-
-    case 'clickhouse':
-      // ClickHouse uses toStartOf functions instead of DATE_TRUNC
-      return filter
-        .replace(/DATE_TRUNC\('day', ([^)]+)\)/g, 'toStartOfDay($1)')
-        .replace(/DATE_TRUNC\('month', ([^)]+)\)/g, 'toStartOfMonth($1)')
-        .replace(/DATE_TRUNC\('year', ([^)]+)\)/g, 'toStartOfYear($1)')
-        .replace(/DATE_TRUNC\('week', ([^)]+)\)/g, 'toMonday($1)')
-        .replace(/EXTRACT\(EPOCH FROM ([^)]+)\)/g, 'toUnixTimestamp($1)');
-
-    case 'influxdb':
-      // InfluxDB has its own time functions
-      return filter
-        .replace(/DATE_TRUNC\('[^']+', ([^)]+)\)/g, '$1')
-        .replace(/NOW\(\)/g, 'now()')
-        .replace(/INTERVAL '(\d+) (\w+)'/g, '-$1$2') // -1h instead of INTERVAL '1 HOUR'
-        .replace(/EXTRACT\(EPOCH FROM ([^)]+)\)/g, '$1');
-
-    default:
-      // Default is PostgreSQL/SQLite compatible syntax
-      return filter;
-  }
+// No longer needed since we only support DuckDB
+export function adaptTimeFilterForDbType(filter: string): string {
+  return filter; // No adaptation needed, already in DuckDB format
 }
 
 // Modify a SQL query to add a time filter if needed
@@ -659,4 +504,30 @@ export function hasTimeFilter(query: string): boolean {
   );
 
   return hasTimeCondition;
+}
+
+// Helper function to check if a string is a valid date or datetime
+export function isAbsoluteDate(dateStr: string): boolean {
+  if (!dateStr || dateStr.startsWith('now')) return false;
+  
+  try {
+    const date = new Date(dateStr);
+    return !isNaN(date.getTime());
+  } catch {
+    return false;
+  }
+}
+
+// Format a date string to ISO format for SQL (YYYY-MM-DD)
+export function formatDateForSql(dateStr: string | Date): string {
+  if (!dateStr) return '';
+  
+  try {
+    const date = dateStr instanceof Date ? dateStr : new Date(dateStr);
+    if (isNaN(date.getTime())) return typeof dateStr === 'string' ? `'${dateStr}'` : '';
+    
+    return `'${date.toISOString()}'`;
+  } catch {
+    return typeof dateStr === 'string' ? `'${dateStr}'` : '';
+  }
 }

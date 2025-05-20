@@ -14,64 +14,70 @@ import AppContent from "@/components/AppContent";
 import { useQuery } from "@/contexts/QueryContext";
 import { Button } from "./components/ui/button";
 import { Input } from "./components/ui/input";
+import { AlertCircle, CheckCircle, Loader2 } from "lucide-react";
 
 // Use package version directly from environment variable
 const VERSION = import.meta.env.PACKAGE_VERSION;
 
 export default function App() {
-  const { isLoading, error, apiUrl, setApiUrl } = useQuery();
+  const { 
+    error, 
+    connectionState,
+    connectionError,
+    apiUrl, 
+    setApiUrl 
+  } = useQuery();
 
-  const [initialLoadComplete, setInitialLoadComplete] = useState(false);
-  const [editableApiUrl, setEditableApiUrl] = useState(apiUrl);
+  const [editableApiUrl, setEditableApiUrl] = useState("");
 
   useEffect(() => {
+    // Initialize editable API URL for the input field
     setEditableApiUrl(apiUrl);
   }, [apiUrl]);
 
-  useEffect(() => {
-    if (!initialLoadComplete && !isLoading) {
-      setInitialLoadComplete(true);
-    }
-  }, [isLoading, initialLoadComplete]);
-
   const handleRetry = () => {
     setApiUrl(editableApiUrl);
-    setInitialLoadComplete(false);
   };
 
-  if (!initialLoadComplete && isLoading) {
+  // Show loading screen during initial connection
+  if (connectionState === 'connecting') {
     return (
       <ThemeProvider defaultTheme="dark" storageKey="gigapi-theme">
         <div className="h-screen flex flex-col items-center justify-center text-muted-foreground">
           <img
             src={Logo}
             alt="GigAPI Logo"
-            className="h-10 w-10 mb-4 animate-pulse"
+            className="h-10 w-10 mb-4"
           />
-          Loading application...
+          <Loader2 className="h-8 w-8 animate-spin text-primary mb-4" />
+          <div className="text-lg font-medium mb-2">Connecting to API...</div>
+          <div className="text-sm text-muted-foreground">Attempting to connect to {apiUrl}</div>
         </div>
         <Toaster />
       </ThemeProvider>
     );
   }
 
-  const isCriticalError =
-    error && !error.toLowerCase().includes("no databases found");
-
-  if (isCriticalError && !initialLoadComplete) {
+  // Show connection error screen
+  if (connectionState === 'error') {
     return (
       <ThemeProvider defaultTheme="dark" storageKey="gigapi-theme">
         <div className="h-screen flex flex-col items-center justify-center p-4 text-center">
           <img src={Logo} alt="GigAPI Logo" className="h-12 w-12 mb-6" />
-          <h1 className="text-2xl font-semibold mb-3 text-destructive">
-            Application Initialization Error
-          </h1>
-          <p className="text-muted-foreground mb-1">
-            An error occurred while trying to connect to the API endpoint:
-          </p>
-          <p className="text-red-500 bg-red-500/10 p-3 rounded-md my-4 text-sm">
-            {error}
-          </p>
+          <div className="flex items-center mb-4 text-destructive">
+            <AlertCircle className="h-6 w-6 mr-2" />
+            <h1 className="text-2xl font-semibold">Connection Error</h1>
+          </div>
+          
+          <div className="mb-6 w-full max-w-md">
+            <p className="text-muted-foreground mb-2">
+              Failed to connect to the API endpoint:
+            </p>
+            <div className="text-destructive bg-destructive/10 p-3 rounded-md my-4 text-sm">
+              {connectionError || error || "Unknown connection error"}
+            </div>
+          </div>
+          
           <div className="w-full max-w-md space-y-3">
             <Input
               type="text"
@@ -122,7 +128,13 @@ export default function App() {
             <span className="sm:hidden">GigAPI Querier</span>
             <span className="text-muted-foreground/70">v{VERSION}</span>
           </div>
-          <div>
+          <div className="flex items-center">
+            {connectionState === 'connected' && (
+              <span className="flex items-center text-green-500 mr-4">
+                <CheckCircle className="h-3 w-3 mr-1" />
+                Connected
+              </span>
+            )}
             <a
               href="https://gigapipe.com"
               className="text-primary hover:underline"

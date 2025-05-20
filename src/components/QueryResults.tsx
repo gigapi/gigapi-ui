@@ -95,7 +95,6 @@ export default function QueryResults() {
   // Update executed query when new query is executed (track by queryHistory changes)
   const prevQueryHistoryLength = useRef(queryHistory.length);
 
-
   useEffect(() => {
     if (
       queryHistory.length > prevQueryHistoryLength.current &&
@@ -257,16 +256,15 @@ export default function QueryResults() {
         <TabsContent value="raw" className="flex-1 overflow-auto min-h-0">
           <ScrollArea className="h-full rounded-md border bg-card">
             <Button
-              variant="outline"
-              className="absolute top-2 right-2"
+              className="absolute top-2 right-2 z-10"
               onClick={() => {
                 navigator.clipboard.writeText(JSON.stringify(rawJson, null, 2));
                 toast.success("Raw data copied to clipboard");
               }}
             >
-              Copy
+              <Copy className="h-4 w-4" />
             </Button>
-            <pre className="p-4 text-sm font-mono text-card-foreground">
+            <pre className="p-4 text-sm font-mono text-card-foreground text-wrap break-words whitespace-pre-wrap">
               {isLoading
                 ? "Loading..."
                 : rawJson
@@ -342,7 +340,7 @@ export default function QueryResults() {
                   <h3 className="text-xs uppercase text-muted-foreground mb-1 font-bold">
                     Executed Query
                   </h3>
-                  <pre className="bg-muted p-3 rounded-md overflow-x-auto">
+                  <pre className="bg-muted p-3 rounded-md overflow-x-auto text-sm break-words whitespace-pre-wrap">
                     {executedQuery || "No query executed yet."}
                   </pre>
                 </div>

@@ -13,12 +13,14 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { InfoIcon } from "lucide-react";
+import { AlertTriangle, InfoIcon } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 
 const SettingsContent: React.FC = () => {
-  const { format, setFormat } = useQuery();
+  const { format, setFormat, formatCompatibility } = useQuery();
 
   return (
     <Card className="border-0 shadow-none bg-transparent">
@@ -51,7 +53,27 @@ const SettingsContent: React.FC = () => {
                   </TooltipContent>
                 </Tooltip>
               </TooltipProvider>
+              
+              {formatCompatibility?.detected && !formatCompatibility?.supportsNdjson && (
+                <Badge 
+                  variant="outline"
+                  className="ml-auto text-xs py-0 px-2 bg-yellow-500/20 border-yellow-500/30 text-yellow-700 dark:text-yellow-400"
+                >
+                  <AlertTriangle className="h-3 w-3 mr-1" />
+                  NDJSON not supported
+                </Badge>
+              )}
             </div>
+            
+            {formatCompatibility?.detected && !formatCompatibility?.supportsNdjson && (
+              <Alert variant="warning" className="py-2 bg-yellow-500/10 border-yellow-500/30 text-yellow-700 dark:text-yellow-400 mb-2">
+                <AlertDescription className="text-xs">
+                  Your API appears to only support JSON format, not NDJSON. 
+                  Consider upgrading to a newer version of the GigaPI engine that supports the more efficient NDJSON format.
+                </AlertDescription>
+              </Alert>
+            )}
+            
             <Select
               value={format}
               onValueChange={(value) => setFormat(value)}
@@ -61,7 +83,12 @@ const SettingsContent: React.FC = () => {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="json">json</SelectItem>
-                <SelectItem value="ndjson">ndjson</SelectItem>
+                <SelectItem value="ndjson" disabled={formatCompatibility?.detected && !formatCompatibility?.supportsNdjson}>
+                  ndjson 
+                  {formatCompatibility?.detected && !formatCompatibility?.supportsNdjson && (
+                    <span className="ml-2 text-red-500 text-xs">not supported</span>
+                  )}
+                </SelectItem>
               </SelectContent>
             </Select>
           </div>

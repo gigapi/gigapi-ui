@@ -136,9 +136,6 @@ export default function QueryEditor() {
     return timeFields;
   }, [selectedDb, selectedTable, schema, timeFields]);
 
-  // Check if we have time fields to show
-  const hasTimeFields = timeFieldOptions.length > 0;
-
   // Detect table name from query
   useEffect(() => {
     if (query) {
@@ -641,6 +638,47 @@ export default function QueryEditor() {
     }
   }, [queryBuilderEnabled]);
 
+  // Add a getter for the time field details
+  const getTimeFieldDetails = useCallback(
+    (fieldName: string) => {
+      if (!selectedDb || !schema[selectedDb] || !selectedTable) return null;
+
+      const tableSchema = schema[selectedDb].find(
+        (table) => table.tableName === selectedTable
+      );
+      if (!tableSchema || !tableSchema.columns) return null;
+
+      return (
+        tableSchema.columns.find((col) => col.columnName === fieldName) || null
+      );
+    },
+    [selectedDb, schema, selectedTable]
+  );
+
+  // Add a new component to render the type badge
+  const renderTimeFieldTypeBadge = (fieldName: string) => {
+    const fieldDetails = getTimeFieldDetails(fieldName);
+    if (!fieldDetails) return null;
+
+    const { dataType, timeUnit } = fieldDetails;
+    const displayType = dataType.toUpperCase();
+    const displayUnit = timeUnit ? ` (${timeUnit})` : "";
+
+    return (
+      <Badge variant="outline" className="ml-1 text-xs font-mono">
+        {displayType}
+        {displayUnit}
+      </Badge>
+    );
+  };
+
+  // Add this useEffect to auto-select the first time field
+  useEffect(() => {
+    if (timeFieldOptions.length > 0 && !selectedTimeField) {
+      handleTimeFieldChange(timeFieldOptions[0]);
+    }
+  }, [timeFieldOptions, selectedTimeField]);
+
   return (
     <div className="flex flex-col h-full space-y-2">
       {/* Grafana-like query header with toolbar */}
@@ -820,35 +858,37 @@ export default function QueryEditor() {
             {selectedTable && (
               <>
                 {/* Time Field Selector */}
-                {hasTimeFields && (
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-xs text-muted-foreground">
-                      TIME BY
-                    </span>
-                    <Select
-                      value={selectedTimeField || "_NONE_"}
-                      onValueChange={handleTimeFieldChange}
-                    >
-                      <SelectTrigger className="h-8 w-[180px] text-xs">
-                        <SelectValue placeholder="Select time field">
-                          {selectedTimeField || "No time filter"}
-                        </SelectValue>
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="_NONE_">No time filter</SelectItem>
-                        {timeFieldOptions.map((field) => (
-                          <SelectItem
-                            key={field}
-                            value={field}
-                            className="text-xs"
-                          >
-                            {field}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                )}
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs text-muted-foreground">TIME BY</span>
+                  <Select
+                    value={selectedTimeField || ""}
+                    onValueChange={handleTimeFieldChange}
+                  >
+                    <SelectTrigger className="h-8 w-[180px] text-xs">
+                      <SelectValue placeholder="Select time field">
+                        <div className="flex items-center">
+                          {selectedTimeField || "Select time field"}
+                          {selectedTimeField &&
+                            renderTimeFieldTypeBadge(selectedTimeField)}
+                        </div>
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {timeFieldOptions.map((field) => (
+                        <SelectItem
+                          key={field}
+                          value={field}
+                          className="text-xs"
+                        >
+                          <div className="flex items-center">
+                            <span>{field}</span>
+                            {renderTimeFieldTypeBadge(field)}
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
 
                 {/* Time Range Selector */}
                 {selectedTimeField && (

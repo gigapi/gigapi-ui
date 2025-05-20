@@ -153,6 +153,40 @@ class HashQueryUtils {
       return false;
     }
   }
+  
+  // Helper to clear all URL parameters
+  static clearUrlParameters(): void {
+    // Set empty hash to clear all parameters
+    window.location.hash = '';
+  }
+  
+  // Helper to get URL hash parameters
+  static getHashParams(): any {
+    const hash = window.location.hash.slice(1);
+    if (!hash) return {};
+
+    try {
+      // First try to decode base64 if it's a base64 string
+      if (hash.match(/^[A-Za-z0-9+/=]+$/)) {
+        const decoded = atob(hash);
+        return JSON.parse(decoded);
+      } 
+      // Fall back to query param parsing
+      else {
+        const params: Record<string, string> = {};
+        const urlParams = new URLSearchParams(hash);
+        
+        urlParams.forEach((value, key) => {
+          params[key] = value;
+        });
+        
+        return params;
+      }
+    } catch (e) {
+      console.error('Failed to parse hash parameters:', e);
+      return {};
+    }
+  }
 }
 
 export default HashQueryUtils;
