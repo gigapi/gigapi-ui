@@ -20,20 +20,12 @@ import { Badge } from "./ui/badge";
 import { useQuery } from "../contexts/QueryContext";
 import { toast } from "sonner";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "./ui/select";
-import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
 } from "./ui/tooltip";
 import { Calendar } from "./ui/calendar";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import "./ui/calendar.css";
 
 export interface TimeRange {

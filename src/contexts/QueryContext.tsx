@@ -65,6 +65,7 @@ interface QueryContextType {
   rawJson: any;
   isLoading: boolean;
   error: string | null;
+  queryErrorDetail: string | null;
   executeQuery: () => Promise<void>;
   clearQuery: () => void;
   databases: Database[];
@@ -138,6 +139,7 @@ export function QueryProvider({ children }: { children: ReactNode }) {
   const [rawJson, setRawJson] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [queryErrorDetail, setQueryErrorDetail] = useState<string | null>(null);
 
   // Database and schema state
   const [databases, setDatabases] = useState<Database[]>([]);
@@ -317,7 +319,6 @@ export function QueryProvider({ children }: { children: ReactNode }) {
         // Try with NDJSON format if that's what's configured
         let currentFormat = format;
         let response;
-        let formatDetected = false;
 
         try {
           // Make the request with the current format setting
@@ -332,43 +333,30 @@ export function QueryProvider({ children }: { children: ReactNode }) {
             }
           );
 
-          // Now let's analyze the response format
-          if (currentFormat === "ndjson") {
-            // If we requested NDJSON, but response is not text or empty, it might be a problem
-            if (typeof response.data !== "string" || !response.data.trim()) {
-              console.warn("Unexpected response type for NDJSON request:", typeof response.data);
-            } else {
-              // Check if it looks like a single JSON object rather than NDJSON lines
-              const trimmedData = response.data.trim();
-              const firstChar = trimmedData[0];
-              const lastChar = trimmedData[trimmedData.length - 1];
-              
-              // If it looks like a complete JSON object/array
-              if ((firstChar === "{" && lastChar === "}") || (firstChar === "[" && lastChar === "]")) {
-                try {
-                  // Try to parse the entire response as a single JSON object
-                  const parsedJson = JSON.parse(trimmedData);
-                  
-                  // If we requested NDJSON but got a JSON object with a results array,
-                  // then the API doesn't support NDJSON
-                  if (parsedJson && typeof parsedJson === "object" && parsedJson.results && Array.isArray(parsedJson.results)) {
-                    console.log("API returned JSON with 'results' array when NDJSON was requested - switching to JSON format");
-                    setFormatCompatibility({
-                      supportsNdjson: false,
-                      detected: true,
-                    });
-                    setFormat("json");
-                    currentFormat = "json";
-                    formatDetected = true;
-                    // Use the results array as our database list
-                    response.data = parsedJson;
-                  }
-                } catch (e) {
-                  // If we can't parse it as a single JSON, it might still be valid NDJSON
-                  console.log("Response doesn't parse as a single JSON object, continuing with NDJSON processing");
-                }
-              }
-            }
+          // Check the Content-Type header to determine actual format
+          const contentType = response.headers['content-type']?.toLowerCase() || '';
+          const isNdjsonResponse = contentType.includes('x-ndjson');
+          const isJsonResponse = contentType.includes('json');
+
+          // If we requested NDJSON but got JSON, API doesn't support NDJSON
+          if (currentFormat === "ndjson" && !isNdjsonResponse && isJsonResponse) {
+            console.log("API returned Content-Type: " + contentType + " when NDJSON was requested");
+            setFormatCompatibility({
+              supportsNdjson: false,
+              detected: true,
+            });
+            setFormat("json");
+            currentFormat = "json";
+            toast.warning("Format switched to JSON", {
+              description: "NDJSON format not supported by this API",
+            });
+          }
+          // If we get NDJSON response, confirm support
+          else if (isNdjsonResponse) {
+            setFormatCompatibility({
+              supportsNdjson: true,
+              detected: true,
+            });
           }
         } catch (e) {
           console.error("Error with initial API request:", e);
@@ -391,7 +379,6 @@ export function QueryProvider({ children }: { children: ReactNode }) {
             });
             // Switch format to JSON
             setFormat("json");
-            formatDetected = true;
             toast.warning("Format switched to JSON", {
               description: "NDJSON format not supported by this API",
             });
@@ -405,59 +392,24 @@ export function QueryProvider({ children }: { children: ReactNode }) {
         let dbList: Database[] = [];
         
         // Process based on the determined format
-        if (currentFormat === "ndjson" && !formatDetected) {
-          // Only try to parse as NDJSON if we didn't already detect it as JSON
-          try {
-            // Traditional NDJSON parsing
-            const lines = response.data
-              .split(/\r?\n/)
-              .filter((line: string) => line.trim().length > 0);
-            
-            dbList = lines
-              .map((line: string) => {
-                try {
-                  return JSON.parse(line);
-                } catch (e) {
-                  console.warn("Error parsing NDJSON line:", line);
-                  return null;
-                }
-              })
-              .filter(Boolean);
-            
-            // Successfully parsed NDJSON
-            if (dbList.length > 0) {
-              setFormatCompatibility({
-                supportsNdjson: true,
-                detected: true,
-              });
-            } else {
-              // No valid NDJSON lines found, API might not support NDJSON
-              console.warn("No valid NDJSON lines found in response");
-              
-              // Try to parse the whole response as JSON as a fallback
+        if (currentFormat === "ndjson") {
+          // Process as NDJSON
+          const lines = response.data
+            .split(/\r?\n/)
+            .filter((line: string) => line.trim().length > 0);
+          
+          dbList = lines
+            .map((line: string) => {
               try {
-                const jsonData = JSON.parse(response.data);
-                if (jsonData && jsonData.results && Array.isArray(jsonData.results)) {
-                  dbList = jsonData.results;
-                  setFormatCompatibility({
-                    supportsNdjson: false,
-                    detected: true,
-                  });
-                  setFormat("json");
-                  toast.warning("Format switched to JSON", {
-                    description: "API returned JSON instead of NDJSON format",
-                  });
-                }
+                return JSON.parse(line);
               } catch (e) {
-                console.error("Failed to parse response as JSON fallback:", e);
+                console.warn("Error parsing NDJSON line:", line);
+                return null;
               }
-            }
-          } catch (e) {
-            console.error("Error processing NDJSON response:", e);
-            throw new Error("Failed to process API response");
-          }
+            })
+            .filter(Boolean);
         } else if (response.data && typeof response.data === "object") {
-          // JSON format handling (either detected or requested)
+          // JSON format handling
           if (response.data.results && Array.isArray(response.data.results)) {
             dbList = response.data.results as Database[];
           } else if (Array.isArray(response.data)) {
@@ -1058,6 +1010,7 @@ export function QueryProvider({ children }: { children: ReactNode }) {
 
     setIsLoading(true);
     setError(null);
+    setQueryErrorDetail(null);
     setStartTime(Date.now());
 
     try {
@@ -1144,102 +1097,60 @@ export function QueryProvider({ children }: { children: ReactNode }) {
         { responseType: currentFormat === "ndjson" ? "text" : "json" }
       );
 
-      let parsedResults: QueryResult[] = [];
-      let formatIssueDetected = false;
+      // Check Content-Type header to determine actual response format
+      const contentType = response.headers['content-type']?.toLowerCase() || '';
+      const isNdjsonResponse = contentType.includes('x-ndjson');
+      const isJsonResponse = contentType.includes('json');
 
-      // Process response based on current format setting
-      if (currentFormat === "ndjson") {
-        // Handle NDJSON format (or what should be NDJSON)
-        if (typeof response.data !== "string") {
-          console.warn("Expected string response for NDJSON format but got:", typeof response.data);
-          formatIssueDetected = true;
-        } else {
-          const responseStr = response.data.trim();
-          
-          // Quick check: If it starts with { and ends with }, it might be a single JSON object
-          // rather than proper NDJSON which should be multiple JSON objects on separate lines
-          if ((responseStr.startsWith('{') && responseStr.endsWith('}')) || 
-              (responseStr.startsWith('[') && responseStr.endsWith(']'))) {
-            
-            try {
-              // Try to parse as a single JSON object
-              const jsonObject = JSON.parse(responseStr);
-              
-              // Check if it has a results array - clear indicator of JSON format instead of NDJSON
-              if (jsonObject && typeof jsonObject === 'object' && jsonObject.results) {
-                console.log("Detected JSON with results array when NDJSON was requested");
-                
-                // Update format compatibility and switch format
-                setFormatCompatibility({
-                  supportsNdjson: false,
-                  detected: true
-                });
-                
-                // Switch to JSON format for future requests
-                setFormat("json");
-                toast.warning("Format switched to JSON", {
-                  description: "Your API only supports JSON format, not NDJSON"
-                });
-                
-                // Handle results from the JSON format
-                if (Array.isArray(jsonObject.results)) {
-                  parsedResults = jsonObject.results;
-                  setResults(parsedResults);
-                  setRawJson(jsonObject);
-                  formatIssueDetected = true;
-                }
-              }
-            } catch (e) {
-              // Not a complete JSON object, continue with NDJSON parsing
-              console.log("Response doesn't parse as a single JSON object", e);
-            }
+      // Format compatibility detection based on headers
+      if (currentFormat === "ndjson" && !isNdjsonResponse && isJsonResponse) {
+        console.log(`Detected content type: ${contentType} when NDJSON was requested`);
+        setFormatCompatibility({
+          supportsNdjson: false,
+          detected: true
+        });
+        setFormat("json");
+        toast.warning("Format switched to JSON", {
+          description: "Your API only supports JSON format, not NDJSON"
+        });
+      } else if (isNdjsonResponse && !formatCompatibility.supportsNdjson) {
+        // Update if we previously thought it didn't support NDJSON
+        setFormatCompatibility({
+          supportsNdjson: true,
+          detected: true
+        });
+      }
+
+      let parsedResults: QueryResult[] = [];
+
+      // Process response based on the actual content type received
+      if (isNdjsonResponse) {
+        // Handle true NDJSON response
+        const lines = response.data.split(/\r?\n/).filter((line: string) => line.trim().length > 0);
+        parsedResults = lines.map((line: string) => {
+          try {
+            return JSON.parse(line);
+          } catch (e) {
+            console.warn("Failed to parse NDJSON line:", line);
+            return null;
           }
-          
-          // If we haven't detected a format issue yet, try regular NDJSON parsing
-          if (!formatIssueDetected) {
-            const lines = responseStr.split(/\r?\n/).filter(line => line.trim().length > 0);
-            
-            // Parse each line as a separate JSON object
-            const parsed = lines.map(line => {
-              try {
-                return JSON.parse(line);
-              } catch (e) {
-                console.warn("Failed to parse NDJSON line:", line);
-                return null;
-              }
-            }).filter(Boolean);
-            
-            if (parsed.length > 0) {
-              // Successfully parsed as NDJSON
-              parsedResults = parsed;
-              setResults(parsedResults);
-              setRawJson(response.data);
-              
-              // If we previously thought NDJSON wasn't supported, update our state
-              if (!formatCompatibility.supportsNdjson && formatCompatibility.detected) {
-                setFormatCompatibility({
-                  supportsNdjson: true,
-                  detected: true
-                });
-              }
-            } else {
-              // No valid JSON objects found in lines - this is suspicious for NDJSON
-              throw new Error("No valid JSON objects found in NDJSON response");
-            }
-          }
-        }
-      } else {
-        // Standard JSON handling
+        }).filter(Boolean);
+        
+        setResults(parsedResults);
         setRawJson(response.data);
-        setResults(
-          response.data && Array.isArray(response.data.results)
-            ? response.data.results
-            : []
-        );
-        parsedResults =
-          response.data && Array.isArray(response.data.results)
-            ? response.data.results
-            : [];
+      } else {
+        // Handle JSON response (either because API only supports JSON or we requested JSON)
+        setRawJson(response.data);
+        if (response.data && Array.isArray(response.data.results)) {
+          parsedResults = response.data.results;
+          setResults(parsedResults);
+        } else if (Array.isArray(response.data)) {
+          parsedResults = response.data;
+          setResults(parsedResults);
+        } else {
+          setResults([]);
+          parsedResults = [];
+        }
       }
 
       // Calculate response metrics
@@ -1265,14 +1176,32 @@ export function QueryProvider({ children }: { children: ReactNode }) {
       localStorage.setItem("lastQuery", query); // Save original query
     } catch (err: any) {
       console.error("Query execution error:", err);
-      const errorMessage =
-        err.response?.data?.error ||
-        err.response?.data?.message ||
-        err.message ||
-        "Error executing query";
+      
+      // Extract detailed error information from response
+      let statusCode = err.response?.status;
+      let errorTitle = statusCode ? `Request failed with status code ${statusCode}` : "Error executing query";
+      
+      // Get the detailed error message from the response if available
+      let detailedMessage = null;
+      if (err.response?.data) {
+        if (typeof err.response.data.error === 'string') {
+          detailedMessage = err.response.data.error;
+        } else if (typeof err.response.data.message === 'string') {
+          detailedMessage = err.response.data.message;
+        } else if (typeof err.response.data === 'string') {
+          detailedMessage = err.response.data;
+        }
+      }
+      
+      // Fallback to the error message if no detailed message is available
+      const errorMessage = errorTitle;
       setError(errorMessage);
+      
+      // Set the detailed error message separately
+      setQueryErrorDetail(detailedMessage);
+      
       setResults(null);
-      setRawJson(null);
+      setRawJson(err.response?.data || null);
       const executionTimeMs = Date.now() - (startTime || Date.now());
       setExecutionTime(executionTimeMs);
       addToQueryHistory({
@@ -1282,7 +1211,7 @@ export function QueryProvider({ children }: { children: ReactNode }) {
         timeField: selectedTimeField,
         timeRange: timeRange.enabled !== false ? timeRange : null,
         success: false,
-        error: errorMessage,
+        error: detailedMessage || errorMessage,
         executionTime: executionTimeMs,
       });
 
@@ -1337,6 +1266,7 @@ export function QueryProvider({ children }: { children: ReactNode }) {
     setResults(null);
     setRawJson(null);
     setError(null);
+    setQueryErrorDetail(null);
     setExecutionTime(null);
     setResponseSize(null);
     localStorage.removeItem("lastQuery");
@@ -1484,6 +1414,7 @@ export function QueryProvider({ children }: { children: ReactNode }) {
         rawJson,
         isLoading,
         error,
+        queryErrorDetail,
         executeQuery,
         clearQuery,
         databases,
@@ -1513,10 +1444,10 @@ export function QueryProvider({ children }: { children: ReactNode }) {
         setFormat,
         connectionState,
         connectionError,
-        selectedTimeZone, // Expose selectedTimeZone
-        setSelectedTimeZone: setSelectedTimeZoneState, // Expose setter
-        selectedTimeFieldDetails, // Expose the details
-        formatCompatibility, // Expose format compatibility
+        selectedTimeZone,
+        setSelectedTimeZone: setSelectedTimeZoneState,
+        selectedTimeFieldDetails,
+        formatCompatibility,
       }}
     >
       {children}

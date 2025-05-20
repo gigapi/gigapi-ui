@@ -2,7 +2,6 @@ import { useState, useEffect, useRef, useLayoutEffect } from "react";
 import {
   AlertCircle,
   CheckCircle2,
-  Clock,
   Database,
   Copy,
   Share,
@@ -30,6 +29,7 @@ export default function QueryResults() {
     rawJson,
     isLoading,
     error,
+    queryErrorDetail,
     executionTime,
     responseSize,
     query,
@@ -163,6 +163,66 @@ export default function QueryResults() {
         </div>
       );
     }
+
+    if (error) {
+      // Use queryErrorDetail if available, otherwise fallback to simpler error handling
+      const detailedError = queryErrorDetail || error;
+
+      // Format SQL errors by preserving newlines and formatting code parts
+      const formattedError = detailedError.split("\n").map((line, i) => {
+        // Highlight SQL code snippets that often appear after "LINE X:"
+        if (line.includes("LINE") && line.includes("^")) {
+          const parts = line.split("^");
+          return (
+            <div key={i} className="font-mono">
+              {parts[0]}
+              <span className="text-red-500 font-bold">^</span>
+              {parts[1] || ""}
+            </div>
+          );
+        }
+        // Highlight candidate column names
+        else if (line.includes("Candidate bindings:")) {
+          return (
+            <div key={i} className="font-mono">
+              Candidate bindings:
+              <span className="text-yellow-500 font-semibold">
+                {line.split("Candidate bindings:")[1]}
+              </span>
+            </div>
+          );
+        }
+        // Return normal lines
+        return (
+          <div key={i} className="font-mono">
+            {line}
+          </div>
+        );
+      });
+
+      return (
+        <div className="flex flex-col items-center justify-center h-full w-full max-w-4xl mx-auto">
+          <div className="w-full bg-red-950/30 border border-red-800 rounded-lg p-6 text-left">
+            <div className="flex items-center mb-4">
+              <AlertCircle className="h-6 w-6 text-red-500 mr-3" />
+              <h3 className="text-lg font-semibold text-red-500">
+                Query Error
+              </h3>
+              {error.includes("status code") && (
+                <span className="ml-auto text-sm text-red-400">{error}</span>
+              )}
+            </div>
+
+            <div className="text-sm whitespace-pre-wrap">{formattedError}</div>
+          </div>
+
+          <div className="mt-6 text-center text-muted-foreground">
+            <p>Check your SQL syntax and column names, then try again.</p>
+          </div>
+        </div>
+      );
+    }
+
     if (!results) {
       return (
         <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
@@ -177,15 +237,6 @@ export default function QueryResults() {
           <CheckCircle2 className="h-12 w-12 mb-4 text-green-500" />
           <p className="text-lg">Query executed successfully</p>
           <p className="text-sm mt-2">No results returned</p>
-          {executionTime && (
-            <div className="flex items-center gap-2 mt-4 text-sm text-muted-foreground">
-              <Clock className="h-4 w-4" />
-              <span>
-                Execution time: {formatExecutionTime(executionTime)}
-                {responseSize && ` • ${formatBytes(responseSize)}`}
-              </span>
-            </div>
-          )}
         </div>
       );
     }
@@ -243,8 +294,12 @@ export default function QueryResults() {
 
           {error && !error.includes("databases") && (
             <div className="flex items-center text-red-500 text-sm max-w-[80%] bg-red-500/15 rounded-md p-2 border border-red-500">
-              <AlertCircle className="h-8 w-8 mr-3" />
-              {error}
+              <AlertCircle className="h-4 w-4 mr-2" />
+              <span className="font-medium">
+                {queryErrorDetail ? "SQL Error" : "Query failed"}
+              </span>
+              <span className="mx-2">•</span>
+              <span className="text-xs">See Results tab for details</span>
             </div>
           )}
         </div>
