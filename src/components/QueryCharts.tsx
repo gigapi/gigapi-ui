@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from "react";
+import React, { useMemo, useState, useEffect, useCallback } from "react";
 import { useQuery } from "../contexts/QueryContext";
 import {
   GigChart,
@@ -14,7 +14,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "./ui/select";
-import { Card, CardContent, CardHeader } from "./ui/card";
 import { Tabs, TabsList, TabsTrigger } from "./ui/tabs";
 import {
   Tooltip,
@@ -22,20 +21,23 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "./ui/tooltip";
-import { isDateTimeField, isDateString } from "@/lib/date-utils";
+import { Badge } from "./ui/badge";
+import { formatISO } from "date-fns";
+import { isDateString } from "@/lib/date-utils";
 
 // Define chart type options
-type ChartType = "bar" | "line" | "area";
+type ChartType = "bar" | "line" | "area" | "horizontalBar";
 
 // Type definitions for schema data
 interface ColumnSchema {
   columnName: string;
   dataType: string;
+  timeUnit?: "s" | "ms" | "us" | "ns"; // Time unit for numeric timestamp fields
 }
 
-interface TableSchema {
-  tableName: string;
-  columns: ColumnSchema[];
+// Add a type for grouped data
+interface GroupedData {
+  [groupValue: string]: ProcessedDataItem[];
 }
 
 const Label = ({
@@ -59,12 +61,18 @@ interface ProcessedDataItem {
   [key: string]: any;
 }
 
-// Helper functions for time/date processing
-const isISODateString = (value: string): boolean => {
-  return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(value);
+// Helper function to check if a field name looks like a time field
+const isTimeField = (fieldName: string): boolean => {
+  const lowerField = fieldName.toLowerCase();
+  return (
+    lowerField.includes("time") ||
+    lowerField.includes("date") ||
+    lowerField.includes("timestamp") ||
+    fieldName === "__timestamp"
+  );
 };
 
-// Check if a value is likely a timestamp in various formats
+// Helper function to check if a value is likely a timestamp in various formats
 const isTimestamp = (value: string | number): boolean => {
   const numValue = typeof value === "string" ? Number(value) : value;
   if (isNaN(numValue)) return false;
@@ -78,61 +86,89 @@ const isTimestamp = (value: string | number): boolean => {
   return false;
 };
 
-const normalizeTimestamp = (
-  value: string | number,
-  targetUnit: "ms" | "s" = "ms"
-): number | string => {
-  if (value === null || value === undefined) return value;
+// Helper function to convert timestamp to Date object based on unit
+const convertTimestampToDate = (
+  value: number,
+  timeUnit?: string
+): Date | null => {
+  if (!value || isNaN(value)) return null;
 
-  // If it's already an ISO date string, parse it to timestamp and then normalize
-  if (typeof value === "string") {
-    if (isISODateString(value)) {
-      try {
-        return new Date(value).toISOString();
-      } catch (e) {
-        return value;
-      }
-    }
-  }
-
-  const numValue = typeof value === "string" ? Number(value) : value;
-  if (isNaN(numValue)) return value;
-
-  // Handle different timestamp scales to convert to milliseconds
-  let normalizedValue = numValue;
-
-  // Detect scale and normalize to milliseconds
-  if (numValue > 1e18) {
-    // Nanoseconds (19+ digits)
-    normalizedValue = Math.floor(numValue / 1000000);
-  } else if (numValue > 1e15) {
-    // Microseconds (16+ digits)
-    normalizedValue = Math.floor(numValue / 1000);
-  } else if (numValue < 1e12 && numValue > 1e9) {
-    // Seconds (10-12 digits)
-    normalizedValue = numValue * 1000;
-  }
-
-  // Convert to target unit or ISO string
-  if (targetUnit === "s") {
-    return Math.floor(normalizedValue / 1000);
-  }
-
-  // Try to convert to ISO string for better readability if requested
   try {
-    const date = new Date(normalizedValue);
-    if (!isNaN(date.getTime())) {
-      // Check if year is reasonable before returning date
-      const year = date.getFullYear();
-      if (year > 1970 && year < 2100) {
-        return date.toISOString();
-      }
+    // Handle different timestamp scales
+    if (timeUnit === "ns" || value > 1e18) {
+      // Nanoseconds (19+ digits)
+      return new Date(Math.floor(value / 1000000));
+    } else if (timeUnit === "us" || value > 1e15) {
+      // Microseconds (16+ digits)
+      return new Date(Math.floor(value / 1000));
+    } else if (timeUnit === "ms" || value > 1e12) {
+      // Milliseconds (13+ digits)
+      return new Date(value);
+    } else if (timeUnit === "s" || (value > 1e9 && value < 1e11)) {
+      // Seconds (10 digits)
+      return new Date(value * 1000);
     }
+
+    // If we can't determine the scale but it's reasonably sized:
+    if (value > 946684800000) {
+      // Jan 1, 2000 in milliseconds
+      return new Date(value); // Assume milliseconds
+    } else if (value > 946684800) {
+      // Jan 1, 2000 in seconds
+      return new Date(value * 1000); // Assume seconds
+    }
+
+    return null; // Can't determine proper scale
   } catch (e) {
-    // If conversion fails, just return the normalized value
+    console.warn("Failed to convert timestamp:", value, timeUnit, e);
+    return null;
+  }
+};
+
+// Helper function to get field schema information
+const getFieldSchema = (
+  tableSchema: ColumnSchema[] | null,
+  fieldName: string
+): ColumnSchema | null => {
+  if (!tableSchema) return null;
+  return tableSchema.find((col) => col.columnName === fieldName) || null;
+};
+
+// Helper function to check if a string is an ISO date string
+const isISODateString = (value: string): boolean => {
+  return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(value);
+};
+
+// Add function to extract table name from SQL query
+const extractTableName = (sql: string): string | null => {
+  if (!sql) return null;
+
+  // Common SQL patterns to extract table name
+  const patterns = [
+    /FROM\s+([a-zA-Z0-9_."]+)/i, // Standard FROM clause
+    /JOIN\s+([a-zA-Z0-9_."]+)/i, // JOIN clause
+    /INTO\s+([a-zA-Z0-9_."]+)/i, // INSERT INTO
+    /UPDATE\s+([a-zA-Z0-9_."]+)/i, // UPDATE statement
+    /TABLE\s+([a-zA-Z0-9_."]+)/i, // CREATE/ALTER TABLE
+  ];
+
+  for (const pattern of patterns) {
+    const match = sql.match(pattern);
+    if (match && match[1]) {
+      // Handle quoted identifiers
+      let tableName = match[1].trim();
+      // Remove quotes if present
+      if (
+        (tableName.startsWith('"') && tableName.endsWith('"')) ||
+        (tableName.startsWith("`") && tableName.endsWith("`"))
+      ) {
+        tableName = tableName.substring(1, tableName.length - 1);
+      }
+      return tableName;
+    }
   }
 
-  return normalizedValue;
+  return null;
 };
 
 export default function QueryCharts() {
@@ -141,12 +177,68 @@ export default function QueryCharts() {
     isLoading,
     schema,
     selectedDb,
+    selectedTable,
+    query,
+    getColumnsForTable,
   } = useQuery();
 
   // Chart type selector
   const [chartType, setChartType] = useState<ChartType>("bar");
   const [selectedXAxis, setSelectedXAxis] = useState<string | null>(null);
   const [selectedYAxis, setSelectedYAxis] = useState<string | null>(null);
+  // Add state for group by field
+  const [selectedGroupBy, setSelectedGroupBy] = useState<string | null>(null);
+
+  // Helper function to aggregate data by category for better visualization
+  const aggregateDataByCategory = useCallback(
+    (data: any[], xField: string, yField: string) => {
+      if (!data.length) return data;
+
+      // Group by the X field category
+      const categoryMap: Record<string, { sum: number; count: number }> = {};
+
+      // Aggregate values
+      data.forEach((item) => {
+        const category = String(item[xField] || "undefined");
+        const value =
+          typeof item[yField] === "number"
+            ? item[yField]
+            : typeof item[yField] === "string" && !isNaN(Number(item[yField]))
+            ? Number(item[yField])
+            : 0;
+
+        if (!categoryMap[category]) {
+          categoryMap[category] = { sum: 0, count: 0 };
+        }
+
+        categoryMap[category].sum += value;
+        categoryMap[category].count += 1;
+      });
+
+      // Convert back to an array with averaged values
+      const aggregatedData = Object.entries(categoryMap).map(
+        ([category, stats]) => ({
+          [xField]: category,
+          [yField]: stats.count > 1 ? stats.sum / stats.count : stats.sum,
+          __aggregated: true,
+          __originalCount: stats.count,
+        })
+      );
+
+      // Sort data by the Y value for better visualization
+      return aggregatedData.sort(
+        (a, b) => (b[yField] as number) - (a[yField] as number)
+      );
+    },
+    []
+  );
+
+  // Get the current table schema information
+  const currentTableSchema = useMemo(() => {
+    const tableName = selectedTable || extractTableName(query) || "";
+    if (!tableName) return null;
+    return getColumnsForTable(tableName);
+  }, [selectedTable, query, getColumnsForTable]);
 
   // Helper function to process each row (moved before processedData useMemo)
   const rowProcessor = useMemo(
@@ -156,42 +248,70 @@ export default function QueryCharts() {
         if (!row || typeof row !== "object") return newRow;
         const keys = Object.keys(row);
 
+        // Get column schema information for better timestamp handling
+        const currentTable = selectedTable || extractTableName(query);
+        const tableSchema = currentTable
+          ? schema?.[selectedDb]?.find((t) => t.tableName === currentTable)
+          : null;
+        const columnSchemas = tableSchema?.columns || [];
+
         // Process each field in the row
         keys.forEach((key) => {
           let value = row[key];
+          // Get schema info for this column if available
+          const columnSchema = columnSchemas.find(
+            (col) => col.columnName === key
+          );
+          const isDateTimeType =
+            columnSchema?.timeUnit ||
+            isTimeField(key) ||
+            columnSchema?.dataType?.toLowerCase().includes("time") ||
+            columnSchema?.dataType?.toLowerCase().includes("date");
 
           // Special handling for __timestamp field to ensure proper formatting
-          if (key === "__timestamp") {
+          if (key === "__timestamp" || isDateTimeType) {
             // Handle various timestamp formats
             try {
-              const numValue =
-                typeof value === "string" ? Number(value) : value;
-              if (!isNaN(numValue)) {
-                // Determine timestamp scale and convert accordingly
-                if (numValue > 1e18) {
-                  // Nanoseconds
-                  const dateMs = Math.floor(numValue / 1000000);
-                  newRow[key] = new Date(dateMs).toISOString();
-                } else if (numValue > 1e15) {
-                  // Microseconds
-                  const dateMs = Math.floor(numValue / 1000);
-                  newRow[key] = new Date(dateMs).toISOString();
-                } else if (numValue > 1e12) {
-                  // Milliseconds
-                  newRow[key] = new Date(numValue).toISOString();
-                } else if (numValue > 1e9) {
-                  // Seconds
-                  newRow[key] = new Date(numValue * 1000).toISOString();
-                } else {
-                  newRow[key] = String(value); // Keep as is if scale not determined
+              if (typeof value === "string") {
+                // Try to parse as ISO date string
+                if (value.match(/^\d{4}-\d{2}-\d{2}T/)) {
+                  // ISO format - keep as is
+                  newRow[key] = value;
+                  return;
                 }
-              } else {
-                newRow[key] = String(value);
+
+                // Check if it's a numeric string that could be a timestamp
+                const numValue = Number(value);
+                if (!isNaN(numValue)) {
+                  const dateObj = convertTimestampToDate(
+                    numValue,
+                    columnSchema?.timeUnit
+                  );
+                  if (dateObj) {
+                    newRow[key] = formatISO(dateObj);
+                    return;
+                  }
+                }
               }
+              // Handle numeric timestamps
+              else if (typeof value === "number") {
+                const dateObj = convertTimestampToDate(
+                  value,
+                  columnSchema?.timeUnit
+                );
+                if (dateObj) {
+                  newRow[key] = formatISO(dateObj);
+                  return;
+                }
+              }
+
+              // Fallback: keep as is if we couldn't convert
+              newRow[key] = value;
             } catch (e) {
-              newRow[key] = String(value);
+              console.warn(`Failed to process timestamp field ${key}:`, e);
+              newRow[key] = value;
             }
-            return; // Skip remaining processing for __timestamp
+            return;
           }
 
           // Special handling for temporal field combinations
@@ -199,7 +319,7 @@ export default function QueryCharts() {
             key === "date" &&
             row["hour"] &&
             typeof row["date"] === "string" &&
-            isISODateString(row["date"])
+            row["date"].match(/^\d{4}-\d{2}-\d{2}/)
           ) {
             try {
               // Create a combined datetime field
@@ -209,7 +329,7 @@ export default function QueryCharts() {
                 datePart.setHours(hour);
                 datePart.setMinutes(0);
                 datePart.setSeconds(0);
-                newRow["date_hour"] = datePart.toISOString();
+                newRow["date_hour"] = formatISO(datePart);
               }
             } catch (e) {
               // Failed to combine, use original
@@ -347,7 +467,12 @@ export default function QueryCharts() {
                   key.toLowerCase().includes("date") ||
                   key === "__timestamp")
               ) {
-                value = String(normalizeTimestamp(numValue));
+                const dateObj = convertTimestampToDate(numValue);
+                if (dateObj) {
+                  value = formatISO(dateObj);
+                } else {
+                  value = String(value);
+                }
               }
               // Convert other numeric strings to numbers if they're not IDs or special fields
               else if (
@@ -379,11 +504,11 @@ export default function QueryCharts() {
 
           // Determine if this is a datetime field
           const isDateTime =
-            isDateTimeField(key) ||
+            isDateTimeType ||
             (typeof value === "string" &&
               (isTimestamp(value) ||
                 isDateString(value) ||
-                isISODateString(value)));
+                value.match(/^\d{4}-\d{2}-\d{2}T/)));
 
           if (isDateTime) {
             // Store temporal values as strings for proper handling
@@ -409,7 +534,7 @@ export default function QueryCharts() {
 
         return newRow;
       },
-    []
+    [schema, selectedDb, selectedTable, query]
   );
 
   // 1. Normalize and Process Raw Data
@@ -434,162 +559,191 @@ export default function QueryCharts() {
     return dataToProcess.length > 0 ? dataToProcess.map(rowProcessor) : [];
   }, [rawQueryResults, rowProcessor]);
 
-  // 2. Analyze Data for Field Selection
-  const { allFields, numericFields, categoricalOrTimeFields, dateTimeFields } =
+  // Determine field types using schema information
+  const { allFields, numericFields, categoricalFields, timeFields } =
     useMemo(() => {
       if (!processedData || processedData.length === 0) {
         return {
           allFields: [],
           numericFields: [],
-          categoricalOrTimeFields: [],
-          dateTimeFields: [],
+          categoricalFields: [],
+          timeFields: [],
         };
-      }
-
-      // Get column information from schema if available
-      const columnInfo: Record<string, string> = {};
-      if (schema && selectedDb && schema[selectedDb]) {
-        const tables = schema[selectedDb];
-        tables.forEach((table: TableSchema) => {
-          table.columns?.forEach((col: ColumnSchema) => {
-            const dataType = col.dataType?.toLowerCase() || "";
-            if (dataType) {
-              columnInfo[col.columnName] = dataType;
-            }
-          });
-        });
       }
 
       const firstRow = processedData[0];
       const af = Object.keys(firstRow);
       const nf: string[] = [];
-      const ctf: string[] = [];
-      const dtf: string[] = [];
+      const cf: string[] = [];
+      const tf: string[] = [];
 
-      // Scan multiple rows for better field type detection
-      const sampleSize = Math.min(10, processedData.length);
-      const samples = processedData.slice(0, sampleSize);
+      af.forEach((fieldName) => {
+        // Get schema info if available
+        const fieldSchema = getFieldSchema(currentTableSchema, fieldName);
 
-      af.forEach((key) => {
-        let isField_DateTime = false;
-        let isField_Numeric = false;
-        let isField_Categorical = false;
+        if (fieldSchema) {
+          // Use schema type information
+          const dataType = fieldSchema.dataType.toLowerCase();
 
-        // Check schema information first if available
-        if (columnInfo[key]) {
-          const dataType = columnInfo[key].toLowerCase();
-          // Use schema type hints
+          // Check for time fields first
           if (
-            dataType.includes("time") ||
+            fieldSchema.timeUnit ||
+            dataType.includes("timestamp") ||
             dataType.includes("date") ||
-            dataType.includes("timestamp")
+            dataType.includes("time")
           ) {
-            isField_DateTime = true;
-          } else if (
+            tf.push(fieldName);
+          }
+          // Numeric fields
+          else if (
             dataType.includes("int") ||
             dataType.includes("float") ||
             dataType.includes("double") ||
-            dataType.includes("decimal") ||
-            dataType.includes("number")
+            dataType.includes("numeric") ||
+            dataType.includes("decimal")
           ) {
-            isField_Numeric = true;
-          } else if (
-            dataType.includes("varchar") ||
-            dataType.includes("text") ||
-            dataType.includes("char") ||
-            dataType.includes("string") ||
-            dataType.includes("enum")
-          ) {
-            isField_Categorical = true;
+            nf.push(fieldName);
+          }
+          // All other fields are considered categorical
+          else {
+            cf.push(fieldName);
           }
         }
+        // Fallback to value-based detection if schema not available
+        else {
+          // Check sample values
+          const sampleSize = Math.min(5, processedData.length);
+          let isNumeric = true;
+          let isTime = false;
 
-        // If schema didn't help, check multiple rows to determine field type more accurately
-        if (!isField_DateTime && !isField_Numeric && !isField_Categorical) {
-          for (let i = 0; i < samples.length; i++) {
-            const value = samples[i][key];
+          for (let i = 0; i < sampleSize; i++) {
+            const value = processedData[i][fieldName];
 
-            // Skip null values for detection
+            // Skip null values
             if (value === null || value === undefined) continue;
 
-            // Handle special values (detect JSON strings)
-            const isJsonStr =
-              typeof value === "string" &&
-              value.startsWith("{") &&
-              value.endsWith("}") &&
-              value.includes('"');
-
-            // Skip complex JSON objects that can't be easily graphed
-            if (isJsonStr) continue;
-
-            // Detect date/time fields
-            const isDateTime =
-              isDateTimeField(key) ||
-              key === "date_hour" || // Check for our synthesized datetime field
-              (typeof value === "string" &&
-                (isTimestamp(value) ||
-                  isDateString(value) ||
-                  isISODateString(value)));
-
-            if (isDateTime) {
-              isField_DateTime = true;
+            // Check for time values
+            if (typeof value === "string" && isISODateString(value)) {
+              isTime = true;
+              break;
             }
 
-            // Detect numeric values - including string numbers
-            const isNumeric =
-              typeof value === "number" ||
-              (typeof value === "string" &&
-                !isNaN(Number(value)) &&
-                key !== "call_id" && // Avoid treating IDs as numbers
-                !key.includes("ip") &&
-                !key.toLowerCase().includes("port")); // Skip IP/port fields which may look numeric
-
-            if (isNumeric && !isDateTime) {
-              isField_Numeric = true;
-            }
-
-            // Detect categorical fields
+            // Check for numeric values
             if (
-              !isField_DateTime &&
-              !isField_Numeric &&
-              typeof value === "string" &&
-              value.length < 100
+              typeof value !== "number" &&
+              (typeof value !== "string" || isNaN(Number(value)))
             ) {
-              isField_Categorical = true;
+              isNumeric = false;
             }
           }
-        }
 
-        // Add field to appropriate categories based on detection
-        if (isField_DateTime) {
-          dtf.push(key);
-          ctf.push(key); // Also include in categorical for selection
-          // Don't add datetime fields to numeric fields
-        } else if (isField_Numeric) {
-          nf.push(key);
-        } else if (isField_Categorical) {
-          ctf.push(key);
+          if (isTime) {
+            tf.push(fieldName);
+          } else if (isNumeric) {
+            nf.push(fieldName);
+          } else {
+            cf.push(fieldName);
+          }
         }
       });
-
-      // Sort fields for easier selection
-      nf.sort();
-      ctf.sort();
-      dtf.sort();
 
       return {
         allFields: af,
         numericFields: nf,
-        categoricalOrTimeFields: ctf,
-        dateTimeFields: dtf,
+        categoricalFields: cf,
+        timeFields: tf,
       };
-    }, [processedData, schema, selectedDb]);
+    }, [processedData, currentTableSchema, getFieldSchema]);
+
+  // Function to group data by a selected categorical field
+  const groupedData = useMemo(() => {
+    if (!selectedGroupBy || !processedData.length) {
+      return null;
+    }
+
+    // Handle special case: grouping by the same field as X or Y axis
+    const isGroupingSameAsXAxis = selectedGroupBy === selectedXAxis;
+    const isGroupingSameAsYAxis = selectedGroupBy === selectedYAxis;
+
+    // When grouping by the X axis, we need a second field to distinguish groups
+    if (isGroupingSameAsXAxis && selectedYAxis) {
+      // Group data by the Y-axis value to visualize different series for each value
+      const groups: GroupedData = {};
+      processedData.forEach((item) => {
+        const yValue = item[selectedYAxis];
+        const groupValue = String(yValue || "undefined");
+        if (!groups[groupValue]) {
+          groups[groupValue] = [];
+        }
+        groups[groupValue].push(item);
+      });
+      return groups;
+    }
+
+    // When grouping by the Y axis, we can use the X-axis values as separate groups
+    if (isGroupingSameAsYAxis && selectedXAxis) {
+      // Use the unique X-axis values to form groups - showing a series for each X value
+      const groups: GroupedData = {};
+      processedData.forEach((item) => {
+        const xValue = item[selectedXAxis];
+        const groupValue = String(xValue || "undefined");
+        if (!groups[groupValue]) {
+          groups[groupValue] = [];
+        }
+        groups[groupValue].push(item);
+      });
+      return groups;
+    }
+
+    // Standard grouping (by a different field)
+    const groups: GroupedData = {};
+
+    processedData.forEach((item) => {
+      const groupValue = item[selectedGroupBy]?.toString() || "undefined";
+      if (!groups[groupValue]) {
+        groups[groupValue] = [];
+      }
+      groups[groupValue].push(item);
+    });
+
+    // Limit the number of groups to prevent chart overcrowding
+    const MAX_GROUPS = 10;
+    const groupNames = Object.keys(groups);
+
+    // If we have too many groups, keep only the top ones by item count
+    if (groupNames.length > MAX_GROUPS) {
+      // Sort groups by size (number of data points)
+      const sortedGroups = groupNames
+        .map((name) => ({ name, count: groups[name].length }))
+        .sort((a, b) => b.count - a.count);
+
+      // Keep only the top MAX_GROUPS groups
+      const topGroups = sortedGroups.slice(0, MAX_GROUPS - 1);
+      const keptGroups: GroupedData = {};
+
+      // Add the top groups to the kept groups
+      topGroups.forEach((group) => {
+        keptGroups[group.name] = groups[group.name];
+      });
+
+      // Add an "Other" group with the remaining data points
+      if (sortedGroups.length > MAX_GROUPS) {
+        keptGroups["Other"] = sortedGroups
+          .slice(MAX_GROUPS - 1)
+          .flatMap((group) => groups[group.name]);
+      }
+
+      return keptGroups;
+    }
+
+    return groups;
+  }, [processedData, selectedGroupBy, selectedXAxis, selectedYAxis]);
 
   // 3. Set Default Axis Selections
   useEffect(() => {
     if (processedData.length > 0) {
       // Always prefer date/time fields for X-axis
-      if (dateTimeFields.length > 0) {
+      if (timeFields.length > 0) {
         // Prefer specific time/date fields in this order: __timestamp, time, date_hour, hours, date, time_sec
         const preferredTimeFields = [
           "__timestamp",
@@ -602,13 +756,13 @@ export default function QueryCharts() {
           "create_date",
         ];
         const foundPreferredField = preferredTimeFields.find((field) =>
-          dateTimeFields.includes(field)
+          timeFields.includes(field)
         );
 
         // Always set X-axis to time field regardless of previous selection
-        setSelectedXAxis(foundPreferredField || dateTimeFields[0]);
-      } else if (categoricalOrTimeFields.length > 0) {
-        setSelectedXAxis(categoricalOrTimeFields[0]);
+        setSelectedXAxis(foundPreferredField || timeFields[0]);
+      } else if (categoricalFields.length > 0) {
+        setSelectedXAxis(categoricalFields[0]);
       } else if (allFields.length > 0) {
         setSelectedXAxis(allFields[0]); // Fallback
       }
@@ -633,7 +787,7 @@ export default function QueryCharts() {
         // Filter out time fields from numeric fields to avoid using them as Y-axis
         const nonTimeNumericFields = numericFields.filter(
           (field) =>
-            !dateTimeFields.includes(field) &&
+            !timeFields.includes(field) &&
             !field.toLowerCase().includes("time") &&
             !field.toLowerCase().includes("date")
         );
@@ -654,13 +808,7 @@ export default function QueryCharts() {
         );
       }
     }
-  }, [
-    processedData,
-    categoricalOrTimeFields,
-    numericFields,
-    dateTimeFields,
-    allFields,
-  ]);
+  }, [processedData, categoricalFields, numericFields, timeFields, allFields]);
 
   // Create chart configuration based on selected type and data
   const chartConfig = useMemo(() => {
@@ -670,25 +818,55 @@ export default function QueryCharts() {
     // Create a deep copy of processed data for manipulation
     let chartData = JSON.parse(JSON.stringify(processedData));
 
-    // Check if we need to swap axes for proper visualization
-    // (time fields should be on X-axis, categorical/metrics on Y-axis)
-    let xAxis = selectedXAxis;
-    let yAxis = selectedYAxis;
+    // Determine the field types for visualization logic
+    const isXAxisDateTime = timeFields.includes(selectedXAxis);
+    const isYAxisDateTime = timeFields.includes(selectedYAxis);
+    const isXAxisNumeric = numericFields.includes(selectedXAxis);
+    const isYAxisNumeric = numericFields.includes(selectedYAxis);
 
-    // If the user has selected a time field for Y-axis and non-time field for X-axis,
-    // automatically swap them for better visualization
-    const isXDateTime = dateTimeFields.includes(selectedXAxis);
-    const isYDateTime = dateTimeFields.includes(selectedYAxis);
+    // Get field schema info for proper timestamp unit handling
+    const xAxisSchema = getFieldSchema(currentTableSchema, selectedXAxis);
+    const yAxisSchema = getFieldSchema(currentTableSchema, selectedYAxis);
 
-    if (!isXDateTime && isYDateTime) {
-      // Swap the axes for proper visualization
-      xAxis = selectedYAxis; // Move time field to X-axis
-      yAxis = selectedXAxis; // Move categorical field to Y-axis
+    // Set axis variables based on current selection
+    const xAxis = selectedXAxis;
+    const yAxis = selectedYAxis;
+
+    // Handle special case: grouping by a field that's also used on X or Y axis
+    const isGroupingSameAsXAxis = selectedGroupBy === selectedXAxis;
+    const isGroupingSameAsYAxis = selectedGroupBy === selectedYAxis;
+
+    // If trying to group by the same field as X or Y axis, show a warning or modify behavior
+    if (isGroupingSameAsXAxis || isGroupingSameAsYAxis) {
+      console.warn(
+        "Grouping by the same field that's used on an axis may produce unexpected results"
+      );
+      // We'll still try to visualize it, but the results may be limited
+    }
+
+    // Check if we should aggregate data for better visualization
+    // Aggregate categorical data if not being grouped and there are many categories
+    if (!isXAxisDateTime && !selectedGroupBy && !isXAxisNumeric) {
+      // Count unique X values to see if aggregation would help
+      const uniqueXValues = new Set(
+        chartData.map((item: any) => String(item[xAxis]))
+      );
+
+      // If we have a lot of duplicate categories, use aggregation
+      if (uniqueXValues.size < chartData.length / 2) {
+        console.log("Aggregating data for better visualization");
+        chartData = aggregateDataByCategory(chartData, xAxis, yAxis);
+
+        // For aggregated data, horizontal bar chart is often better
+        const shouldUseHorizontalChart = uniqueXValues.size > 8;
+        if (shouldUseHorizontalChart && chartType === "bar") {
+          // Suggest horizontal bar for better display
+          console.log("Using horizontal bar for better visualization");
+        }
+      }
     }
 
     // Pre-process data based on field types
-    const isXAxisDateTime = dateTimeFields.includes(xAxis);
-
     // For datetime axes, ensure we have proper point distribution
     if (isXAxisDateTime) {
       // Sort data by the selected X-axis for proper temporal order
@@ -704,14 +882,15 @@ export default function QueryCharts() {
       });
     }
 
-    // Convert Y-axis string values to numbers if necessary
+    // Convert Y-axis string values to numbers if possible for better visualization
     chartData = chartData.map((item: Record<string, any>) => {
       const newItem = { ...item };
 
       // Handle Y-axis value conversion if it's a string number
       if (
         typeof newItem[yAxis] === "string" &&
-        !isNaN(Number(newItem[yAxis]))
+        !isNaN(Number(newItem[yAxis])) &&
+        !isYAxisDateTime // Don't convert datetime strings to numbers
       ) {
         newItem[yAxis] = Number(newItem[yAxis]);
       }
@@ -722,24 +901,381 @@ export default function QueryCharts() {
     // Enhanced options with toolbox for zooming and saving
     const enhancedOptions = {
       tooltip: true,
-      legend: true,
+      legend: selectedGroupBy !== null, // Show legend when grouping
       toolbox: true,
-      dataZoom: true,
-      title: `${yAxis} by ${xAxis}`,
+      dataZoom: isXAxisDateTime, // Show zoom controls for time series
+      title: selectedGroupBy
+        ? `${yAxis} by ${xAxis}, grouped by ${selectedGroupBy}`
+        : `${yAxis} by ${xAxis}`,
       xIsDateTime: isXAxisDateTime,
+      yIsDateTime: isYAxisDateTime,
+      xIsNumeric: isXAxisNumeric,
+      yIsNumeric: isYAxisNumeric,
+      showArea: chartType === "area", // Use showArea option for area charts
+      // Add schema information for timestamp handling
+      fieldInfo: {
+        xIsDateTime: isXAxisDateTime,
+        yIsDateTime: isYAxisDateTime,
+        xField: selectedXAxis,
+        yFields: [selectedYAxis],
+        autoColors: true,
+        // Include time unit information from schema
+        timestampScale: (xAxisSchema?.timeUnit ||
+          (isXAxisDateTime && isTimestamp(chartData[0]?.[xAxis])
+            ? typeof chartData[0][xAxis] === "number" &&
+              chartData[0][xAxis] > 1e15
+              ? "microsecond"
+              : chartData[0][xAxis] > 1e12
+              ? "millisecond"
+              : "second"
+            : undefined)) as
+          | "second"
+          | "millisecond"
+          | "microsecond"
+          | "nanosecond"
+          | undefined,
+        timeFieldDetails: {
+          xAxis: xAxisSchema
+            ? {
+                dataType: xAxisSchema.dataType,
+                timeUnit: xAxisSchema.timeUnit,
+              }
+            : null,
+          yAxis: yAxisSchema
+            ? {
+                dataType: yAxisSchema.dataType,
+                timeUnit: yAxisSchema.timeUnit,
+              }
+            : null,
+        },
+      },
+      // Enhanced chart options
+      animation: true,
+      animationDuration: 500,
+      barGap: "10%", // Add gap between bars for multiple series
+      barCategoryGap: "20%", // Add gap between categories
+      barMaxWidth: 50, // Limit maximum width to ensure separation
+      emphasis: {
+        focus: "series",
+        blurScope: "coordinateSystem",
+      },
+      visualMap: selectedGroupBy
+        ? {
+            show: false,
+            dimension: 1, // Value dimension
+            // Enable color gradient for better visual contrast
+            inRange: {
+              colorLightness: [0.8, 0.4],
+              colorSaturation: [0.2, 0.8],
+            },
+          }
+        : undefined,
     };
 
-    switch (chartType) {
-      case "bar":
-        return createBarChart(chartData, xAxis, yAxis, enhancedOptions);
-      case "line":
-        return createLineChart(chartData, xAxis, yAxis, enhancedOptions);
-      case "area":
-        return createAreaChart(chartData, xAxis, yAxis, enhancedOptions);
-      default:
-        return null;
+    // Determine chart type that best fits the data types
+    let effectiveChartType = chartType;
+
+    // For certain field type combinations, suggest better chart types
+    if (isXAxisDateTime && !isYAxisNumeric && chartType === "bar") {
+      // For time + non-numeric, line charts usually work better
+      effectiveChartType = "line";
+    } else if (
+      !isXAxisDateTime &&
+      !isXAxisNumeric &&
+      isYAxisNumeric &&
+      chartType === "line"
+    ) {
+      // For categorical + numeric, bar charts usually work better
+      effectiveChartType = "bar";
     }
-  }, [processedData, selectedXAxis, selectedYAxis, chartType, dateTimeFields]);
+
+    // Special handling for horizontal bar charts
+    const useHorizontalBars = effectiveChartType === "horizontalBar";
+    // For area charts, we need to use 'line' type but enable the areaStyle
+    const shouldUseAreaStyle = chartType === "area";
+
+    if (useHorizontalBars) {
+      // Convert back to regular bar for chart creation, but with horizontal option
+      effectiveChartType = "bar";
+    }
+
+    // If grouping is active, use the grouped data
+    if (selectedGroupBy && groupedData) {
+      // For datetime X-axis with grouping, aggregate data points to avoid overcrowding
+      if (isXAxisDateTime) {
+        // Create series data for each group
+        const series = Object.entries(groupedData).map(([groupName, items]) => {
+          // Sort items by X-axis for proper line/area rendering
+          items.sort((a: ProcessedDataItem, b: ProcessedDataItem) => {
+            const aValue = a[xAxis];
+            const bValue = b[xAxis];
+
+            if (typeof aValue === "string" && typeof bValue === "string") {
+              return new Date(aValue).getTime() - new Date(bValue).getTime();
+            }
+            return Number(aValue) - Number(bValue);
+          });
+
+          // For Y-axis, convert values appropriately based on data type
+          return {
+            name: groupName,
+            data: items.map((item: ProcessedDataItem) => {
+              const xValue = item[xAxis];
+              let yValue = item[yAxis];
+
+              // Convert to number if possible and not a datetime
+              if (
+                !isYAxisDateTime &&
+                typeof yValue === "string" &&
+                !isNaN(Number(yValue))
+              ) {
+                yValue = Number(yValue);
+              } else if (yValue === null || yValue === undefined) {
+                yValue = 0;
+              }
+
+              return {
+                x: xValue,
+                y: yValue,
+              };
+            }),
+            type: effectiveChartType,
+          };
+        });
+
+        // For grouped data visualization with time X-axis
+        switch (effectiveChartType) {
+          case "bar":
+            const barOptions = useHorizontalBars
+              ? { ...enhancedOptions, forceHorizontal: true }
+              : enhancedOptions;
+            return createBarChart(chartData, xAxis, yAxis, barOptions, series);
+          case "line":
+            return createLineChart(
+              chartData,
+              xAxis,
+              yAxis,
+              enhancedOptions,
+              series
+            );
+          case "area":
+            return createAreaChart(
+              chartData,
+              xAxis,
+              yAxis,
+              enhancedOptions,
+              series
+            );
+          default:
+            return null;
+        }
+      } else {
+        // For categorical X-axis with grouping, use a different approach
+        // Prepare data for a stacked chart visualization
+        const uniqueXValues = Array.from(
+          new Set(chartData.map((item: ProcessedDataItem) => item[xAxis]))
+        );
+
+        // Create a matrix of data: X-values × groups
+        const matrix: Record<string, Record<string, number>> = {};
+        uniqueXValues.forEach((xValue: any) => {
+          matrix[String(xValue)] = {};
+          // Initialize with zeros
+          Object.keys(groupedData).forEach((groupName: string) => {
+            matrix[String(xValue)][groupName] = 0;
+          });
+        });
+
+        // Fill the matrix with actual values
+        Object.entries(groupedData).forEach(([groupName, items]) => {
+          items.forEach((item: ProcessedDataItem) => {
+            const xValue = String(item[xAxis]);
+            let yValue = item[yAxis];
+
+            // Convert to number if possible and not a datetime
+            if (
+              !isYAxisDateTime &&
+              typeof yValue === "string" &&
+              !isNaN(Number(yValue))
+            ) {
+              yValue = Number(yValue);
+            } else if (typeof yValue !== "number") {
+              yValue = 0; // Default for non-numeric values
+            }
+
+            // Aggregate values if there are multiple items with the same X-value in this group
+            if (matrix[xValue]) {
+              matrix[xValue][groupName] =
+                (matrix[xValue][groupName] || 0) + Number(yValue);
+            }
+          });
+        });
+
+        // Convert matrix to series data
+        const series = Object.keys(groupedData).map((groupName: string) => ({
+          name: groupName,
+          type: effectiveChartType,
+          data: uniqueXValues.map(
+            (xValue: any) => matrix[String(xValue)][groupName] || 0
+          ),
+          stack: effectiveChartType === "bar" ? "total" : undefined, // Stack bars but not lines/areas
+        }));
+
+        // For grouped data visualization with categorical X-axis
+        switch (effectiveChartType) {
+          case "bar":
+            const barOptions = useHorizontalBars
+              ? { ...enhancedOptions, forceHorizontal: true }
+              : enhancedOptions;
+            return createBarChart(chartData, xAxis, yAxis, barOptions, series);
+          case "line":
+            return createLineChart(
+              chartData,
+              xAxis,
+              yAxis,
+              enhancedOptions,
+              series
+            );
+          case "area":
+            return createAreaChart(
+              chartData,
+              xAxis,
+              yAxis,
+              enhancedOptions,
+              series
+            );
+          default:
+            return null;
+        }
+      }
+    } else {
+      // Standard single-series chart
+      switch (effectiveChartType) {
+        case "bar":
+          const barOptions = useHorizontalBars
+            ? { ...enhancedOptions, forceHorizontal: true }
+            : enhancedOptions;
+          // Check if data was aggregated and add tooltip info
+          if (chartData.length > 0 && chartData[0].__aggregated) {
+            const enhancedBarOptions = {
+              ...barOptions,
+              tooltip:
+                typeof barOptions.tooltip === "object"
+                  ? {
+                      ...(barOptions.tooltip as object),
+                      formatter: (params: any) => {
+                        if (!params) return "";
+
+                        try {
+                          // Handle both single item and array of items
+                          const paramArray = Array.isArray(params)
+                            ? params
+                            : [params];
+                          const firstParam = paramArray[0];
+
+                          if (!firstParam) return "";
+
+                          const item = firstParam.data || {};
+                          const categoryName = String(
+                            item[xAxis] || firstParam.name || ""
+                          );
+                          const value =
+                            typeof item[yAxis] === "number"
+                              ? item[yAxis]
+                              : typeof firstParam.value === "number"
+                              ? firstParam.value
+                              : 0;
+
+                          // Get count if available, otherwise default to 1
+                          const count = item.__originalCount || 1;
+
+                          return `
+                      <div style="font-weight:bold;margin-bottom:4px">${categoryName}</div>
+                      <div>${
+                        count > 1 ? "Average: " : "Value: "
+                      }${value.toFixed(2)}</div>
+                      ${
+                        count > 1
+                          ? `<div style="opacity:0.7;font-size:0.9em">(${count} data points)</div>`
+                          : ""
+                      }
+                    `;
+                        } catch (err) {
+                          console.error("Error in tooltip formatter:", err);
+                          return "Error displaying tooltip";
+                        }
+                      },
+                    }
+                  : {
+                      formatter: (params: any) => {
+                        if (!params) return "";
+
+                        try {
+                          // Handle both single item and array of items
+                          const paramArray = Array.isArray(params)
+                            ? params
+                            : [params];
+                          const firstParam = paramArray[0];
+
+                          if (!firstParam) return "";
+
+                          const item = firstParam.data || {};
+                          const categoryName = String(
+                            item[xAxis] || firstParam.name || ""
+                          );
+                          const value =
+                            typeof item[yAxis] === "number"
+                              ? item[yAxis]
+                              : typeof firstParam.value === "number"
+                              ? firstParam.value
+                              : 0;
+
+                          // Get count if available, otherwise default to 1
+                          const count = item.__originalCount || 1;
+
+                          return `
+                      <div style="font-weight:bold;margin-bottom:4px">${categoryName}</div>
+                      <div>${
+                        count > 1 ? "Average: " : "Value: "
+                      }${value.toFixed(2)}</div>
+                      ${
+                        count > 1
+                          ? `<div style="opacity:0.7;font-size:0.9em">(${count} data points)</div>`
+                          : ""
+                      }
+                    `;
+                        } catch (err) {
+                          console.error("Error in tooltip formatter:", err);
+                          return "Error displaying tooltip";
+                        }
+                      },
+                    },
+            };
+            return createBarChart(chartData, xAxis, yAxis, enhancedBarOptions);
+          }
+          return createBarChart(chartData, xAxis, yAxis, barOptions);
+        case "line":
+          // When shouldUseAreaStyle is true, we're creating a line chart with area style
+          if (shouldUseAreaStyle) {
+            return createAreaChart(chartData, xAxis, yAxis, enhancedOptions);
+          }
+          return createLineChart(chartData, xAxis, yAxis, enhancedOptions);
+        case "area":
+          return createAreaChart(chartData, xAxis, yAxis, enhancedOptions);
+        default:
+          return null;
+      }
+    }
+  }, [
+    processedData,
+    selectedXAxis,
+    selectedYAxis,
+    chartType,
+    timeFields,
+    numericFields,
+    selectedGroupBy,
+    groupedData,
+  ]);
 
   // Handler for axis changes
   const handleXAxisChange = (value: string) => {
@@ -750,6 +1286,54 @@ export default function QueryCharts() {
   const handleYAxisChange = (value: string) => {
     if (value === "_NONE_") setSelectedYAxis(null);
     else setSelectedYAxis(value);
+  };
+
+  // Handler for group by changes
+  const handleGroupByChange = (value: string) => {
+    if (value === "_NONE_") setSelectedGroupBy(null);
+    else setSelectedGroupBy(value);
+  };
+
+  // Helper function to get data type badge
+  const getDataTypeBadge = (field: string) => {
+    const fieldSchema = getFieldSchema(currentTableSchema, field);
+
+    if (timeFields.includes(field)) {
+      const dataType = fieldSchema?.dataType.toUpperCase() || "TIME";
+      const timeUnit = fieldSchema?.timeUnit
+        ? ` (${fieldSchema.timeUnit})`
+        : "";
+      return (
+        <Badge
+          variant="outline"
+          className="ml-2 text-[10px] font-mono py-0 h-4 px-1 bg-blue-500/10 text-blue-500 border-0"
+        >
+          {dataType}
+          {timeUnit}
+        </Badge>
+      );
+    } else if (numericFields.includes(field)) {
+      const dataType = fieldSchema?.dataType.toUpperCase() || "NUM";
+      return (
+        <Badge
+          variant="outline"
+          className="ml-2 text-[10px] font-mono py-0 h-4 px-1 bg-green-500/10 text-green-500 border-0"
+        >
+          {dataType}
+        </Badge>
+      );
+    } else if (categoricalFields.includes(field)) {
+      const dataType = fieldSchema?.dataType.toUpperCase() || "TEXT";
+      return (
+        <Badge
+          variant="outline"
+          className="ml-2 text-[10px] font-mono py-0 h-4 px-1 bg-muted/30 border-0"
+        >
+          {dataType}
+        </Badge>
+      );
+    }
+    return null;
   };
 
   // Loading state
@@ -775,234 +1359,401 @@ export default function QueryCharts() {
 
   return (
     <TooltipProvider>
-      <Card className="w-full h-full flex flex-col border border-border/40 rounded-lg shadow-sm bg-background/60 backdrop-blur-sm">
-        <CardHeader className="pb-2 px-4 pt-3 border-b border-border/30">
-          <div className="flex flex-wrap gap-3 items-end">
-            <div>
-              <div className="flex items-center gap-1 mb-1">
-                <Label
-                  htmlFor="chartTypeSelect"
-                  className="text-xs font-semibold"
-                >
-                  Chart Type
-                </Label>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Info className="h-3 w-3 text-muted-foreground" />
-                  </TooltipTrigger>
-                  <TooltipContent side="right">
-                    <p className="max-w-xs">
-                      Select the visualization type that best fits your data
-                    </p>
-                  </TooltipContent>
-                </Tooltip>
-              </div>
-              <Tabs
-                value={chartType}
-                onValueChange={(value) => setChartType(value as ChartType)}
-                className="w-[260px]"
-              >
-                <TabsList className="grid grid-cols-3 h-8">
-                  <TabsTrigger value="bar" className="text-xs">
-                    Bar
-                  </TabsTrigger>
-                  <TabsTrigger value="line" className="text-xs">
-                    Line
-                  </TabsTrigger>
-                  <TabsTrigger value="area" className="text-xs">
-                    Area
-                  </TabsTrigger>
-                </TabsList>
-              </Tabs>
-            </div>
-
-            <div>
-              <div className="flex items-center gap-1 mb-1">
-                <Label htmlFor="xAxisSelect" className="text-xs font-semibold">
-                  X-Axis{" "}
-                  {dateTimeFields.includes(selectedXAxis || "") ? (
-                    <Calendar className="h-3 w-3 inline ml-1 text-blue-500" />
-                  ) : null}
-                </Label>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Info className="h-3 w-3 text-muted-foreground" />
-                  </TooltipTrigger>
-                  <TooltipContent side="right">
-                    <p className="max-w-xs">
-                      Select a field for the X-axis. For time-series data, time
-                      fields (marked with{" "}
-                      <Calendar className="h-3 w-3 inline text-blue-500" />)
-                      work best on X-axis.
-                    </p>
-                  </TooltipContent>
-                </Tooltip>
-              </div>
-              <Select
-                value={selectedXAxis || "_NONE_"}
-                onValueChange={handleXAxisChange}
-              >
-                <SelectTrigger
-                  id="xAxisSelect"
-                  className="w-[180px] h-8 text-xs border-border/40"
-                >
-                  <SelectValue placeholder="Select X-Axis" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="_NONE_"> (None) </SelectItem>
-                  {dateTimeFields.length > 0 && (
-                    <>
-                      <div className="px-2 py-1.5 text-xs font-semibold text-blue-500 flex items-center">
-                        <Calendar className="h-3 w-3 inline mr-1" /> Time Fields
-                        (Recommended for X-axis)
-                      </div>
-                      {dateTimeFields.map((field) => (
-                        <SelectItem
-                          key={`dt-${field}`}
-                          value={field}
-                          className="text-xs"
-                        >
-                          {field}{" "}
-                          <Calendar className="h-3 w-3 inline ml-1 text-blue-500" />
-                        </SelectItem>
-                      ))}
-                      <div className="h-px bg-border/30 my-1.5 mx-1" />
-                    </>
-                  )}
-                  {categoricalOrTimeFields.filter(
-                    (field) => !dateTimeFields.includes(field)
-                  ).length > 0 ? (
-                    <>
-                      <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground flex items-center">
-                        Other Fields
-                      </div>
-                      {categoricalOrTimeFields
-                        .filter((field) => !dateTimeFields.includes(field))
-                        .map((field) => (
-                          <SelectItem
-                            key={field}
-                            value={field}
-                            className="text-xs"
-                          >
-                            {field}
-                          </SelectItem>
-                        ))}
-                    </>
-                  ) : (
-                    <SelectItem
-                      value="_NO_OPTIONS_"
-                      disabled
-                      className="text-xs text-muted-foreground italic"
-                    >
-                      No suitable fields found
-                    </SelectItem>
-                  )}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div>
-              <div className="flex items-center gap-1 mb-1">
-                <Label htmlFor="yAxisSelect" className="text-xs font-semibold">
-                  Y-Axis (Value){" "}
-                  {numericFields.includes(selectedYAxis || "") ? (
-                    <Hash className="h-3 w-3 inline ml-1 text-green-500" />
-                  ) : null}
-                </Label>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Info className="h-3 w-3 text-muted-foreground" />
-                  </TooltipTrigger>
-                  <TooltipContent side="right">
-                    <p className="max-w-xs">
-                      Select a numeric field for the Y-axis. Metric values
-                      (marked with{" "}
-                      <Hash className="h-3 w-3 inline text-green-500" />) work
-                      best on Y-axis.
-                    </p>
-                  </TooltipContent>
-                </Tooltip>
-              </div>
-              <Select
-                value={selectedYAxis || "_NONE_"}
-                onValueChange={handleYAxisChange}
-              >
-                <SelectTrigger
-                  id="yAxisSelect"
-                  className="w-[180px] h-8 text-xs border-border/40"
-                >
-                  <SelectValue placeholder="Select Y-Axis" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="_NONE_"> (None) </SelectItem>
-                  {numericFields.length > 0 ? (
-                    <>
-                      <div className="px-2 py-1.5 text-xs font-semibold text-green-500 flex items-center">
-                        <Hash className="h-3 w-3 inline mr-1" /> Metric Fields
-                        (Recommended for Y-axis)
-                      </div>
-                      {/* Filter out any fields with time-related names from Y-axis metrics section */}
-                      {numericFields
-                        .filter(
-                          (field) =>
-                            !dateTimeFields.includes(field) &&
-                            !field.toLowerCase().includes("time") &&
-                            !field.toLowerCase().includes("date") &&
-                            !field.toLowerCase().includes("timestamp")
-                        )
-                        .map((field) => (
-                          <SelectItem
-                            key={field}
-                            value={field}
-                            className="text-xs"
-                          >
-                            {field}{" "}
-                            <Hash className="h-3 w-3 inline ml-1 text-green-500" />
-                          </SelectItem>
-                        ))}
-                    </>
-                  ) : (
-                    <SelectItem
-                      value="_NO_OPTIONS_"
-                      disabled
-                      className="text-xs text-muted-foreground italic"
-                    >
-                      No numeric fields found
-                    </SelectItem>
-                  )}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {numericFields.length === 0 && (
-              <div className="text-xs text-amber-500 flex items-center gap-1 ml-2">
-                <Info className="h-3 w-3" />
-                <span>
-                  This data may contain nested JSON values that need extraction
-                </span>
-              </div>
-            )}
+      <div className="flex flex-wrap gap-3 items-end">
+        <div>
+          <div className="flex items-center gap-1 mb-1">
+            <Label htmlFor="chartTypeSelect" className="text-xs font-semibold">
+              Chart Type
+            </Label>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Info className="h-3 w-3 text-muted-foreground" />
+              </TooltipTrigger>
+              <TooltipContent side="right">
+                <p className="max-w-xs">
+                  Select the visualization type that best fits your data
+                </p>
+              </TooltipContent>
+            </Tooltip>
           </div>
-        </CardHeader>
+          <Tabs
+            value={chartType}
+            onValueChange={(value) => setChartType(value as ChartType)}
+          >
+            <TabsList className="grid grid-cols-4 gap-2">
+              <TabsTrigger
+                value="bar"
+                className="text-xs flex items-center gap-1"
+              >
+                Bar
+              </TabsTrigger>
+              <TabsTrigger
+                value="horizontalBar"
+                className="text-xs flex items-center gap-1"
+              >
+                Bar Horizontal
+              </TabsTrigger>
+              <TabsTrigger
+                value="line"
+                className="text-xs flex items-center gap-1"
+              >
+                Line
+              </TabsTrigger>
+              <TabsTrigger
+                value="area"
+                className="text-xs flex items-center gap-1"
+              >
+                Area
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
+        </div>
 
-        <CardContent className="flex-grow p-4 min-h-[350px]">
-          {chartConfig ? (
-            <GigChart
-              config={chartConfig}
-              className="w-full h-full rounded-md border border-border/30 shadow-sm"
-              style={{ height: "calc(100% - 10px)", marginTop: "10px" }}
-            />
-          ) : (
-            <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
-              <p>
-                {!selectedXAxis || !selectedYAxis
-                  ? "Please select X and Y axes to display the chart."
-                  : "No data to display for the current selection."}
-              </p>
+        <div>
+          <div className="flex items-center gap-1 mb-1">
+            <Label htmlFor="xAxisSelect" className="text-xs font-semibold">
+              X-Axis{" "}
+              {timeFields.includes(selectedXAxis || "") ? (
+                <Calendar className="h-3 w-3 inline ml-1 text-blue-500" />
+              ) : null}
+            </Label>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Info className="h-3 w-3 text-muted-foreground" />
+              </TooltipTrigger>
+              <TooltipContent side="right">
+                <p className="max-w-xs">
+                  Select a field for the X-axis. Time fields (marked with{" "}
+                  <Calendar className="h-3 w-3 inline text-blue-500" />) work
+                  best on X-axis.
+                </p>
+              </TooltipContent>
+            </Tooltip>
+          </div>
+          <Select
+            value={selectedXAxis || "_NONE_"}
+            onValueChange={handleXAxisChange}
+          >
+            <SelectTrigger
+              id="xAxisSelect"
+              className="w-[180px] h-8 text-xs border-border/40"
+            >
+              <SelectValue placeholder="Select X-Axis" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="_NONE_"> (None) </SelectItem>
+              {/* Show time fields first (recommended for X-axis) */}
+              {timeFields.length > 0 && (
+                <>
+                  <div className="px-2 py-1.5 text-xs font-semibold text-blue-500 flex items-center">
+                    <Calendar className="h-3 w-3 inline mr-1" /> Time Fields
+                  </div>
+                  {timeFields.map((field) => (
+                    <SelectItem
+                      key={`dt-${field}`}
+                      value={field}
+                      className="text-xs flex items-center justify-between"
+                    >
+                      <span>{field}</span>
+                      <Calendar className="h-3 w-3 text-blue-500" />
+                    </SelectItem>
+                  ))}
+                  <div className="h-px bg-border/30 my-1.5 mx-1" />
+                </>
+              )}
+              {/* Show all remaining fields */}
+              <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground flex items-center">
+                All Fields
+              </div>
+              {allFields
+                .filter((field) => !timeFields.includes(field))
+                .map((field) => (
+                  <SelectItem
+                    key={`all-${field}`}
+                    value={field}
+                    className="text-xs flex items-center justify-between"
+                  >
+                    <span>{field}</span>
+                    {getDataTypeBadge(field)}
+                  </SelectItem>
+                ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div>
+          <div className="flex items-center gap-1 mb-1">
+            <Label htmlFor="yAxisSelect" className="text-xs font-semibold">
+              Y-Axis (Value){" "}
+              {numericFields.includes(selectedYAxis || "") ? (
+                <Hash className="h-3 w-3 inline ml-1 text-green-500" />
+              ) : null}
+            </Label>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Info className="h-3 w-3 text-muted-foreground" />
+              </TooltipTrigger>
+              <TooltipContent side="right">
+                <p className="max-w-xs">
+                  Select a numeric field for the Y-axis. Metric values (marked
+                  with <Hash className="h-3 w-3 inline text-green-500" />) work
+                  best on Y-axis.
+                </p>
+              </TooltipContent>
+            </Tooltip>
+          </div>
+          <Select
+            value={selectedYAxis || "_NONE_"}
+            onValueChange={handleYAxisChange}
+          >
+            <SelectTrigger
+              id="yAxisSelect"
+              className="w-[180px] h-8 text-xs border-border/40"
+            >
+              <SelectValue placeholder="Select Y-Axis" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="_NONE_"> (None) </SelectItem>
+              {/* Show numeric fields first (recommended for Y-axis) */}
+              {numericFields.length > 0 && (
+                <>
+                  <div className="px-2 py-1.5 text-xs font-semibold text-green-500 flex items-center">
+                    <Hash className="h-3 w-3 inline mr-1" /> Metric Fields
+                  </div>
+                  {numericFields
+                    .filter(
+                      (field) =>
+                        !timeFields.includes(field) &&
+                        !field.toLowerCase().includes("time") &&
+                        !field.toLowerCase().includes("date")
+                    )
+                    .map((field) => (
+                      <SelectItem
+                        key={`num-${field}`}
+                        value={field}
+                        className="text-xs flex items-center justify-between"
+                      >
+                        <span>{field}</span>
+                        <Hash className="h-3 w-3 text-green-500" />
+                      </SelectItem>
+                    ))}
+                  <div className="h-px bg-border/30 my-1.5 mx-1" />
+                </>
+              )}
+
+              {/* Show all remaining fields */}
+              <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground flex items-center">
+                All Fields
+              </div>
+              {allFields
+                .filter(
+                  (field) =>
+                    numericFields.includes(field) === false ||
+                    timeFields.includes(field) ||
+                    field.toLowerCase().includes("time") ||
+                    field.toLowerCase().includes("date") ||
+                    field.toLowerCase().includes("timestamp")
+                )
+                .map((field) => (
+                  <SelectItem
+                    key={`all-${field}`}
+                    value={field}
+                    className="text-xs flex items-center justify-between"
+                  >
+                    <span>{field}</span>
+                    {getDataTypeBadge(field)}
+                  </SelectItem>
+                ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        {/* Group By Selector */}
+        <div>
+          <div className="flex items-center gap-1 mb-1">
+            <Label htmlFor="groupBySelect" className="text-xs font-semibold">
+              Group By (Optional)
+            </Label>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Info className="h-3 w-3 text-muted-foreground" />
+              </TooltipTrigger>
+              <TooltipContent side="right">
+                <p className="max-w-xs">
+                  Group data by a categorical field to compare different
+                  categories. This creates multiple series on your chart.
+                </p>
+              </TooltipContent>
+            </Tooltip>
+          </div>
+          <Select
+            value={selectedGroupBy || "_NONE_"}
+            onValueChange={handleGroupByChange}
+          >
+            <SelectTrigger
+              id="groupBySelect"
+              className="w-[180px] h-8 text-xs border-border/40"
+            >
+              <SelectValue placeholder="Select Group By Field" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="_NONE_"> (None) </SelectItem>
+
+              {/* Show categorical fields first (recommended for grouping) */}
+              {categoricalFields.length > 0 && (
+                <>
+                  <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground flex items-center">
+                    Categorical Fields
+                  </div>
+                  {categoricalFields
+                    .filter((_) => true)
+                    .map((field) => (
+                      <SelectItem
+                        key={`cat-${field}`}
+                        value={field}
+                        className="text-xs flex items-center justify-between"
+                      >
+                        <span>{field}</span>
+                        {getDataTypeBadge(field)}
+                      </SelectItem>
+                    ))}
+                  <div className="h-px bg-border/30 my-1.5 mx-1" />
+                </>
+              )}
+
+              {/* Show all other fields */}
+              <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground flex items-center">
+                All Fields
+              </div>
+              {allFields
+                .filter(
+                  (field) => !categoricalFields.includes(field)
+                  // Allow using any field for grouping, even if already on X or Y axis
+                )
+                .map((field) => (
+                  <SelectItem
+                    key={`all-${field}`}
+                    value={field}
+                    className="text-xs flex items-center justify-between"
+                  >
+                    <span>{field}</span>
+                    {getDataTypeBadge(field)}
+                  </SelectItem>
+                ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        {numericFields.length === 0 && (
+          <div className="text-xs text-amber-500 flex items-center gap-1 ml-2">
+            <Info className="h-3 w-3" />
+            <span>
+              This data may contain nested JSON values that need extraction
+            </span>
+          </div>
+        )}
+      </div>
+
+      {chartConfig ? (
+        <div className="flex flex-col h-full">
+          {/* Add field type information */}
+          {selectedXAxis && selectedYAxis && (
+            <div className="flex flex-wrap gap-2 mb-2 items-center text-xs text-muted-foreground mt-4">
+              <div className="flex items-center">
+                <span>X-Axis:</span>
+                <Badge
+                  variant="outline"
+                  className={`ml-1 text-[10px] font-mono py-0 h-4 px-1 ${
+                    selectedGroupBy === selectedXAxis
+                      ? "bg-blue-100 dark:bg-blue-900/30 border-blue-200 dark:border-blue-800/40"
+                      : "bg-muted/20 border-0"
+                  }`}
+                >
+                  {selectedXAxis}
+                  {timeFields.includes(selectedXAxis) && (
+                    <Calendar className="h-3 w-3 inline ml-1 text-blue-500" />
+                  )}
+                  {numericFields.includes(selectedXAxis) &&
+                    !timeFields.includes(selectedXAxis) && (
+                      <Hash className="h-3 w-3 inline ml-1 text-green-500" />
+                    )}
+                  {selectedGroupBy === selectedXAxis && (
+                    <span className="ml-1 text-[8px] text-blue-500 font-semibold">
+                      +GROUP
+                    </span>
+                  )}
+                </Badge>
+              </div>
+              <div className="flex items-center">
+                <span>Y-Axis:</span>
+                <Badge
+                  variant="outline"
+                  className={`ml-1 text-[10px] font-mono py-0 h-4 px-1 ${
+                    selectedGroupBy === selectedYAxis
+                      ? "bg-green-100 dark:bg-green-900/30 border-green-200 dark:border-green-800/40"
+                      : "bg-muted/20 border-0"
+                  }`}
+                >
+                  {selectedYAxis}
+                  {timeFields.includes(selectedYAxis) && (
+                    <Calendar className="h-3 w-3 inline ml-1 text-blue-500" />
+                  )}
+                  {numericFields.includes(selectedYAxis) &&
+                    !timeFields.includes(selectedYAxis) && (
+                      <Hash className="h-3 w-3 inline ml-1 text-green-500" />
+                    )}
+                  {selectedGroupBy === selectedYAxis && (
+                    <span className="ml-1 text-[8px] text-green-500 font-semibold">
+                      +GROUP
+                    </span>
+                  )}
+                </Badge>
+              </div>
+              {selectedGroupBy && (
+                <div className="flex items-center">
+                  <span>Grouped By:</span>
+                  <Badge
+                    variant="outline"
+                    className={`ml-1 text-[10px] font-mono py-0 h-4 px-1 
+                      ${
+                        selectedGroupBy === selectedXAxis
+                          ? "bg-blue-100 dark:bg-blue-900/30 border-blue-200 dark:border-blue-800/40"
+                          : selectedGroupBy === selectedYAxis
+                          ? "bg-green-100 dark:bg-green-900/30 border-green-200 dark:border-green-800/40"
+                          : "bg-muted/20 border-0"
+                      }`}
+                  >
+                    {selectedGroupBy}
+                    {selectedGroupBy === selectedXAxis && (
+                      <span className="ml-1 text-[8px] text-blue-500 font-semibold">
+                        X-AXIS
+                      </span>
+                    )}
+                    {selectedGroupBy === selectedYAxis && (
+                      <span className="ml-1 text-[8px] text-green-500 font-semibold">
+                        Y-AXIS
+                      </span>
+                    )}
+                  </Badge>
+                </div>
+              )}
             </div>
           )}
-        </CardContent>
-      </Card>
+          <GigChart
+            config={chartConfig}
+            className="w-full h-full rounded-md border border-border/30 shadow-sm"
+            style={{ height: "calc(100% - 24px)" }}
+          />
+        </div>
+      ) : (
+        <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
+          <p>
+            {!selectedXAxis || !selectedYAxis
+              ? "Please select X and Y axes to display the chart."
+              : "No data to display for the current selection."}
+          </p>
+        </div>
+      )}
     </TooltipProvider>
   );
 }

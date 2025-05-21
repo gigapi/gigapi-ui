@@ -17,7 +17,20 @@ import {
   formatDateForSql,
 } from "../lib/time-range-utils";
 import HashQueryUtils from "../lib/hash-query-utils";
+import {
+  resolveTimeRangeToDates,
+  convertDateToScaledEpoch,
+} from "../lib/utils";
 
+// Storage keys
+const CONNECTION_KEY = "gigapi_connection";
+const TIME_RANGE_KEY = "gigapi_time_range";
+const SELECTED_TABLE_KEY = "gigapi_selected_table";
+const QUERY_BUILDER_KEY = "gigapi_query_builder";
+const QUERY_HISTORY_KEY = "gigapi_query_history";
+const SELECTED_TIME_ZONE_KEY = "gigapi_selected_time_zone";
+
+// Type definitions
 type Database = {
   database_name: string;
 };
@@ -121,14 +134,6 @@ const QueryContext = createContext<QueryContextType | undefined>(undefined);
 // Export the context directly so it can be imported if needed
 export { QueryContext };
 
-// Connection key for persistence
-const CONNECTION_KEY = "gigapi_connection";
-const TIME_RANGE_KEY = "gigapi_time_range";
-const SELECTED_TABLE_KEY = "gigapi_selected_table";
-const QUERY_BUILDER_KEY = "gigapi_query_builder";
-const QUERY_HISTORY_KEY = "gigapi_query_history";
-const SELECTED_TIME_ZONE_KEY = "gigapi_selected_time_zone"; // Key for time zone
-
 export function QueryProvider({ children }: { children: ReactNode }) {
   // State management for query execution
   const [selectedDb, setSelectedDbState] = useState(""); // Renamed to avoid conflict with context value
@@ -213,7 +218,16 @@ export function QueryProvider({ children }: { children: ReactNode }) {
     useState<boolean>(false);
 
   // Query builder state
-  const [queryBuilderEnabled, setQueryBuilderEnabled] = useState(true);
+  const [queryBuilderEnabled, setQueryBuilderEnabled] = useState(() => {
+    try {
+      const savedState = localStorage.getItem(QUERY_BUILDER_KEY);
+      // Only enable it if explicitly set to true in localStorage
+      return savedState ? JSON.parse(savedState) === true : false;
+    } catch (e) {
+      console.error("Failed to parse saved query builder state", e);
+      return false; // Default to false if not set or invalid
+    }
+  });
 
   // Time zone state
   const [selectedTimeZone, setSelectedTimeZoneState] = useState<string>(() => {
@@ -263,11 +277,6 @@ export function QueryProvider({ children }: { children: ReactNode }) {
     return [];
   });
 
-  // Retry tracking refs (currently not used in core connection/schema logic, but kept if needed elsewhere)
-  const retryCountRef = useRef(0);
-  const schemaRetryCountRef = useRef(0);
-  // const MAX_RETRIES = 2; // Not used
-
   // Refs for state values needed in callbacks without causing dep cycles
   const connectionStateRef = useRef(connectionState);
   useEffect(() => {
@@ -291,6 +300,10 @@ export function QueryProvider({ children }: { children: ReactNode }) {
     },
     [selectedDb, schema]
   );
+
+  // ----------------------------------------
+  // API Connection and Database Management
+  // ----------------------------------------
 
   // API connection handler
   const connectToApi = useCallback(
@@ -334,13 +347,22 @@ export function QueryProvider({ children }: { children: ReactNode }) {
           );
 
           // Check the Content-Type header to determine actual format
-          const contentType = response.headers['content-type']?.toLowerCase() || '';
-          const isNdjsonResponse = contentType.includes('x-ndjson');
-          const isJsonResponse = contentType.includes('json');
+          const contentType =
+            response.headers["content-type"]?.toLowerCase() || "";
+          const isNdjsonResponse = contentType.includes("x-ndjson");
+          const isJsonResponse = contentType.includes("json");
 
           // If we requested NDJSON but got JSON, API doesn't support NDJSON
-          if (currentFormat === "ndjson" && !isNdjsonResponse && isJsonResponse) {
-            console.log("API returned Content-Type: " + contentType + " when NDJSON was requested");
+          if (
+            currentFormat === "ndjson" &&
+            !isNdjsonResponse &&
+            isJsonResponse
+          ) {
+            console.log(
+              "API returned Content-Type: " +
+                contentType +
+                " when NDJSON was requested"
+            );
             setFormatCompatibility({
               supportsNdjson: false,
               detected: true,
@@ -371,7 +393,7 @@ export function QueryProvider({ children }: { children: ReactNode }) {
               { query: "SHOW DATABASES" },
               { timeout: 10000, responseType: "json" }
             );
-            
+
             // If JSON request succeeds, update format compatibility
             setFormatCompatibility({
               supportsNdjson: false,
@@ -387,17 +409,17 @@ export function QueryProvider({ children }: { children: ReactNode }) {
             throw e;
           }
         }
-        
+
         // Process the response to get database list
         let dbList: Database[] = [];
-        
+
         // Process based on the determined format
         if (currentFormat === "ndjson") {
           // Process as NDJSON
           const lines = response.data
             .split(/\r?\n/)
             .filter((line: string) => line.trim().length > 0);
-          
+
           dbList = lines
             .map((line: string) => {
               try {
@@ -432,7 +454,7 @@ export function QueryProvider({ children }: { children: ReactNode }) {
             dbToMakeActive = savedDbFromStorage;
           }
           setSelectedDbState(dbToMakeActive);
-          
+
           // Save connection info to local storage
           const connection = {
             apiUrl: urlToConnect,
@@ -444,7 +466,7 @@ export function QueryProvider({ children }: { children: ReactNode }) {
           // Change this part to indicate "empty" state instead of error
           setConnectionState("empty");
           setConnectionError(null);
-          setDatabases([]);          
+          setDatabases([]);
           // Still save connection info
           const connection = {
             apiUrl: urlToConnect,
@@ -486,8 +508,6 @@ export function QueryProvider({ children }: { children: ReactNode }) {
     setExecutionTime(null);
     setResponseSize(null);
     HashQueryUtils.clearUrlParameters();
-    retryCountRef.current = 0;
-    schemaRetryCountRef.current = 0;
   }, []); // Relies on stable setters from useState
 
   // Effect to save apiUrl to localStorage
@@ -629,9 +649,8 @@ export function QueryProvider({ children }: { children: ReactNode }) {
                 )
                   timeUnit = "s";
                 // Priority 2: Strong Conventions (if no suffix matches)
-                else if (lowerColName === "__timestamp")
-                  timeUnit =
-                    "ns"; // Strong convention for high-res main timestamp
+                else if (lowerColName === "__timestamp") timeUnit = "ns";
+                // Strong convention for high-res main timestamp
                 else if (
                   lowerColName === "created_at" ||
                   lowerColName === "create_date"
@@ -725,12 +744,13 @@ export function QueryProvider({ children }: { children: ReactNode }) {
     if (databases.length > 0 && connectionState === "connected") {
       // Ensure connection is stable and DBs are loaded
       const savedQuery = localStorage.getItem("lastQuery");
-      const savedTable = localStorage.getItem(SELECTED_TABLE_KEY);
       const savedQueryBuilder = localStorage.getItem(QUERY_BUILDER_KEY);
 
-      if (savedTable && availableTables.includes(savedTable)) {
-        setSelectedTableState(savedTable); // Use internal setter
-      }
+      // Don't automatically select a table, only if explicitly coming from history or URL
+      // if (savedTable && availableTables.includes(savedTable)) {
+      //  setSelectedTableState(savedTable); // Use internal setter
+      // }
+
       if (savedQuery) setQuery(savedQuery);
       if (savedQueryBuilder) {
         try {
@@ -743,33 +763,8 @@ export function QueryProvider({ children }: { children: ReactNode }) {
   }, [databases, availableTables, connectionState]); // Rerun when DBs or tables become available, or connection established
 
   useEffect(() => {
-    try {
-      localStorage.setItem(
-        QUERY_BUILDER_KEY,
-        JSON.stringify(queryBuilderEnabled)
-      );
-    } catch (e) {
-      console.error("Failed to save query builder state", e);
-    }
-  }, [queryBuilderEnabled]);
-
-  useEffect(() => {
-    if (selectedDb) {
-      localStorage.setItem("selectedDb", selectedDb);
-      setSelectedTableState(null); // Use internal setter
-      setAvailableTables([]); // Will be repopulated by loadSchemaForDb
-      setTimeFields([]);
-      setSelectedTimeField(null);
-      HashQueryUtils.clearUrlParameters();
-
-      loadSchemaForDb(selectedDb).catch(console.error);
-    }
-  }, [selectedDb, loadSchemaForDb, apiUrl]);
-
-  useEffect(() => {
     if (selectedTable) {
       localStorage.setItem(SELECTED_TABLE_KEY, selectedTable);
-      setSelectedTimeField(null); // Reset time field when table changes
 
       if (selectedDb && schema && schema[selectedDb]) {
         const tableSchemaData = schema[selectedDb].find(
@@ -804,19 +799,6 @@ export function QueryProvider({ children }: { children: ReactNode }) {
           });
           setTimeFields(fields);
           setDetectableTimeFields(fields.length > 0);
-          if (fields.length > 0) {
-            const preferredField = fields.find((f) =>
-              [
-                "__timestamp",
-                "time",
-                "date",
-                "timestamp",
-                "created_at",
-                "create_date",
-              ].includes(f)
-            );
-            setSelectedTimeField(preferredField || fields[0]);
-          }
         } else {
           setTimeFields([]);
           setDetectableTimeFields(false);
@@ -845,16 +827,6 @@ export function QueryProvider({ children }: { children: ReactNode }) {
     },
     [saveTimeRange] // setTimeRangeInternal is stable
   );
-
-  useEffect(() => {
-    if (query && !selectedTable && availableTables.length > 0) {
-      // Check availableTables to prevent premature selection
-      const detected = extractTableName(query);
-      if (detected && availableTables.includes(detected)) {
-        setSelectedTableState(detected); // Use internal setter
-      }
-    }
-  }, [query, availableTables, selectedTable]); // Add selectedTable to prevent re-running if already set
 
   const saveQueryHistory = useCallback((history: QueryHistoryEntry[]) => {
     try {
@@ -885,116 +857,29 @@ export function QueryProvider({ children }: { children: ReactNode }) {
     [saveQueryHistory]
   );
 
-  // Helper functions for JS-based time calculations (can be moved to a utility file later)
+  const clearQueryHistory = useCallback(() => {
+    setQueryHistory([]);
+    localStorage.removeItem(QUERY_HISTORY_KEY);
+  }, []);
 
-  /**
-   * Parses a relative date string (e.g., "now-5m", "now-24h") based on a given baseDate.
-   * Note: This is a simplified parser. For robust production use, a library like date-fns is recommended.
-   * Timezone of baseDate is preserved.
-   */
-  const parseRelativeDate = (relativeString: string, baseDate: Date): Date => {
-    const match = relativeString.match(/^now-(\d+)([mhdwMy])$/);
-    if (!match) return baseDate; // Should not happen if called after isAbsoluteDate
+  const getShareableUrlForQuery = useCallback(
+    (queryText: string) => {
+      const params = {
+        query: queryText,
+        db: selectedDb,
+        table: selectedTable || undefined,
+        timeField: selectedTimeField || undefined,
+        timeFrom: timeRange?.from,
+        timeTo: timeRange?.to,
+      };
+      return HashQueryUtils.generateShareableUrl(params);
+    },
+    [selectedDb, selectedTable, selectedTimeField, timeRange]
+  );
 
-    const amount = parseInt(match[1], 10);
-    const unit = match[2];
-    const date = new Date(baseDate.getTime()); // Clone baseDate
-
-    switch (unit) {
-      case "m":
-        date.setMinutes(date.getMinutes() - amount);
-        break;
-      case "h":
-        date.setHours(date.getHours() - amount);
-        break;
-      case "d":
-        date.setDate(date.getDate() - amount);
-        break;
-      case "w":
-        date.setDate(date.getDate() - amount * 7);
-        break;
-      case "M":
-        date.setMonth(date.getMonth() - amount);
-        break;
-      case "y":
-        date.setFullYear(date.getFullYear() - amount);
-        break;
-      default:
-        break; // Should not happen
-    }
-    return date;
-  };
-
-  /**
-   * Resolves a TimeRange object to absolute Date objects.
-   * For "now" or relative strings, it uses the current time.
-   * For absolute date strings, it parses them.
-   * Timezone handling is basic: uses system/browser local time for Date operations.
-   */
-  const resolveTimeRangeToDates = (
-    timeRange: TimeRange
-  ): { fromDate: Date; toDate: Date } => {
-    const now = new Date();
-    let fromDate: Date;
-    let toDate: Date;
-
-    if (isAbsoluteDate(timeRange.from)) {
-      fromDate = new Date(timeRange.from);
-    } else if (timeRange.from.toLowerCase() === "now") {
-      fromDate = now;
-    } else {
-      // Relative e.g. "now-5m"
-      fromDate = parseRelativeDate(timeRange.from, now);
-    }
-
-    if (isAbsoluteDate(timeRange.to)) {
-      toDate = new Date(timeRange.to);
-    } else if (timeRange.to.toLowerCase() === "now") {
-      toDate = now;
-    } else {
-      // Relative e.g. "now-5m" (though less common for 'to')
-      toDate = parseRelativeDate(timeRange.to, now);
-    }
-    // Basic validation to ensure fromDate is not after toDate
-    if (fromDate.getTime() > toDate.getTime()) {
-      console.warn(
-        "Time range warning: 'from' date is after 'to' date. Swapping them."
-      );
-      return { fromDate: toDate, toDate: fromDate };
-    }
-
-    return { fromDate, toDate };
-  };
-
-  /**
-   * Converts a JavaScript Date object to a numeric epoch value, scaled to the target unit.
-   * JS Date.getTime() is epoch milliseconds.
-   */
-  const convertDateToScaledEpoch = (
-    date: Date,
-    unit: "s" | "ms" | "us" | "ns" | undefined
-  ): number => {
-    const millis = date.getTime();
-    switch (unit) {
-      case "s":
-        return Math.floor(millis / 1000);
-      case "ms":
-        return millis;
-      case "us":
-        return millis * 1000;
-      case "ns":
-        return millis * 1000000;
-      default:
-        // This case should ideally be handled before calling, by checking if unit is defined.
-        // If called with undefined unit, defaulting to milliseconds for safety, but warning.
-        console.warn(
-          `convertDateToScaledEpoch called with undefined unit. Defaulting to milliseconds.`
-        );
-        return millis;
-    }
-  };
-
-  // End of new helper functions
+  // ----------------------------------------
+  // Query Execution and History
+  // ----------------------------------------
 
   const executeQuery = useCallback(async () => {
     if (!selectedDb) {
@@ -1020,7 +905,10 @@ export function QueryProvider({ children }: { children: ReactNode }) {
     setStartTime(Date.now());
 
     try {
-      let queryToExecute = query.trim();
+      // Store the original, parameterized query
+      const originalQuery = query.trim();
+      let queryToExecute = originalQuery;
+
       if (
         queryBuilderEnabled &&
         selectedTimeField &&
@@ -1033,7 +921,12 @@ export function QueryProvider({ children }: { children: ReactNode }) {
         const fieldDataType = columnSchema?.dataType?.toLowerCase();
         const timeUnit = columnSchema?.timeUnit;
 
-        const { fromDate, toDate } = resolveTimeRangeToDates(timeRange);
+        // Use the utility function from utils.ts
+        const { fromDate, toDate } = resolveTimeRangeToDates(
+          { from: timeRange.from, to: timeRange.to },
+          selectedTimeZone,
+          isAbsoluteDate
+        );
 
         let finalFromStr: string = "NULL";
         let finalToStr: string = "NULL";
@@ -1067,6 +960,7 @@ export function QueryProvider({ children }: { children: ReactNode }) {
           fieldDataType?.includes("int")
         ) {
           if (timeUnit) {
+            // Use the utility function from utils.ts
             const epochFrom = convertDateToScaledEpoch(fromDate, timeUnit);
             const epochTo = convertDateToScaledEpoch(toDate, timeUnit);
             timeFilterCondition = `${selectedTimeField} >= ${epochFrom} AND ${selectedTimeField} <= ${epochTo}`;
@@ -1098,32 +992,36 @@ export function QueryProvider({ children }: { children: ReactNode }) {
       // Execute the query with proper format parameter
       let currentFormat = format;
       const response = await axios.post(
-        `${apiUrl}?db=${encodeURIComponent(selectedDb)}&format=${currentFormat}`,
+        `${apiUrl}?db=${encodeURIComponent(
+          selectedDb
+        )}&format=${currentFormat}`,
         { query: queryToExecute },
         { responseType: currentFormat === "ndjson" ? "text" : "json" }
       );
 
       // Check Content-Type header to determine actual response format
-      const contentType = response.headers['content-type']?.toLowerCase() || '';
-      const isNdjsonResponse = contentType.includes('x-ndjson');
-      const isJsonResponse = contentType.includes('json');
+      const contentType = response.headers["content-type"]?.toLowerCase() || "";
+      const isNdjsonResponse = contentType.includes("x-ndjson");
+      const isJsonResponse = contentType.includes("json");
 
       // Format compatibility detection based on headers
       if (currentFormat === "ndjson" && !isNdjsonResponse && isJsonResponse) {
-        console.log(`Detected content type: ${contentType} when NDJSON was requested`);
+        console.log(
+          `Detected content type: ${contentType} when NDJSON was requested`
+        );
         setFormatCompatibility({
           supportsNdjson: false,
-          detected: true
+          detected: true,
         });
         setFormat("json");
         toast.warning("Format switched to JSON", {
-          description: "Your API only supports JSON format, not NDJSON"
+          description: "Your API only supports JSON format, not NDJSON",
         });
       } else if (isNdjsonResponse && !formatCompatibility.supportsNdjson) {
         // Update if we previously thought it didn't support NDJSON
         setFormatCompatibility({
           supportsNdjson: true,
-          detected: true
+          detected: true,
         });
       }
 
@@ -1132,16 +1030,20 @@ export function QueryProvider({ children }: { children: ReactNode }) {
       // Process response based on the actual content type received
       if (isNdjsonResponse) {
         // Handle true NDJSON response
-        const lines = response.data.split(/\r?\n/).filter((line: string) => line.trim().length > 0);
-        parsedResults = lines.map((line: string) => {
-          try {
-            return JSON.parse(line);
-          } catch (e) {
-            console.warn("Failed to parse NDJSON line:", line);
-            return null;
-          }
-        }).filter(Boolean);
-        
+        const lines = response.data
+          .split(/\r?\n/)
+          .filter((line: string) => line.trim().length > 0);
+        parsedResults = lines
+          .map((line: string) => {
+            try {
+              return JSON.parse(line);
+            } catch (e) {
+              console.warn("Failed to parse NDJSON line:", line);
+              return null;
+            }
+          })
+          .filter(Boolean);
+
         setResults(parsedResults);
         setRawJson(response.data);
       } else {
@@ -1168,9 +1070,9 @@ export function QueryProvider({ children }: { children: ReactNode }) {
       const executionTimeMs = Date.now() - (startTime || Date.now());
       setExecutionTime(executionTimeMs);
 
-      // Add to query history
+      // Add to query history - save the original query with variables, not the processed one
       addToQueryHistory({
-        query: queryToExecute,
+        query: originalQuery,
         db: selectedDb,
         table: selectedTable,
         timeField: selectedTimeField,
@@ -1179,39 +1081,42 @@ export function QueryProvider({ children }: { children: ReactNode }) {
         executionTime: executionTimeMs,
         rowCount: parsedResults.length,
       });
-      localStorage.setItem("lastQuery", query); // Save original query
+      localStorage.setItem("lastQuery", originalQuery); // Save original query
     } catch (err: any) {
       console.error("Query execution error:", err);
-      
+
       // Extract detailed error information from response
       let statusCode = err.response?.status;
-      let errorTitle = statusCode ? `Request failed with status code ${statusCode}` : "Error executing query";
-      
+      let errorTitle = statusCode
+        ? `Request failed with status code ${statusCode}`
+        : "Error executing query";
+
       // Get the detailed error message from the response if available
       let detailedMessage = null;
       if (err.response?.data) {
-        if (typeof err.response.data.error === 'string') {
+        if (typeof err.response.data.error === "string") {
           detailedMessage = err.response.data.error;
-        } else if (typeof err.response.data.message === 'string') {
+        } else if (typeof err.response.data.message === "string") {
           detailedMessage = err.response.data.message;
-        } else if (typeof err.response.data === 'string') {
+        } else if (typeof err.response.data === "string") {
           detailedMessage = err.response.data;
         }
       }
-      
+
       // Fallback to the error message if no detailed message is available
       const errorMessage = errorTitle;
       setError(errorMessage);
-      
+
       // Set the detailed error message separately
       setQueryErrorDetail(detailedMessage);
-      
+
       setResults(null);
       setRawJson(err.response?.data || null);
       const executionTimeMs = Date.now() - (startTime || Date.now());
       setExecutionTime(executionTimeMs);
+      // In the catch block, also use the original query
       addToQueryHistory({
-        query,
+        query: query.trim(),
         db: selectedDb,
         table: selectedTable,
         timeField: selectedTimeField,
@@ -1224,29 +1129,27 @@ export function QueryProvider({ children }: { children: ReactNode }) {
       // Enhanced format error detection for improved reliability
       if (
         format === "ndjson" &&
-        (
-          // Check error message for format-related keywords
-          (typeof err.message === "string" && 
-            (err.message.toLowerCase().includes("json") ||
+        // Check error message for format-related keywords
+        ((typeof err.message === "string" &&
+          (err.message.toLowerCase().includes("json") ||
             err.message.toLowerCase().includes("parse") ||
             err.message.toLowerCase().includes("syntax"))) ||
           // Also check response error messages which might be more specific
-          (err.response?.data?.error && 
+          (err.response?.data?.error &&
             typeof err.response.data.error === "string" &&
             (err.response.data.error.toLowerCase().includes("format") ||
-             err.response.data.error.toLowerCase().includes("invalid")))
-        )
+              err.response.data.error.toLowerCase().includes("invalid"))))
       ) {
         // This may be an API that doesn't support NDJSON
         setFormatCompatibility({
           supportsNdjson: false,
           detected: true,
         });
-        
+
         // Switch format for future requests
         setFormat("json");
         toast.warning("Switched to JSON format", {
-          description: "The API appears to only support JSON format"
+          description: "The API appears to only support JSON format",
         });
       }
     } finally {
@@ -1265,6 +1168,7 @@ export function QueryProvider({ children }: { children: ReactNode }) {
     getColumnsForTable,
     selectedTable,
     formatCompatibility,
+    selectedTimeZone, // Added selectedTimeZone as dependency
   ]);
 
   const clearQuery = useCallback(() => {
@@ -1278,78 +1182,9 @@ export function QueryProvider({ children }: { children: ReactNode }) {
     localStorage.removeItem("lastQuery");
   }, []);
 
-  const clearQueryHistory = useCallback(() => {
-    setQueryHistory([]);
-    localStorage.removeItem(QUERY_HISTORY_KEY);
-  }, []);
-
-  const getShareableUrlForQuery = useCallback(
-    (queryText: string) => {
-      const params = {
-        query: queryText,
-        db: selectedDb,
-        table: selectedTable || undefined,
-        timeField: selectedTimeField || undefined,
-        timeFrom: timeRange?.from,
-        timeTo: timeRange?.to,
-      };
-      return HashQueryUtils.generateShareableUrl(params);
-    },
-    [selectedDb, selectedTable, selectedTimeField, timeRange]
-  );
-
-  // Effect to handle URL hash changes on initial mount
-  useEffect(() => {
-    const handleHashChange = () => {
-      const hash = window.location.hash.slice(1);
-      if (!hash) return;
-      try {
-        const params = HashQueryUtils.getHashParams();
-        if (params.query && params.db) {
-          // Defer execution slightly to allow initial state to settle from localStorage
-          setTimeout(() => {
-            if (params.db !== selectedDb) {
-              // This will trigger other effects (load schema, etc.)
-              selectDatabase(params.db);
-            }
-            if (params.query !== query) {
-              setQuery(params.query);
-            }
-            // Table/timefield selection should ideally wait for schema to be loaded for the new DB
-            // TODO: This part might need refinement based on UX for hash loading.
-            // For now, if they are present and valid for *current* schema, set them.
-            if (
-              params.table &&
-              params.table !== selectedTable &&
-              availableTables.includes(params.table)
-            ) {
-              selectTable(params.table);
-            }
-            if (
-              params.timeField &&
-              params.timeField !== selectedTimeField &&
-              timeFields.includes(params.timeField)
-            ) {
-              setSelectedTimeField(params.timeField);
-            }
-            if (params.timeFrom && params.timeTo) {
-              updateTimeRange({
-                from: params.timeFrom,
-                to: params.timeTo,
-                display: `${params.timeFrom} to ${params.timeTo}`,
-                enabled: true,
-              });
-            }
-          }, 100);
-        }
-      } catch (err) {
-        console.error("Failed to process hash parameters:", err);
-      }
-    };
-    handleHashChange();
-    // IMPORTANT: This effect runs ONLY ONCE on mount.
-    // Adding dependencies would make it re-run on state changes, potentially causing loops. DON'T ADD DEPENDENCIES!!!
-  }, []);
+  // ----------------------------------------
+  // Time Range and Settings Management
+  // ----------------------------------------
 
   const selectDatabase = useCallback(
     (dbName: string) => {
@@ -1405,6 +1240,30 @@ export function QueryProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     localStorage.setItem(SELECTED_TIME_ZONE_KEY, selectedTimeZone);
   }, [selectedTimeZone]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        QUERY_BUILDER_KEY,
+        JSON.stringify(queryBuilderEnabled)
+      );
+    } catch (e) {
+      console.error("Failed to save query builder state", e);
+    }
+  }, [queryBuilderEnabled]);
+
+  useEffect(() => {
+    if (selectedDb) {
+      localStorage.setItem("selectedDb", selectedDb);
+      setSelectedTableState(null); // Use internal setter
+      setAvailableTables([]); // Will be repopulated by loadSchemaForDb
+      setTimeFields([]);
+      setSelectedTimeField(null);
+      HashQueryUtils.clearUrlParameters();
+
+      loadSchemaForDb(selectedDb).catch(console.error);
+    }
+  }, [selectedDb, loadSchemaForDb, apiUrl]);
 
   return (
     <QueryContext.Provider

@@ -638,6 +638,16 @@ export default function QueryEditor() {
     }
   }, [queryBuilderEnabled]);
 
+  // Update editor content when query changes from context (e.g., query history selection)
+  useEffect(() => {
+    if (editorRef.current && isEditorReady) {
+      const currentEditorValue = editorRef.current.getValue();
+      if (query !== currentEditorValue) {
+        editorRef.current.setValue(query);
+      }
+    }
+  }, [query, isEditorReady]);
+
   // Add a getter for the time field details
   const getTimeFieldDetails = useCallback(
     (fieldName: string) => {

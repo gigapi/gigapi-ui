@@ -6,7 +6,6 @@ import { toast } from "sonner";
 
 export default function AppContent() {
   const { 
-
     setQuery, 
     executeQuery, 
     setSelectedDb, 

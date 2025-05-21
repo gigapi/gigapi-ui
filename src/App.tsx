@@ -84,7 +84,7 @@ export default function App() {
             </a>
           </div>
         </footer>
-        <Toaster />
+        <Toaster position="bottom-right" richColors expand />
       </div>
     </ThemeProvider>
   );

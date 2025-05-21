@@ -3,6 +3,7 @@ import * as echarts from "echarts";
 import { cn } from "@/lib/utils";
 import { useTheme } from "../theme-provider";
 import { isDateTimeField, isTimestamp, isDateString } from "@/lib/date-utils";
+import { format, parseISO, isValid } from "date-fns";
 
 // Helper utilities for handling the query result format
 const extractQueryResults = (data: any): Record<string, any>[] => {
@@ -288,6 +289,10 @@ export type GigChartConfig = {
     autoColors?: boolean;
     timestampScale?: 'second' | 'millisecond' | 'microsecond' | 'nanosecond';
   };
+  // Add showArea option for line charts
+  showArea?: boolean;
+  // Add forceHorizontal option
+  forceHorizontal?: boolean;
 };
 
 export type GigChartProps = {
@@ -337,6 +342,7 @@ export const GigChart: React.FC<GigChartProps> = ({
 }) => {
   const chartRef = useRef<HTMLDivElement>(null);
   const [chart, setChart] = useState<echarts.ECharts | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const { theme } = useTheme();
   
   // Theme-based colors
@@ -367,391 +373,457 @@ export const GigChart: React.FC<GigChartProps> = ({
     } : undefined;
 
     // Initialize the chart
-    const newChart = echarts.init(chartRef.current, echartsTheme);
-    setChart(newChart);
+    try {
+      const newChart = echarts.init(chartRef.current, echartsTheme);
+      setChart(newChart);
+      setError(null);
 
-    // Create resize observer for responsive behavior
-    const resizeObserver = new ResizeObserver(() => {
-      newChart.resize();
-    });
-    
-    resizeObserver.observe(chartRef.current);
+      // Create resize observer for responsive behavior
+      const resizeObserver = new ResizeObserver(() => {
+        newChart.resize();
+      });
+      
+      resizeObserver.observe(chartRef.current);
 
-    // Additional window resize handler
-    const handleResize = () => {
-      newChart.resize();
-    };
-    window.addEventListener("resize", handleResize);
+      // Additional window resize handler
+      const handleResize = () => {
+        newChart.resize();
+      };
+      window.addEventListener("resize", handleResize);
 
-    return () => {
-      window.removeEventListener("resize", handleResize);
-      resizeObserver.disconnect();
-      newChart.dispose();
-    };
+      return () => {
+        window.removeEventListener("resize", handleResize);
+        resizeObserver.disconnect();
+        newChart.dispose();
+      };
+    } catch (err) {
+      console.error("Error initializing chart:", err);
+      setError(`Error initializing chart: ${err instanceof Error ? err.message : String(err)}`);
+      return undefined;
+    }
   }, [currentTheme]);
 
   // Update chart options
   useEffect(() => {
     if (!chart) return;
+    if (error) setError(null); // Reset error on config change
     
-    // Handle X-axis formatter for datetime values
-    let enhancedXAxis = config.xAxis;
+    try {
+      // Handle X-axis formatter for datetime values
+      let enhancedXAxis = config.xAxis;
 
-    // Apply datetime formatting to X-axis if needed
-    if (config.fieldInfo?.xIsDateTime && config.xAxis) {
-      enhancedXAxis = {
-        ...config.xAxis,
-        type: 'time',
-        axisLabel: {
-          ...(config.xAxis.axisLabel || {}),
-          rotate: 30, // Slightly rotate labels to prevent overlap
-          margin: 12,
-          formatter: (value: number | string) => {
-            try {
-              // If it's a timestamp number, convert to date
-              if (typeof value === 'number') {
-                const date = new Date(value);
-                if (!isNaN(date.getTime())) {
-                  return date.toLocaleString([], {
-                    month: "short",
-                    day: "numeric",
-                    hour: "2-digit",
-                    minute: "2-digit" 
-                  });
+      // Apply datetime formatting to X-axis if needed
+      if (config.fieldInfo?.xIsDateTime && config.xAxis) {
+        enhancedXAxis = {
+          ...config.xAxis,
+          type: 'time',
+          axisLabel: {
+            ...(config.xAxis.axisLabel || {}),
+            rotate: 30, // Slightly rotate labels to prevent overlap
+            margin: 12,
+            formatter: (value: number | string) => {
+              try {
+                // If it's a timestamp number, convert to date
+                if (typeof value === 'number') {
+                  const date = new Date(value);
+                  if (!isNaN(date.getTime())) {
+                    return format(date, 'MMM d, HH:mm');
+                  }
                 }
-              }
 
-              // If it's an ISO string, parse it directly
-              if (typeof value === 'string' && isISODateString(value)) {
-                const date = new Date(value);
-                if (!isNaN(date.getTime())) {
-                  return date.toLocaleString([], {
-                    month: "short",
-                    day: "numeric",
-                    hour: "2-digit",
-                    minute: "2-digit"
+                // If it's an ISO string, parse it directly
+                if (typeof value === 'string' && value.match(/^\d{4}-\d{2}-\d{2}T/)) {
+                  try {
+                    const date = parseISO(value);
+                    if (isValid(date)) {
+                      return format(date, 'MMM d, HH:mm');
+                    }
+                  } catch (e) {
+                    // Fall back to default formatting if parseISO fails
+                  }
+                }
+                
+                return String(value);
+              } catch (e) {
+                return String(value);
+              }
+            }
+          },
+          // Set proper time scale settings
+          minInterval: 3600 * 1000, // minimum interval of 1 hour
+          splitNumber: 6 // Limit the number of axis ticks to avoid crowding
+        };
+      }
+
+      // Enhanced tooltip formatter that handles dates
+      let enhancedTooltip: any = config.tooltip;
+      
+      if (config.tooltip) {
+        enhancedTooltip = {
+          ...(typeof config.tooltip === 'object' ? config.tooltip : {}),
+          trigger: 'axis',
+          axisPointer: {
+            type: 'cross',
+            label: {
+              backgroundColor: colors[0]
+            }
+          },
+          backgroundColor: currentTheme === 'dark' ? 'rgba(30, 30, 30, 0.9)' : 'rgba(255, 255, 255, 0.95)',
+          borderColor: currentTheme === 'dark' ? 'rgba(70, 70, 70, 0.9)' : 'rgba(200, 200, 200, 0.95)',
+          textStyle: {
+            color: currentTheme === 'dark' ? 'rgba(255, 255, 255, 0.85)' : 'rgba(0, 0, 0, 0.85)'
+          },
+          padding: [8, 12],
+          extraCssText: 'box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);',
+          formatter: (params: any) => {
+            if (Array.isArray(params)) {
+              // Handle axis tooltip (multiple series)
+              const firstParam = params[0];
+              let header = '';
+              
+              // Format x-axis value for header if it's a date field
+              if (config.fieldInfo?.xIsDateTime && firstParam.axisValue) {
+                try {
+                  // Handle ISO date string
+                  if (typeof firstParam.axisValue === 'string' && firstParam.axisValue.match(/^\d{4}-\d{2}-\d{2}T/)) {
+                    try {
+                      const date = parseISO(firstParam.axisValue);
+                      if (isValid(date)) {
+                        header = `<div style="font-weight:bold;margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid ${currentTheme === 'dark' ? 'rgba(100, 100, 100, 0.8)' : 'rgba(220, 220, 220, 0.8)'}">${format(date, 'PPp')}</div>`;
+                      } else {
+                        header = `<div style="font-weight:bold;margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid ${currentTheme === 'dark' ? 'rgba(100, 100, 100, 0.8)' : 'rgba(220, 220, 220, 0.8)'}">${firstParam.axisValue}</div>`;
+                      }
+                    } catch (e) {
+                      header = `<div style="font-weight:bold;margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid ${currentTheme === 'dark' ? 'rgba(100, 100, 100, 0.8)' : 'rgba(220, 220, 220, 0.8)'}">${firstParam.axisValue}</div>`;
+                    }
+                  } 
+                  // Handle timestamp number
+                  else if (typeof firstParam.axisValue === 'number') {
+                    const date = new Date(firstParam.axisValue);
+                    if (!isNaN(date.getTime())) {
+                      header = `<div style="font-weight:bold;margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid ${currentTheme === 'dark' ? 'rgba(100, 100, 100, 0.8)' : 'rgba(220, 220, 220, 0.8)'}">${format(date, 'PPp')}</div>`;
+                    } else {
+                      header = `<div style="font-weight:bold;margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid ${currentTheme === 'dark' ? 'rgba(100, 100, 100, 0.8)' : 'rgba(220, 220, 220, 0.8)'}">${firstParam.axisValue}</div>`;
+                    }
+                  } else {
+                    header = `<div style="font-weight:bold;margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid ${currentTheme === 'dark' ? 'rgba(100, 100, 100, 0.8)' : 'rgba(220, 220, 220, 0.8)'}">${firstParam.axisValue}</div>`;
+                  }
+                } catch (e) {
+                  header = `<div style="font-weight:bold;margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid ${currentTheme === 'dark' ? 'rgba(100, 100, 100, 0.8)' : 'rgba(220, 220, 220, 0.8)'}">${firstParam.axisValue}</div>`;
+                }
+              } else if (firstParam.axisValue) {
+                header = `<div style="font-weight:bold;margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid ${currentTheme === 'dark' ? 'rgba(100, 100, 100, 0.8)' : 'rgba(220, 220, 220, 0.8)'}">${firstParam.axisValue}</div>`;
+              }
+              
+              // Get total value for stacked bars
+              let total = 0;
+              const hasValues = params.some((p: any) => !isNaN(parseFloat(p.value)));
+              
+              if (hasValues) {
+                // If we have multiple series (stacked values)
+                if (params.length > 1) {
+                  params.forEach((p: any) => {
+                    const value = typeof p.value === 'number' 
+                      ? p.value 
+                      : (Array.isArray(p.value) ? p.value[1] : parseFloat(p.value));
+                    if (!isNaN(value)) {
+                      total += value;
+                    }
                   });
                 }
               }
               
-              return String(value);
-            } catch (e) {
-              return String(value);
-            }
-          }
-        },
-        // Set proper time scale settings
-        minInterval: 3600 * 1000, // minimum interval of 1 hour
-        splitNumber: 6 // Limit the number of axis ticks to avoid crowding
-      };
-    }
-
-    // Enhanced tooltip formatter that handles dates
-    let enhancedTooltip: any = config.tooltip;
-    
-    if (config.tooltip) {
-      enhancedTooltip = {
-        ...(typeof config.tooltip === 'object' ? config.tooltip : {}),
-        trigger: 'axis',
-        axisPointer: {
-          type: 'cross',
-          label: {
-            backgroundColor: colors[0]
-          }
-        },
-        backgroundColor: currentTheme === 'dark' ? 'rgba(30, 30, 30, 0.9)' : 'rgba(255, 255, 255, 0.95)',
-        borderColor: currentTheme === 'dark' ? 'rgba(70, 70, 70, 0.9)' : 'rgba(200, 200, 200, 0.95)',
-        textStyle: {
-          color: currentTheme === 'dark' ? 'rgba(255, 255, 255, 0.85)' : 'rgba(0, 0, 0, 0.85)'
-        },
-        padding: [8, 12],
-        extraCssText: 'box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);',
-        formatter: (params: any) => {
-          if (Array.isArray(params)) {
-            // Handle axis tooltip (multiple series)
-            const firstParam = params[0];
-            let header = '';
-            
-            // Format x-axis value for header if it's a date field
-            if (config.fieldInfo?.xIsDateTime && firstParam.axisValue) {
-              try {
-                // Handle ISO date string
-                if (typeof firstParam.axisValue === 'string' && isISODateString(firstParam.axisValue)) {
-                  const date = new Date(firstParam.axisValue);
-                  if (!isNaN(date.getTime())) {
-                    header = `<div style="font-weight:bold;margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid ${currentTheme === 'dark' ? 'rgba(100, 100, 100, 0.8)' : 'rgba(220, 220, 220, 0.8)'}">${date.toLocaleString([], {
-                      year: "numeric",
-                      month: "short",
-                      day: "numeric",
-                      hour: "2-digit",
-                      minute: "2-digit"
-                    })}</div>`;
-                  }
-                } 
-                // Handle timestamp number
-                else if (typeof firstParam.axisValue === 'number') {
-                  const date = new Date(firstParam.axisValue);
-                  if (!isNaN(date.getTime())) {
-                    header = `<div style="font-weight:bold;margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid ${currentTheme === 'dark' ? 'rgba(100, 100, 100, 0.8)' : 'rgba(220, 220, 220, 0.8)'}">${date.toLocaleString([], {
-                      year: "numeric",
-                      month: "short",
-                      day: "numeric",
-                      hour: "2-digit",
-                      minute: "2-digit"
-                    })}</div>`;
-                  } else {
-                    header = `<div style="font-weight:bold;margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid ${currentTheme === 'dark' ? 'rgba(100, 100, 100, 0.8)' : 'rgba(220, 220, 220, 0.8)'}">${firstParam.axisValue}</div>`;
-                  }
+              // Show items with values
+              const items = params.map((param: any) => {
+                const marker = `<span style="display:inline-block;margin-right:6px;border-radius:50%;width:10px;height:10px;background-color:${param.color};"></span>`;
+                let displayValue;
+                
+                if (Array.isArray(param.value)) {
+                  // For custom data formats like [x, y]
+                  displayValue = typeof param.value[1] === 'number' ? param.value[1].toLocaleString() : param.value[1] ?? 'N/A';
                 } else {
-                  header = `<div style="font-weight:bold;margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid ${currentTheme === 'dark' ? 'rgba(100, 100, 100, 0.8)' : 'rgba(220, 220, 220, 0.8)'}">${firstParam.axisValue}</div>`;
+                  // For standard value
+                  displayValue = typeof param.value === 'number' ? param.value.toLocaleString() : (param.value ?? 'N/A');
                 }
-              } catch (e) {
-                header = `<div style="font-weight:bold;margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid ${currentTheme === 'dark' ? 'rgba(100, 100, 100, 0.8)' : 'rgba(220, 220, 220, 0.8)'}">${firstParam.axisValue}</div>`;
-              }
-            } else if (firstParam.axisValue) {
-              header = `<div style="font-weight:bold;margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid ${currentTheme === 'dark' ? 'rgba(100, 100, 100, 0.8)' : 'rgba(220, 220, 220, 0.8)'}">${firstParam.axisValue}</div>`;
+                
+                return `<div style="display:flex;align-items:center;justify-content:space-between;margin-top:4px">
+                  <span>${marker}${param.seriesName || ''}</span>
+                  <span style="font-weight:bold;margin-left:24px">${displayValue}</span>
+                </div>`;
+              }).join('');
+              
+              // Add total if we have multiple series
+              const totalSection = hasValues && params.length > 1 ? 
+                `<div style="margin-top:8px;padding-top:6px;border-top:1px dashed ${currentTheme === 'dark' ? 'rgba(100, 100, 100, 0.5)' : 'rgba(200, 200, 200, 0.8)'}">
+                  <div style="display:flex;align-items:center;justify-content:space-between;">
+                    <span style="font-weight:bold">Total</span>
+                    <span style="font-weight:bold;margin-left:24px">${total.toLocaleString()}</span>
+                  </div>
+                </div>` : '';
+              
+              return `${header}${items}${totalSection}`;
             }
-            
-            const items = params.map((param: any) => {
-              const marker = `<span style="display:inline-block;margin-right:6px;border-radius:50%;width:10px;height:10px;background-color:${param.color};"></span>`;
-              return `<div style="display:flex;align-items:center;justify-content:space-between;margin-top:4px">
-                <span>${marker}${param.seriesName || ''}</span>
-                <span style="font-weight:bold;margin-left:24px">${typeof param.value === 'number' ? param.value.toLocaleString() : (param.value ?? 'N/A')}</span>
-              </div>`;
-            }).join('');
-            
-            return `${header}${items}`;
-          }
-          return '';
-        }
-      };
-    }
-
-    // Element heights and spacings (in pixels)
-    const ELEMENT_SPACING = 15; // Space between elements
-    const LEGEND_HEIGHT = 30;
-    const DATAZOOM_HEIGHT = 30;
-    const EDGE_PADDING = 15;  // Increased padding from edges
-    const DATAZOOM_TOP_MARGIN = 20; // New margin between chart and zoom control
-
-    // Calculate layout based on components present
-    const hasLegend = config.legend;
-    const hasDataZoom = config.dataZoom;
-    
-    // Add title if provided
-    let title = undefined;
-    if (config.title) {
-      title = {
-        text: config.title,
-        left: 'center',
-        top: 10,
-        textStyle: {
-          fontSize: 14,
-          color: currentTheme === 'dark' ? 'rgba(255, 255, 255, 0.85)' : 'rgba(0, 0, 0, 0.85)'
-        }
-      };
-    }
-    
-    // Determine grid spacing with improved margins
-    let gridBottom = EDGE_PADDING + DATAZOOM_TOP_MARGIN; // Add extra margin above zoom control
-    let gridTop = hasLegend ? LEGEND_HEIGHT + ELEMENT_SPACING + EDGE_PADDING : EDGE_PADDING;
-    
-    // Add extra space for title if present
-    if (config.title) {
-      gridTop += 30; // Add space for title
-    }
-    
-    if (hasDataZoom) {
-      gridBottom += DATAZOOM_HEIGHT + ELEMENT_SPACING;
-    }
-    
-    // Position elements
-    // DataZoom component is always at the bottom when present
-    const dataZoomBottom = EDGE_PADDING;
-    
-    // Enhanced grid with better padding for responsive layout
-    const enhancedGrid = {
-      left: '5%',
-      right: '5%',
-      bottom: gridBottom,
-      top: gridTop,
-      containLabel: true,
-      ...(config.grid || {})
-    };
-
-    // Modify bar chart series config for time series data
-    const enhancedSeries = config.series?.map(series => {
-      if (series.type === 'bar' && config.fieldInfo?.xIsDateTime) {
-        return {
-          ...series,
-          barWidth: '50%',  // More appropriate width for temporal data
-          barMaxWidth: 40,  // Set a max width for better scaling
-          barGap: '30%',    // More spacing between bars
-          large: true,      // Enable large data mode for performance
-          encode: {         // Ensure proper encoding of data dimensions
-            x: 0,           // First dimension (timestamp)
-            y: 1            // Second dimension (value)
-          },
-          // Better item styling
-          itemStyle: {
-            ...series.itemStyle,
-            borderRadius: [3, 3, 0, 0]
+            return '';
           }
         };
       }
-      return series;
-    });
-    
-    // Prepare the final options with our enhanced components
-    const options: echarts.EChartsOption = {
-      color: colors,
-      backgroundColor: 'transparent',
-      title: title,
-      legend: typeof config.legend === 'object' ? config.legend : config.legend ? { 
-        type: "scroll", 
-        orient: "horizontal", 
-        top: config.title ? 25 : 10, // Adjust position if title exists
-        left: 'center', // Center the legend
-        textStyle: {
-          color: currentTheme === 'dark' ? 'rgba(255, 255, 255, 0.85)' : 'rgba(0, 0, 0, 0.85)'
-        },
-        width: '60%', // Reduced width to prevent overlap with toolbox
-        selected: {} // Will be auto-populated
-      } : undefined,
-      grid: enhancedGrid,
-      tooltip: enhancedTooltip,
-      toolbox: config.toolbox ? {
-        show: true,
-        feature: {
-          saveAsImage: { show: true, name: `chart-${new Date().toISOString().split('T')[0]}`, title: 'Save' },
-          dataZoom: { show: true, title: { zoom: 'Zoom', back: 'Reset Zoom' } },
-          restore: { show: true, title: 'Reset' },
-        },
-        right: "15px",
-        top: "15px",
-        itemSize: 17, // Make the icons a bit larger
-        itemGap: 10, // Add more spacing between tools
-        iconStyle: {
-          borderColor: currentTheme === 'dark' ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)',
-          borderWidth: 1,
-        },
-        emphasis: {
-          iconStyle: {
-            borderColor: colors[0]
+
+      // Element heights and spacings (in pixels)
+      const ELEMENT_SPACING = 15; // Space between elements
+      const LEGEND_HEIGHT = 30;
+      const DATAZOOM_HEIGHT = 30;
+      const EDGE_PADDING = 15;  // Increased padding from edges
+      const DATAZOOM_TOP_MARGIN = 20; // New margin between chart and zoom control
+
+      // Calculate layout based on components present
+      const hasLegend = config.legend;
+      const hasDataZoom = config.dataZoom;
+      
+      // Add title if provided
+      let title = undefined;
+      if (config.title) {
+        title = {
+          text: config.title,
+          left: 'center',
+          top: 10,
+          textStyle: {
+            fontSize: 14,
+            color: currentTheme === 'dark' ? 'rgba(255, 255, 255, 0.85)' : 'rgba(0, 0, 0, 0.85)'
           }
-        }
-      } : undefined,
-      dataZoom: config.dataZoom ? (
-        Array.isArray(config.dataZoom) ? config.dataZoom : [
-          {
-            type: "inside",
-            start: 0,
-            end: 100,
-            zoomLock: false
-          },
-          {
-            type: "slider",
-            start: 0,
-            end: 100,
-            height: DATAZOOM_HEIGHT,
-            bottom: dataZoomBottom,
-            borderColor: 'transparent',
-            backgroundColor: currentTheme === 'dark' ? 'rgba(50, 50, 50, 0.3)' : 'rgba(240, 240, 240, 0.5)',
-            fillerColor: colors[0] + '20', // Add high transparency
-            handleStyle: {
-              color: colors[0],
-              borderColor: colors[0]
-            },
-            moveHandleStyle: {
-              color: colors[0]
-            },
-            dataBackground: {
-              lineStyle: {
-                color: currentTheme === 'dark' ? 'rgba(120, 120, 120, 0.5)' : 'rgba(180, 180, 180, 0.5)'
-              },
-              areaStyle: {
-                color: currentTheme === 'dark' ? 'rgba(80, 80, 80, 0.3)' : 'rgba(200, 200, 200, 0.3)'
-              }
-            },
-            selectedDataBackground: {
-              lineStyle: {
-                color: colors[0]
-              },
-              areaStyle: {
-                color: colors[0] + '40' // Add transparency
-              }
-            },
-            textStyle: {
-              color: currentTheme === 'dark' ? 'rgba(255, 255, 255, 0.85)' : 'rgba(0, 0, 0, 0.85)'
-            },
-            brushSelect: false, // Disable range selection with mouse drag
-            handleSize: '100%', // Increase handle size
-            showDetail: true, // Show detail tooltip when hovering handle
-            showDataShadow: true, // Show data shadow
-            realtime: true, // Update chart in realtime
-            zoomLock: false, // Allow zooming
-            throttle: 100 // Throttle for performance
-          }
-        ]
-      ) : undefined,
-      xAxis: enhancedXAxis,
-      yAxis: {
-        ...(config.yAxis || {}),
-        axisLine: {
-          lineStyle: {
-            color: currentTheme === 'dark' ? 'rgba(255, 255, 255, 0.2)' : 'rgba(0, 0, 0, 0.1)'
-          }
-        },
-        splitLine: {
-          lineStyle: {
-            color: currentTheme === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)'
-          }
-        },
-        axisLabel: {
-          color: currentTheme === 'dark' ? 'rgba(255, 255, 255, 0.65)' : 'rgba(0, 0, 0, 0.65)',
-          fontSize: 12, // Slightly larger for better readability
-          formatter: (value: number) => {
-            // Format numbers with thousand separators
-            return value.toLocaleString();
-          }
-        }
-      },
-      series: enhancedSeries || config.series?.map(series => {
-        if (series.type === 'line') {
+        };
+      }
+      
+      // Determine grid spacing with improved margins
+      let gridBottom = EDGE_PADDING + DATAZOOM_TOP_MARGIN; // Add extra margin above zoom control
+      let gridTop = hasLegend ? LEGEND_HEIGHT + ELEMENT_SPACING + EDGE_PADDING : EDGE_PADDING;
+      
+      // Add extra space for title if present
+      if (config.title) {
+        gridTop += 30; // Add space for title
+      }
+      
+      if (hasDataZoom) {
+        gridBottom += DATAZOOM_HEIGHT + ELEMENT_SPACING;
+      }
+      
+      // Position elements
+      // DataZoom component is always at the bottom when present
+      const dataZoomBottom = EDGE_PADDING;
+      
+      // Enhanced grid with better padding for responsive layout
+      const enhancedGrid = {
+        left: '5%',
+        right: '5%',
+        bottom: gridBottom,
+        top: gridTop,
+        containLabel: true,
+        ...(config.grid || {})
+      };
+
+      // Modify bar chart series config for time series data
+      const enhancedSeries = config.series?.map(series => {
+        if (series.type === 'bar' && config.fieldInfo?.xIsDateTime) {
           return {
             ...series,
-            symbolSize: 6, // Larger symbols for better touch targets
-            emphasis: {
-              itemStyle: {
-                shadowBlur: 10,
-                shadowColor: 'rgba(0, 0, 0, 0.3)'
-              }
+            barWidth: '50%',  // More appropriate width for temporal data
+            barMaxWidth: 40,  // Set a max width for better scaling
+            barGap: '30%',    // More spacing between bars
+            large: true,      // Enable large data mode for performance
+            encode: {         // Ensure proper encoding of data dimensions
+              x: 0,           // First dimension (timestamp)
+              y: 1            // Second dimension (value)
+            },
+            // Better item styling
+            itemStyle: {
+              ...series.itemStyle,
+              borderRadius: [3, 3, 0, 0]
             }
           };
         }
         return series;
-      }),
-      dataset: config.dataset ? {
-        source: config.dataset.source,
-        dimensions: config.dataset.dimensions
-      } : undefined,
-    };
-
-    // Set options and render chart
-    chart.setOption(options, true);
-
-    // Bind events
-    Object.entries(onEvents).forEach(([eventName, callback]) => {
-      chart.on(eventName, callback);
-    });
-
-    // Return unregistering events
-    return () => {
-      Object.keys(onEvents).forEach((eventName) => {
-        chart?.off(eventName);
       });
-    };
+      
+      // Prepare the final options with our enhanced components
+      const options: echarts.EChartsOption = {
+        color: colors,
+        backgroundColor: 'transparent',
+        title: title,
+        legend: typeof config.legend === 'object' ? config.legend : config.legend ? { 
+          type: "scroll", 
+          orient: "horizontal", 
+          top: config.title ? 25 : 10, // Adjust position if title exists
+          left: 'center', // Center the legend
+          textStyle: {
+            color: currentTheme === 'dark' ? 'rgba(255, 255, 255, 0.85)' : 'rgba(0, 0, 0, 0.85)'
+          },
+          width: '60%', // Reduced width to prevent overlap with toolbox
+          selected: {} // Will be auto-populated
+        } : undefined,
+        grid: enhancedGrid,
+        tooltip: enhancedTooltip,
+        toolbox: config.toolbox ? {
+          show: true,
+          feature: {
+            saveAsImage: { show: true, name: `chart-${new Date().toISOString().split('T')[0]}`, title: 'Save' },
+            dataZoom: { show: true, title: { zoom: 'Zoom', back: 'Reset Zoom' } },
+            restore: { show: true, title: 'Reset' },
+          },
+          right: "15px",
+          top: "15px",
+          itemSize: 17, // Make the icons a bit larger
+          itemGap: 10, // Add more spacing between tools
+          iconStyle: {
+            borderColor: currentTheme === 'dark' ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)',
+            borderWidth: 1,
+          },
+          emphasis: {
+            iconStyle: {
+              borderColor: colors[0]
+            }
+          }
+        } : undefined,
+        dataZoom: config.dataZoom ? (
+          Array.isArray(config.dataZoom) ? config.dataZoom : [
+            {
+              type: "inside",
+              start: 0,
+              end: 100,
+              zoomLock: false
+            },
+            {
+              type: "slider",
+              start: 0,
+              end: 100,
+              height: DATAZOOM_HEIGHT,
+              bottom: dataZoomBottom,
+              borderColor: 'transparent',
+              backgroundColor: currentTheme === 'dark' ? 'rgba(50, 50, 50, 0.3)' : 'rgba(240, 240, 240, 0.5)',
+              fillerColor: colors[0] + '20', // Add high transparency
+              handleStyle: {
+                color: colors[0],
+                borderColor: colors[0]
+              },
+              moveHandleStyle: {
+                color: colors[0]
+              },
+              dataBackground: {
+                lineStyle: {
+                  color: currentTheme === 'dark' ? 'rgba(120, 120, 120, 0.5)' : 'rgba(180, 180, 180, 0.5)'
+                },
+                areaStyle: {
+                  color: currentTheme === 'dark' ? 'rgba(80, 80, 80, 0.3)' : 'rgba(200, 200, 200, 0.3)'
+                }
+              },
+              selectedDataBackground: {
+                lineStyle: {
+                  color: colors[0]
+                },
+                areaStyle: {
+                  color: colors[0] + '40' // Add transparency
+                }
+              },
+              textStyle: {
+                color: currentTheme === 'dark' ? 'rgba(255, 255, 255, 0.85)' : 'rgba(0, 0, 0, 0.85)'
+              },
+              brushSelect: false, // Disable range selection with mouse drag
+              handleSize: '100%', // Increase handle size
+              showDetail: true, // Show detail tooltip when hovering handle
+              showDataShadow: true, // Show data shadow
+              realtime: true, // Update chart in realtime
+              zoomLock: false, // Allow zooming
+              throttle: 100 // Throttle for performance
+            }
+          ]
+        ) : undefined,
+        xAxis: enhancedXAxis,
+        yAxis: {
+          ...(config.yAxis || {}),
+          axisLine: {
+            lineStyle: {
+              color: currentTheme === 'dark' ? 'rgba(255, 255, 255, 0.2)' : 'rgba(0, 0, 0, 0.1)'
+            }
+          },
+          splitLine: {
+            lineStyle: {
+              color: currentTheme === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)'
+            }
+          },
+          axisLabel: {
+            color: currentTheme === 'dark' ? 'rgba(255, 255, 255, 0.65)' : 'rgba(0, 0, 0, 0.65)',
+            fontSize: 12, // Slightly larger for better readability
+            formatter: (value: number) => {
+              // Format numbers with thousand separators
+              return value.toLocaleString();
+            }
+          }
+        },
+        series: enhancedSeries || config.series?.map(series => {
+          if (series.type === 'line') {
+            return {
+              ...series,
+              symbolSize: 6, // Larger symbols for better touch targets
+              emphasis: {
+                itemStyle: {
+                  shadowBlur: 10,
+                  shadowColor: 'rgba(0, 0, 0, 0.3)'
+                }
+              }
+            };
+          }
+          return series;
+        }),
+        dataset: config.dataset ? {
+          source: config.dataset.source,
+          dimensions: config.dataset.dimensions
+        } : undefined,
+      };
+
+      // Set options and render chart
+      chart.setOption(options, true);
+
+      // Bind events
+      Object.entries(onEvents).forEach(([eventName, callback]) => {
+        chart.on(eventName, callback);
+      });
+
+      // Return unregistering events
+      return () => {
+        Object.keys(onEvents).forEach((eventName) => {
+          chart?.off(eventName);
+        });
+      };
+    } catch (err) {
+      console.error("Error rendering chart:", err);
+      setError(`Error rendering chart: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }, [chart, config, colors, onEvents, currentTheme]);
+
+  // Display error if chart fails to render
+  if (error) {
+    return (
+      <div 
+        className={cn("w-full min-h-[300px] flex flex-col items-center justify-center rounded-md shadow-sm", className)}
+        style={{
+          ...style, 
+          minHeight: '300px', 
+          backgroundColor: currentTheme === 'dark' ? 'rgba(30, 30, 30, 0.3)' : 'rgba(250, 250, 250, 0.5)',
+          backdropFilter: 'blur(10px)',
+          padding: '1rem'
+        }}
+      >
+        <div className="text-red-500 font-semibold mb-2">Chart Error</div>
+        <div className="text-sm text-center p-4 max-w-md bg-red-100 dark:bg-red-900/20 rounded border border-red-200 dark:border-red-800/30">
+          {error}
+        </div>
+        <button 
+          className="mt-4 px-4 py-2 bg-primary text-primary-foreground text-sm rounded hover:bg-primary/90 transition-colors"
+          onClick={() => window.location.reload()}
+        >
+          Reload Page
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div 
@@ -817,12 +889,13 @@ function detectTimeField(data: Record<string, any>[], field: string): boolean {
   return dateValueCount > sampleSize / 3; // Reduced threshold to detect more date fields
 }
 
-// Update createBarChart function with better timestamp handling
+// Create chart configuration based on selected type and data
 export const createBarChart = (
   data: any,
   xField: string,
   yField: string | string[],
-  options: Partial<GigChartConfig> = {}
+  options: Partial<GigChartConfig> = {},
+  customSeries?: any[]
 ): GigChartConfig => {
   // Process data to handle the results format
   const processedData = extractQueryResults(data);
@@ -909,44 +982,65 @@ export const createBarChart = (
       
       return valueA - valueB;
     });
-    
-    // Remove duplicate time points by aggregating values
-    if (formattedData.length > 1 && isTimestampField) {
-      const aggregatedData: Record<string, any>[] = [];
-      const timeMap = new Map<string, number[]>();
-      
-      // Group values by timestamp
-      formattedData.forEach(item => {
-        const timeKey = String(item[xField]);
-        yFields.forEach(field => {
-          const values = timeMap.get(timeKey) || [];
-          const value = typeof item[field] === 'number' ? item[field] : 0;
-          values.push(value);
-          timeMap.set(`${timeKey}_${field}`, values);
-        });
+  }
+
+  // Filter out categories with no data - this prevents empty bars/cluttered x-axis
+  if (!xIsDateTime) {
+    // Group data by x values and calculate totals
+    const dataByCategory: Record<string, number> = {};
+    formattedData.forEach(item => {
+      const xValue = String(item[xField]);
+      // Sum up all values across y fields
+      let sum = 0;
+      yFields.forEach(field => {
+        const value = extractNumericValue(item[field]) || 0;
+        sum += value;
       });
-      
-      // Create new data points with aggregated values
-      const timeKeys = Array.from(new Set(formattedData.map(item => String(item[xField]))));
-      timeKeys.forEach(timeKey => {
-        const newItem: Record<string, any> = { [xField]: timeKey };
-        yFields.forEach(field => {
-          const values = timeMap.get(`${timeKey}_${field}`) || [];
-          // Use average for aggregation
-          newItem[field] = values.length > 0 ? values.reduce((a, b) => a + b, 0) / values.length : 0;
-        });
-        aggregatedData.push(newItem);
-      });
-      
-      // Replace with aggregated data if we have any
-      if (aggregatedData.length > 0) {
-        formattedData = aggregatedData;
-      }
+      dataByCategory[xValue] = (dataByCategory[xValue] || 0) + sum;
+    });
+
+    // Filter out categories with zero or very small values
+    const filteredCategories = Object.keys(dataByCategory).filter(
+      category => dataByCategory[category] > 0.01
+    );
+
+    // Only apply filtering if we'd be removing some categories but keeping at least a few
+    if (filteredCategories.length > 0 && filteredCategories.length < Object.keys(dataByCategory).length * 0.9) {
+      formattedData = formattedData.filter(item => 
+        filteredCategories.includes(String(item[xField]))
+      );
     }
   }
   
-  // For time series data, explicitly create data point pairs [time, value]
-  const timeSeriesData = xIsDateTime ? 
+  // Calculate proper y-axis bounds - avoid large empty spaces and negative ranges if not needed
+  let minY = 0;
+  let maxY = 0;
+  let hasNegativeValues = false;
+  
+  formattedData.forEach(item => {
+    yFields.forEach(field => {
+      const value = extractNumericValue(item[field]);
+      if (value !== null) {
+        if (value < 0) hasNegativeValues = true;
+        maxY = Math.max(maxY, value);
+        minY = Math.min(minY, value);
+      }
+    });
+  });
+  
+  // Add padding to max value
+  maxY = maxY * 1.1;
+  
+  // Set min value appropriately (start at 0 unless we have negative values)
+  if (!hasNegativeValues) {
+    minY = 0;
+  } else {
+    // Add some padding for negative values
+    minY = minY * 1.1;
+  }
+  
+  // If custom series data is provided (for grouped data), use that instead
+  const series = customSeries || (xIsDateTime ? 
     yFields.map(field => ({
       name: field,
       type: "bar" as const,
@@ -984,50 +1078,153 @@ export const createBarChart = (
       itemStyle: {
         borderRadius: [3, 3, 0, 0]
       },
-      barWidth: '60%',
       emphasis: {
         itemStyle: {
           shadowBlur: 10,
           shadowColor: 'rgba(0, 0, 0, 0.3)'
         }
       }
-    }));
+    }))
+  );
+
+  // Determine if we should use horizontal bars based on explicit option only
+  const shouldUseHorizontalBars = options.forceHorizontal === true;
+
+  // Create horizontal bar chart configuration if needed
+  if (shouldUseHorizontalBars) {
+    // Swap axes for horizontal bars
+    return {
+      tooltip: true,
+      legend: yFields.length > 1,
+      grid: {
+        left: "15%",  // More space for category labels
+        right: "5%",
+        bottom: "10%", 
+        top: yFields.length > 1 ? "60px" : "40px",
+        containLabel: true,
+      },
+      toolbox: {
+        right: "20px",
+        top: "20px",
+        feature: {
+          saveAsImage: { show: true },
+          dataView: { show: true },
+          magicType: { 
+            show: true, 
+            type: ['line', 'bar', 'stack'] 
+          },
+          restore: { show: true }
+        }
+      },
+      // X and Y axes are flipped for horizontal bars
+      yAxis: {
+        type: 'category',
+        data: [...new Set(formattedData.map(item => extractStringValue(item[xField])))],
+        axisLabel: {
+          fontSize: 12,
+          width: 100,
+          overflow: 'truncate'
+        },
+        nameLocation: 'middle',
+        nameGap: 30,
+        nameTextStyle: {
+          fontSize: 12
+        }
+      } as echarts.YAXisComponentOption,
+      xAxis: {
+        type: "value",
+        axisLabel: {
+          formatter: (value: number) => {
+            return value.toLocaleString();
+          }
+        },
+        min: minY,
+        max: maxY,
+        splitLine: {
+          show: true,
+          lineStyle: {
+            type: 'dashed',
+            opacity: 0.2
+          }
+        }
+      },
+      series: yFields.map(field => ({
+        name: field,
+        type: "bar",
+        data: formattedData.map(item => extractNumericValue(item[field])),
+        label: {
+          show: false,
+          position: "right"
+        },
+        itemStyle: {
+          borderRadius: [0, 3, 3, 0]  // Rounded corners on the right for horizontal bars
+        },
+        barWidth: '60%',  // Wider bars for better visibility
+        emphasis: {
+          itemStyle: {
+            shadowBlur: 10,
+            shadowColor: 'rgba(0, 0, 0, 0.3)'
+          }
+        }
+      })),
+      fieldInfo: {
+        xIsDateTime,
+        xField,
+        yFields,
+        autoColors: true
+      },
+      ...options
+    };
+  }
 
   return {
     tooltip: true,
     legend: yFields.length > 1,
     grid: {
-      left: "5%",
+      left: shouldUseHorizontalBars ? "15%" : "5%",
       right: "5%",
-      bottom: "15%", // Increased to give more space for zoom control
-      top: yFields.length > 1 ? "60px" : "50px", // Increased top margin for legend and tools
+      bottom: shouldUseHorizontalBars ? "10%" : "15%", 
+      top: yFields.length > 1 ? "60px" : "50px",
       containLabel: true,
     },
     toolbox: {
       right: "20px",
       top: "20px",
+      feature: {
+        saveAsImage: { show: true },
+        dataView: { show: true },
+        magicType: { 
+          show: true, 
+          type: ['line', 'bar', 'stack'] 
+        },
+        restore: { show: true }
+      }
     },
     xAxis: {
       type: xIsDateTime ? 'time' : 'category',
       axisLabel: { 
         fontSize: 12, 
-        rotate: xIsDateTime ? 30 : 0,
-        // Improve time formatting
+        rotate: shouldUseHorizontalBars ? 0 : xIsDateTime ? 30 : 
+          [...new Set(formattedData.map(item => item[xField]))].length > 5 ? 45 : 0,
+        interval: shouldUseHorizontalBars ? 'auto' : 0, // Show all labels in horizontal mode
         formatter: xIsDateTime ? (value: any) => {
           // Format the time according to scale of data
-          const date = new Date(value);
-          if (isNaN(date.getTime())) return value;
-          
-          // Format differently based on data granularity
-          // Use more detailed format when zoomed in, more general when zoomed out
-          return date.toLocaleString(undefined, {
-            year: 'numeric',
-            month: 'short',
-            day: 'numeric', 
-            hour: '2-digit', 
-            minute: '2-digit',
-            second: '2-digit'
-          });
+          try {
+            if (typeof value === 'string' && value.match(/^\d{4}-\d{2}-\d{2}T/)) {
+              const date = parseISO(value);
+              if (isValid(date)) {
+                return format(date, 'MMM d, HH:mm');
+              }
+            } else if (typeof value === 'number') {
+              const date = new Date(value);
+              if (!isNaN(date.getTime())) {
+                return format(date, 'MMM d, HH:mm');
+              }
+            }
+          } catch (e) {
+            console.warn("Error formatting date in axis label:", e);
+          }
+          return value;
         } : undefined
       },
       axisLine: {
@@ -1056,7 +1253,9 @@ export const createBarChart = (
       nameGap: 30,
       nameTextStyle: {
         fontSize: 12
-      }
+      },
+      // Use horizontal orientation if we have many categories
+      position: shouldUseHorizontalBars ? 'top' : 'bottom'
     } as echarts.XAXisComponentOption,
     yAxis: {
       type: "value",
@@ -1065,9 +1264,22 @@ export const createBarChart = (
         formatter: (value: number) => {
           return value.toLocaleString();
         }
+      },
+      // Set bounds based on data
+      min: minY,
+      max: maxY,
+      // Use horizontal orientation if we have many categories
+      position: shouldUseHorizontalBars ? 'left' : 'right',
+      // Add dynamic grid lines
+      splitLine: {
+        show: true,
+        lineStyle: {
+          type: 'dashed',
+          opacity: 0.2
+        }
       }
     } as echarts.YAXisComponentOption,
-    series: timeSeriesData as echarts.SeriesOption[],
+    series: series as echarts.SeriesOption[],
     fieldInfo: {
       xIsDateTime,
       xField,
@@ -1083,7 +1295,8 @@ export const createLineChart = (
   data: any,
   xField: string,
   yField: string | string[],
-  options: Partial<GigChartConfig> = {}
+  options: Partial<GigChartConfig> = {},
+  customSeries?: any[]
 ): GigChartConfig => {
   // Process data to handle the results format
   const processedData = extractQueryResults(data);
@@ -1206,25 +1419,31 @@ export const createLineChart = (
     }
   }
   
-  // For time series data, explicitly create data point pairs [time, value]
-  const timeSeriesData = xIsDateTime ? 
+  // If custom series data is provided (for grouped data), use that instead
+  const series = customSeries || (xIsDateTime ? 
     yFields.map(field => ({
       name: field,
       type: "line" as const,
+      smooth: true,
       data: formattedData.map(item => {
         const value = extractNumericValue(item[field]) || 0;
         return [item[xField], value]; 
       }),
-      smooth: true,
+      // Line customization
       symbolSize: 6,
       symbol: 'circle',
+      // Add area shading for time series
+      areaStyle: options.showArea ? {
+        opacity: 0.1
+      } : undefined,
       lineStyle: {
-        width: 3
+        width: 2,
+        cap: 'round'
       },
       emphasis: {
         focus: 'series',
         lineStyle: {
-          width: 4
+          width: 3
         }
       }
     })) : 
@@ -1232,20 +1451,23 @@ export const createLineChart = (
     yFields.map(field => ({
       name: field,
       type: "line" as const,
-      data: formattedData.map(item => extractNumericValue(item[field])),
       smooth: true,
+      data: formattedData.map(item => extractNumericValue(item[field])),
+      // Line customization
       symbolSize: 6,
       symbol: 'circle',
       lineStyle: {
-        width: 3
+        width: 2,
+        cap: 'round'
       },
       emphasis: {
         focus: 'series',
         lineStyle: {
-          width: 4
+          width: 3
         }
       }
-    }));
+    }))
+  );
 
   return {
     tooltip: true,
@@ -1291,7 +1513,7 @@ export const createLineChart = (
         }
       }
     } as echarts.YAXisComponentOption,
-    series: timeSeriesData as echarts.SeriesOption[],
+    series: series as echarts.SeriesOption[],
     fieldInfo: {
       xIsDateTime,
       xField,
@@ -1306,7 +1528,8 @@ export const createAreaChart = (
   data: any,
   xField: string,
   yField: string | string[],
-  options: Partial<GigChartConfig> = {}
+  options: Partial<GigChartConfig> = {},
+  customSeries?: any[]
 ): GigChartConfig => {
   // Process data to handle the results format
   const processedData = extractQueryResults(data);
@@ -1429,52 +1652,115 @@ export const createAreaChart = (
     }
   }
   
-  // For time series data, explicitly create data point pairs [time, value]
-  const timeSeriesData = xIsDateTime ? 
-    yFields.map(field => ({
-      name: field,
-      type: "line" as const,
-      data: formattedData.map(item => {
-        const value = extractNumericValue(item[field]) || 0;
-        return [item[xField], value]; 
-      }),
-      smooth: true,
-      symbol: 'circle',
-      symbolSize: 6,
-      lineStyle: {
-        width: 3
-      },
-      areaStyle: {
-        opacity: 0.2
-      },
-      emphasis: {
-        focus: 'series',
+  // Colors for area charts - used for gradients
+  const chartColors = [
+    'rgba(59, 130, 246, 0.8)', // blue
+    'rgba(52, 211, 153, 0.8)', // green
+    'rgba(251, 146, 60, 0.8)', // orange
+    'rgba(167, 139, 250, 0.8)', // purple
+    'rgba(251, 191, 36, 0.8)', // yellow
+    'rgba(248, 113, 113, 0.8)', // red
+    'rgba(56, 189, 248, 0.8)', // sky
+    'rgba(45, 212, 191, 0.8)', // teal
+    'rgba(129, 140, 248, 0.8)'  // indigo
+  ];
+  
+  // If custom series data is provided (for grouped data), use that instead
+  const series = customSeries || (xIsDateTime ? 
+    yFields.map((field, index) => {
+      // Get a color for this series
+      const color = chartColors[index % chartColors.length];
+      const colorWithoutOpacity = color.replace(/,[^,]*\)$/, ')');
+      
+      return {
+        name: field,
+        type: "line" as const,
+        smooth: true,
+        data: formattedData.map(item => {
+          const value = extractNumericValue(item[field]) || 0;
+          return [item[xField], value]; 
+        }),
         areaStyle: {
-          opacity: 0.3
+          opacity: 0.2,
+          color: {
+            type: 'linear',
+            x: 0,
+            y: 0,
+            x2: 0,
+            y2: 1,
+            colorStops: [
+              {
+                offset: 0,
+                color: color // Already has opacity
+              },
+              {
+                offset: 1,
+                color: colorWithoutOpacity.replace(')', ', 0.1)') // Fade to transparent
+              }
+            ]
+          }
+        },
+        // Line customization
+        symbolSize: 5,
+        symbol: 'circle',
+        lineStyle: {
+          width: 2,
+          cap: 'round'
+        },
+        emphasis: {
+          focus: 'series',
+          areaStyle: {
+            opacity: 0.3
+          }
         }
       }
-    })) : 
+    }) : 
     // Regular category data (non-time series)
-    yFields.map(field => ({
-      name: field,
-      type: "line" as const,
-      data: formattedData.map(item => extractNumericValue(item[field])),
-      smooth: true,
-      symbol: 'circle',
-      symbolSize: 6,
-      lineStyle: {
-        width: 3
-      },
-      areaStyle: {
-        opacity: 0.2
-      },
-      emphasis: {
-        focus: 'series',
+    yFields.map((field, index) => {
+      // Get a color for this series
+      const color = chartColors[index % chartColors.length];
+      const colorWithoutOpacity = color.replace(/,[^,]*\)$/, ')');
+      
+      return {
+        name: field,
+        type: "line" as const,
+        smooth: true,
+        data: formattedData.map(item => extractNumericValue(item[field])),
         areaStyle: {
-          opacity: 0.3
+          opacity: 0.2,
+          color: {
+            type: 'linear',
+            x: 0,
+            y: 0,
+            x2: 0,
+            y2: 1,
+            colorStops: [
+              {
+                offset: 0,
+                color: color // Already has opacity
+              },
+              {
+                offset: 1,
+                color: colorWithoutOpacity.replace(')', ', 0.1)') // Fade to transparent
+              }
+            ]
+          }
+        },
+        // Line customization
+        symbolSize: 5,
+        symbol: 'circle',
+        lineStyle: {
+          width: 2
+        },
+        emphasis: {
+          focus: 'series',
+          areaStyle: {
+            opacity: 0.3
+          }
         }
       }
-    }));
+    })
+  );
 
   return {
     tooltip: true,
@@ -1520,7 +1806,7 @@ export const createAreaChart = (
         }
       }
     } as echarts.YAXisComponentOption,
-    series: timeSeriesData as echarts.SeriesOption[],
+    series: series as echarts.SeriesOption[],
     fieldInfo: {
       xIsDateTime,
       xField,

@@ -33,11 +33,11 @@ class HashQueryUtils {
       return acc;
     }, {} as Record<string, any>);
     
-    // Convert to JSON and base64 encode
+    // Convert to JSON and base64 encode - use direct JSON without double encoding
     const jsonString = JSON.stringify(cleanParams);
-    const base64String = btoa(encodeURIComponent(jsonString));
     
-    return base64String;
+    // Use simple base64 without additional URL encoding to avoid double-encoding issues
+    return btoa(jsonString);
   }
   
   /**
@@ -51,13 +51,37 @@ class HashQueryUtils {
       // Remove the # prefix
       const hashContent = hash.startsWith("#") ? hash.substring(1) : hash;
       
+      // Handle URL-encoded hash content (which might happen depending on the browser)
+      let decodedHashContent = hashContent;
+      if (/%[0-9A-F]{2}/.test(hashContent)) {
+        try {
+          decodedHashContent = decodeURIComponent(hashContent);
+        } catch (e) {
+          console.warn("Failed to decodeURIComponent on hash, using as-is", e);
+          // Continue with the original hash content
+        }
+      }
+      
       try {
         // Try to decode as base64 first (new format)
-        const jsonString = decodeURIComponent(atob(hashContent));
+        const jsonString = atob(decodedHashContent);
         const params = JSON.parse(jsonString);
         return params as HashQueryParams;
-      } catch (firstError) {        
-        const searchParams = new URLSearchParams(hashContent);
+      } catch (firstError) {
+        console.warn("Failed to decode hash as base64, trying legacy format", firstError);
+        
+        // If the base64 decoding fails, try to see if it's the old format or URL-encoded JSON
+        try {
+          // Try to parse as JSON directly
+          if (decodedHashContent.startsWith('{') && decodedHashContent.endsWith('}')) {
+            return JSON.parse(decodedHashContent) as HashQueryParams;
+          }
+        } catch (jsonError) {
+          console.warn("Failed to parse as direct JSON", jsonError);
+        }
+        
+        // Finally, try the old URLSearchParams format
+        const searchParams = new URLSearchParams(decodedHashContent);
         
         // Extract params using old format
         const query = searchParams.get("q") ? decodeURIComponent(searchParams.get("q")!) : undefined;
@@ -160,30 +184,57 @@ class HashQueryUtils {
     window.location.hash = '';
   }
   
-  // Helper to get URL hash parameters
-  static getHashParams(): any {
+  // Helper to get URL hash parameters with better error handling
+  static getHashParams(): HashQueryParams {
     const hash = window.location.hash.slice(1);
     if (!hash) return {};
 
-    try {
-      // First try to decode base64 if it's a base64 string
-      if (hash.match(/^[A-Za-z0-9+/=]+$/)) {
-        const decoded = atob(hash);
-        return JSON.parse(decoded);
-      } 
-      // Fall back to query param parsing
-      else {
-        const params: Record<string, string> = {};
-        const urlParams = new URLSearchParams(hash);
-        
-        urlParams.forEach((value, key) => {
-          params[key] = value;
-        });
-        
-        return params;
+    // First check for URL encoding in the entire hash
+    let decodedHash = hash;
+    if (/%[0-9A-F]{2}/.test(hash)) {
+      try {
+        decodedHash = decodeURIComponent(hash);
+      } catch (e) {
+        console.warn("Failed to decode hash with decodeURIComponent", e);
       }
+    }
+
+    try {
+      // First try to parse as direct JSON if it looks like JSON
+      if (decodedHash.startsWith('{') && decodedHash.endsWith('}')) {
+        return JSON.parse(decodedHash);
+      }
+      
+      // Try to decode as base64
+      try {
+        const decoded = atob(decodedHash);
+        // Check if the result is valid JSON
+        if (decoded.startsWith('{') && decoded.endsWith('}')) {
+          return JSON.parse(decoded);
+        }
+      } catch (base64Error) {
+        console.warn("Failed to decode hash as base64", base64Error);
+      }
+      
+      // Fall back to query param parsing
+      const params: Record<string, string> = {};
+      const urlParams = new URLSearchParams(decodedHash);
+      
+      urlParams.forEach((value, key) => {
+        params[key] = value;
+      });
+      
+      return params;
     } catch (e) {
       console.error('Failed to parse hash parameters:', e);
+      // As a last resort, try to decode the URL-encoded JSON form we saw in the example
+      if (decodedHash.includes('%22query%22')) {
+        try {
+          return JSON.parse(decodeURIComponent(decodedHash));
+        } catch (lastError) {
+          console.error('Last resort parsing failed:', lastError);
+        }
+      }
       return {};
     }
   }

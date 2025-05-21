@@ -25,6 +25,9 @@ import {
   Trash2,
   Calendar,
   Database as DbIcon,
+  Clock,
+  Table,
+  Variable,
 } from "lucide-react";
 import { Badge } from "./ui/badge";
 import { Input } from "./ui/input";
@@ -46,8 +49,15 @@ type HistoryItem = {
 };
 
 export default function QueryHistory() {
-  const { setQuery, setSelectedDb, queryHistory, clearQueryHistory } =
-    useQuery();
+  const { 
+    setQuery, 
+    setSelectedDb, 
+    setSelectedTable, 
+    setSelectedTimeField, 
+    setTimeRange, 
+    queryHistory, 
+    clearQueryHistory 
+  } = useQuery();
   const [localHistory, setLocalHistory] = useState<HistoryItem[]>([]);
   const [isOpen, setIsOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
@@ -60,12 +70,31 @@ export default function QueryHistory() {
     }
   }, [isOpen, queryHistory]);
 
-  // Load a query from history
+  // Load a query from history with all its context
   function loadQueryFromHistory(item: HistoryItem) {
+    // First set the database (this might trigger schema loading)
     setSelectedDb(item.db);
+    
+    // Restore the original query with variables
     setQuery(item.query);
+    
+    // Restore the table if available
+    if (item.table) {
+      setSelectedTable(item.table);
+    }
+    
+    // Restore the time field if available
+    if (item.timeField) {
+      setSelectedTimeField(item.timeField);
+    }
+    
+    // Restore the time range if available
+    if (item.timeRange) {
+      setTimeRange(item.timeRange);
+    }
+    
     setIsOpen(false);
-    toast.success("Query loaded");
+    toast.success("Query context restored");
   }
 
   // Clear all history using context method
@@ -117,6 +146,11 @@ export default function QueryHistory() {
     return `${query.substring(0, maxLength)}...`;
   }
 
+  // Check if query contains time variables
+  function hasTimeVariables(query: string): boolean {
+    return query.includes('$__time') || query.includes('$__from') || query.includes('$__to');
+  }
+
   // Filter the history based on search term
   const filteredHistory = localHistory.filter((item) => {
     if (!searchTerm) return true;
@@ -124,7 +158,9 @@ export default function QueryHistory() {
     const searchLower = searchTerm.toLowerCase();
     return (
       item.query.toLowerCase().includes(searchLower) ||
-      item.db.toLowerCase().includes(searchLower)
+      item.db.toLowerCase().includes(searchLower) ||
+      (item.table && item.table.toLowerCase().includes(searchLower)) ||
+      (item.timeField && item.timeField.toLowerCase().includes(searchLower))
     );
   });
 
@@ -199,7 +235,7 @@ export default function QueryHistory() {
                   onClick={() => loadQueryFromHistory(item)}
                 >
                   <div className="flex items-center justify-between mb-1">
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-1 flex-wrap">
                       <Badge
                         variant="outline"
                         className="h-5 px-1.5 flex items-center gap-1 font-normal bg-primary/5 hover:bg-primary/10 text-xs"
@@ -207,6 +243,37 @@ export default function QueryHistory() {
                         <DbIcon className="h-3 w-3" />
                         {item.db}
                       </Badge>
+                      
+                      {item.table && (
+                        <Badge
+                          variant="outline"
+                          className="h-5 px-1.5 flex items-center gap-1 font-normal bg-muted hover:bg-muted/80 text-xs"
+                        >
+                          <Table className="h-3 w-3" />
+                          {item.table}
+                        </Badge>
+                      )}
+                      
+                      {item.timeField && (
+                        <Badge
+                          variant="outline"
+                          className="h-5 px-1.5 flex items-center gap-1 font-normal bg-blue-500/10 hover:bg-blue-500/20 text-xs text-blue-600 dark:text-blue-400"
+                        >
+                          <Clock className="h-3 w-3" />
+                          {item.timeField}
+                        </Badge>
+                      )}
+                      
+                      {hasTimeVariables(item.query) && (
+                        <Badge
+                          variant="outline"
+                          className="h-5 px-1.5 flex items-center gap-1 font-normal bg-amber-500/10 hover:bg-amber-500/20 text-xs text-amber-600 dark:text-amber-400"
+                        >
+                          <Variable className="h-3 w-3" />
+                          Variables
+                        </Badge>
+                      )}
+                      
                       <span className="text-xs flex items-center gap-1 text-muted-foreground">
                         <Calendar className="h-3 w-3" />
                         {formatDate(item.timestamp)}
@@ -229,6 +296,13 @@ export default function QueryHistory() {
                   <div className="font-mono text-xs text-foreground/80 whitespace-pre-wrap break-all leading-snug bg-muted/30 rounded p-1.5 max-h-24 overflow-hidden">
                     {truncateQuery(item.query)}
                   </div>
+                  
+                  {item.timeRange && (
+                    <div className="mt-1 text-xs text-muted-foreground flex items-center gap-1">
+                      <Clock className="h-3 w-3" />
+                      <span>Range: {item.timeRange.display || `${item.timeRange.from} to ${item.timeRange.to}`}</span>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
