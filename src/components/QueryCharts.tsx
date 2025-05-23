@@ -1,29 +1,36 @@
-import React, { useMemo, useState, useEffect, useCallback } from "react";
-import { useQuery } from "../contexts/QueryContext";
+import React, {
+  useMemo,
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+} from "react";
+import { useQuery } from "@/contexts/QueryContext";
 import {
   GigChart,
   createBarChart,
   createLineChart,
   createAreaChart,
-} from "./ui/gig_chart";
-import { RefreshCw, Info, Calendar, Hash } from "lucide-react";
+} from "@/components/ui/gig_chart";
+import { Info, Calendar, Hash } from "lucide-react";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "./ui/select";
-import { Tabs, TabsList, TabsTrigger } from "./ui/tabs";
+} from "@/components/ui/select";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
-} from "./ui/tooltip";
-import { Badge } from "./ui/badge";
+} from "@/components/ui/tooltip";
+import { Badge } from "@/components/ui/badge";
 import { formatISO } from "date-fns";
 import { isDateString } from "@/lib/date-utils";
+import Loader from "@/components/Loader";
 
 // Define chart type options
 type ChartType = "bar" | "line" | "area" | "horizontalBar";
@@ -188,6 +195,34 @@ export default function QueryCharts() {
   const [selectedYAxis, setSelectedYAxis] = useState<string | null>(null);
   // Add state for group by field
   const [selectedGroupBy, setSelectedGroupBy] = useState<string | null>(null);
+
+  // Add ref for the chart instance to manage its lifecycle
+  const chartInstanceRef = useRef<any>(null);
+
+  // Use component mounted ref for safer async operations
+  const componentMountedRef = useRef(true);
+
+  // Set up cleanup on component unmount
+  useEffect(() => {
+    // Set initial mounted state
+    componentMountedRef.current = true;
+
+    // Cleanup function
+    return () => {
+      componentMountedRef.current = false;
+
+      // Safely destroy chart instance if it exists
+      if (chartInstanceRef.current) {
+        try {
+          chartInstanceRef.current.destroy();
+          chartInstanceRef.current = null;
+        } catch (error) {
+          console.debug("Chart cleanup error (safely handled):", error);
+        }
+      }
+    };
+  }, []);
+
 
   // Helper function to aggregate data by category for better visualization
   const aggregateDataByCategory = useCallback(
@@ -767,48 +802,51 @@ export default function QueryCharts() {
         setSelectedXAxis(allFields[0]); // Fallback
       }
 
-      // For Y-axis, prefer numeric "value" fields and never use time fields
-      if (numericFields.length > 0) {
-        // Prefer common value fields for Y-axis in this order
-        const preferredValueFields = [
-          "value",
-          "jitter",
-          "temperature",
-          "octets",
-          "count",
-          "total",
-          "amount",
-          "sum",
-          "payload_size",
-          "size",
-          "length",
-        ];
-
-        // Filter out time fields from numeric fields to avoid using them as Y-axis
-        const nonTimeNumericFields = numericFields.filter(
-          (field) =>
-            !timeFields.includes(field) &&
-            !field.toLowerCase().includes("time") &&
-            !field.toLowerCase().includes("date")
+      // Set default Y-axis: prefer numeric fields, but avoid using the same field as X
+      if (
+        numericFields.length > 0 &&
+        (!selectedXAxis || numericFields.indexOf(selectedXAxis) === -1)
+      ) {
+        // Find a numeric field that isn't the same as X-axis
+        const filteredNumericFields = numericFields.filter(
+          (field) => field !== selectedXAxis
         );
-
-        const foundPreferredField = preferredValueFields.find(
-          (field) =>
-            nonTimeNumericFields.includes(field) ||
-            nonTimeNumericFields.some((f) =>
-              f.toLowerCase().includes(field.toLowerCase())
-            )
-        );
-
-        setSelectedYAxis(
-          foundPreferredField ||
-            (nonTimeNumericFields.length > 0
-              ? nonTimeNumericFields[0]
-              : numericFields[0])
-        );
+        if (filteredNumericFields.length > 0) {
+          setSelectedYAxis(filteredNumericFields[0]);
+        } else {
+          setSelectedYAxis(numericFields[0]); // Fallback to any numeric field
+        }
+      } else if (allFields.length > 0 && allFields[0] !== selectedXAxis) {
+        setSelectedYAxis(allFields[0]); // Fallback
+      } else if (allFields.length > 1) {
+        setSelectedYAxis(allFields[1]); // Fallback to second field
       }
     }
-  }, [processedData, categoricalFields, numericFields, timeFields, allFields]);
+
+    // Add cleanup to prevent state updates after unmounting
+    return () => {
+      // This empty cleanup function ensures React knows this effect can be safely canceled
+    };
+  }, [processedData, timeFields, categoricalFields, numericFields, allFields]);
+
+  // For chart visualization info logging, add cancellation handling
+  useEffect(() => {
+    let isMounted = true;
+
+    return () => {
+      isMounted = false;
+    };
+  }, [processedData, selectedXAxis, selectedYAxis]);
+
+  // Fix any other useEffect calls that might cause cancellation warnings
+  useEffect(() => {
+    let isMounted = true;
+
+    // Cleanup function to prevent updates after unmounting
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   // Create chart configuration based on selected type and data
   const chartConfig = useMemo(() => {
@@ -854,15 +892,7 @@ export default function QueryCharts() {
 
       // If we have a lot of duplicate categories, use aggregation
       if (uniqueXValues.size < chartData.length / 2) {
-        console.log("Aggregating data for better visualization");
         chartData = aggregateDataByCategory(chartData, xAxis, yAxis);
-
-        // For aggregated data, horizontal bar chart is often better
-        const shouldUseHorizontalChart = uniqueXValues.size > 8;
-        if (shouldUseHorizontalChart && chartType === "bar") {
-          // Suggest horizontal bar for better display
-          console.log("Using horizontal bar for better visualization");
-        }
       }
     }
 
@@ -1340,7 +1370,7 @@ export default function QueryCharts() {
   if (isLoading) {
     return (
       <div className="flex flex-col items-center justify-center h-64">
-        <RefreshCw className="h-8 w-8 text-primary animate-spin" />
+        <Loader className="h-12 w-12 " />
         <p className="mt-2 text-sm text-muted-foreground">Loading data...</p>
       </div>
     );

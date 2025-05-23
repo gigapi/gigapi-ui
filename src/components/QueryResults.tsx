@@ -7,21 +7,31 @@ import {
   Share,
   Timer,
   Server,
-  MonitorPlay,
-  Wifi,
-  FileJson,
 } from "lucide-react";
 import { toast } from "sonner";
-import { ScrollArea } from "./ui/scroll-area";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { formatBytes } from "../lib/utils";
-import { useQuery } from "../contexts/QueryContext";
-import QueryCharts from "./QueryCharts";
-import GigTable from "./GigTable";
-import Loader from "./Loader";
-import { Button } from "./ui/button";
+import { useQuery } from "@/contexts/QueryContext";
+import QueryCharts from "@/components/QueryCharts";
+import GigTable from "@/components/GigTable";
+import Loader from "@/components/Loader";
+import { Button } from "@/components/ui/button";
 import HashQueryUtils from "@/lib/hash-query-utils";
-import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
+  calculatePerformanceMetrics,
+  formatExecutionTime,
+  extractServerMetrics,
+  extractTransformedQuery,
+  type PerformanceMetrics,
+} from "@/lib/performance-utils";
 
 export default function QueryResults() {
   const {
@@ -40,75 +50,76 @@ export default function QueryResults() {
     queryHistory,
   } = useQuery();
 
-  // Performance metrics
-  const [performanceMetrics, setPerformanceMetrics] = useState({
-    apiResponseTime: 0,
-    renderTime: 0,
-    totalTime: 0,
-    clientProcessingTime: 0,
-    networkTime: 0,
-    parseTime: 0,
-  });
-
-  // Store the executed query separately from the editor query
-  const [executedQuery, setExecutedQuery] = useState(() => {
-    // Initialize with the most recent history item if available
-    if (queryHistory && queryHistory.length > 0) {
-      return queryHistory[0].query || query;
-    }
-    return query;
-  });
+  // Simplified state management
   const [activeTab, setActiveTab] = useState("results");
   const [chartsLoaded, setChartsLoaded] = useState(false);
 
-  // Ref for render timing
+  // Track query info with better naming
+  const [currentExecutedQuery, setCurrentExecutedQuery] = useState(query);
+  const [transformedQuery, setTransformedQuery] = useState("");
+
+  // Performance metrics - simplified
+  const [localPerformanceMetrics, setLocalPerformanceMetrics] =
+    useState<PerformanceMetrics>({
+      totalTime: 0,
+      serverTime: 0,
+      networkTime: 0,
+      clientTime: 0,
+    });
+
+  // Refs for performance tracking
   const renderStartTime = useRef(0);
+  const queryStartTime = useRef(0);
 
-  // Measure render time
+  // Simplified performance tracking
   useEffect(() => {
-    if (results && !isLoading) {
-      const now = performance.now();
-      if (renderStartTime.current > 0) {
-        const renderTime = now - renderStartTime.current;
-        setPerformanceMetrics((prev) => ({
-          ...prev,
-          renderTime,
-          // Estimate client processing as the difference between total time and API response time
-          clientProcessingTime: Math.max(
-            0,
-            (executionTime || 0) - prev.apiResponseTime
-          ),
-          // Estimate network time (rough approximation)
-          networkTime: Math.max(
-            0,
-            (executionTime || 0) - prev.apiResponseTime - renderTime
-          ),
-          // Total time is the full execution time
-          totalTime: executionTime || 0,
-        }));
-      }
-    } else if (isLoading) {
+    if (isLoading) {
       renderStartTime.current = performance.now();
-    }
-  }, [results, isLoading, executionTime]);
+      queryStartTime.current = performance.now();
+    } else if (results !== null && executionTime) {
+      const renderTime = performance.now() - renderStartTime.current;
+      const serverMetrics = extractServerMetrics(rawJson);
 
-  // Update executed query when new query is executed (track by queryHistory changes)
-  const prevQueryHistoryLength = useRef(queryHistory.length);
+      const metrics = calculatePerformanceMetrics(
+        executionTime,
+        serverMetrics,
+        renderTime
+      );
+
+      setLocalPerformanceMetrics(metrics);
+    }
+  }, [results, isLoading, executionTime, rawJson]);
+
+  // Simplified query tracking
+  const { actualExecutedQuery } = useQuery();
 
   useEffect(() => {
-    if (
-      queryHistory.length > prevQueryHistoryLength.current &&
-      queryHistory.length > 0
-    ) {
-      // A new query has been executed, update the executedQuery
-      const lastQuery = queryHistory[0];
-      setExecutedQuery(lastQuery.query || query);
-    } else if (queryHistory.length > 0) {
-      // Just in case, always ensure we have the latest query
-      setExecutedQuery(queryHistory[0].query || query);
+    // Update current executed query from latest history
+    if (queryHistory.length > 0) {
+      const latestQuery = queryHistory[0];
+      setCurrentExecutedQuery(latestQuery.query || query);
+    } else {
+      setCurrentExecutedQuery(query);
     }
-    prevQueryHistoryLength.current = queryHistory.length;
   }, [queryHistory, query]);
+
+  useEffect(() => {
+    // Update transformed query from context or try to extract from response
+    if (actualExecutedQuery) {
+      setTransformedQuery(actualExecutedQuery);
+    } else {
+      // Try to extract from raw data as fallback
+      updateTransformedQuery();
+    }
+  }, [actualExecutedQuery, rawJson]);
+
+  // Helper function to extract transformed query from raw response
+  const updateTransformedQuery = () => {
+    const extracted = extractTransformedQuery(rawJson);
+    if (extracted) {
+      setTransformedQuery(extracted);
+    }
+  };
 
   // Load charts only when the tab is selected
   useEffect(() => {
@@ -116,43 +127,6 @@ export default function QueryResults() {
       setChartsLoaded(true);
     }
   }, [activeTab]);
-
-  // Performance timing for query execution
-  useEffect(() => {
-    if (rawJson && rawJson.metrics) {
-      // Try to extract server-side metrics if available
-      const serverMetrics = rawJson.metrics;
-
-      // Update performance metrics with server-side data
-      setPerformanceMetrics((prev) => ({
-        ...prev,
-        apiResponseTime: serverMetrics.queryTime || 0,
-        parseTime: serverMetrics.parseTime || 0,
-        // Update other metrics based on server data
-        ...serverMetrics,
-      }));
-    }
-  }, [rawJson]);
-
-  // Format execution time properly
-  const formatExecutionTime = (timeMs: number | null) => {
-    if (timeMs === null || timeMs === undefined) return "";
-
-    // Format as milliseconds if less than 1 second
-    if (timeMs < 1000) {
-      return `${timeMs.toFixed(1)}ms`;
-    }
-
-    // Format as seconds if less than 60 seconds
-    if (timeMs < 60000) {
-      return `${(timeMs / 1000).toFixed(1)}s`;
-    }
-
-    // Format as minutes:seconds for longer durations
-    const minutes = Math.floor(timeMs / 60000);
-    const seconds = ((timeMs % 60000) / 1000).toFixed(1);
-    return `${minutes}m ${seconds}s`;
-  };
 
   function renderResultsContent() {
     if (isLoading) {
@@ -313,18 +287,32 @@ export default function QueryResults() {
             <Button
               className="absolute top-2 right-2 z-10"
               onClick={() => {
-                navigator.clipboard.writeText(JSON.stringify(rawJson, null, 2));
+                // Handle copying based on rawJson type
+                const textToCopy =
+                  typeof rawJson === "string"
+                    ? rawJson
+                    : JSON.stringify(rawJson, null, 2);
+                navigator.clipboard.writeText(textToCopy);
                 toast.success("Raw data copied to clipboard");
               }}
             >
               <Copy className="h-4 w-4" />
             </Button>
             <pre className="p-4 text-sm font-mono text-card-foreground text-wrap break-words whitespace-pre-wrap">
-              {isLoading
-                ? "Loading..."
-                : rawJson
-                ? JSON.stringify(rawJson, null, 2)
-                : "No raw data available."}
+              {isLoading ? (
+                <>
+                  <Loader className="h-12 w-12" />
+                  <p>Loading...</p>
+                </>
+              ) : rawJson ? (
+                typeof rawJson === "string" ? (
+                  rawJson // Display raw string (NDJSON) as is
+                ) : (
+                  JSON.stringify(rawJson, null, 2)
+                ) // Format JSON with indentation
+              ) : (
+                "No raw data available."
+              )}
             </pre>
           </ScrollArea>
         </TabsContent>
@@ -391,36 +379,29 @@ export default function QueryResults() {
                   </pre>
                 </div>
 
-                <div>
-                  <h3 className="text-xs uppercase text-muted-foreground mb-1 font-bold">
-                    Executed Query
-                  </h3>
-                  <pre className="bg-muted p-3 rounded-md overflow-x-auto text-sm break-words whitespace-pre-wrap">
-                    {executedQuery || "No query executed yet."}
-                  </pre>
-                </div>
-
-                {selectedTimeField && (
+                {currentExecutedQuery && currentExecutedQuery !== query && (
                   <div>
                     <h3 className="text-xs uppercase text-muted-foreground mb-1 font-bold">
-                      Time Filter
+                      Executed Query
                     </h3>
-                    <div className="bg-muted p-3 rounded-md">
-                      <p>
-                        <span className="text-muted-foreground">Field:</span>{" "}
-                        {selectedTimeField}
-                      </p>
-                      <p>
-                        <span className="text-muted-foreground">Range:</span>{" "}
-                        {timeRange?.from} to {timeRange?.to}
-                      </p>
-                      <p>
-                        <span className="text-muted-foreground">Display:</span>{" "}
-                        {timeRange?.display}
-                      </p>
-                    </div>
+                    <pre className="bg-muted p-3 rounded-md overflow-x-auto text-sm break-words whitespace-pre-wrap">
+                      {currentExecutedQuery}
+                    </pre>
                   </div>
                 )}
+
+                {transformedQuery &&
+                  transformedQuery !== currentExecutedQuery &&
+                  transformedQuery !== query && (
+                    <div>
+                      <h3 className="text-xs uppercase text-muted-foreground mb-1 font-bold">
+                        Processed Query (Variables Replaced)
+                      </h3>
+                      <pre className="bg-muted p-3 rounded-md overflow-x-auto text-sm break-words whitespace-pre-wrap">
+                        {transformedQuery}
+                      </pre>
+                    </div>
+                  )}
 
                 <div>
                   <h3 className="text-xs uppercase text-muted-foreground mb-1 font-bold">
@@ -481,94 +462,64 @@ export default function QueryResults() {
                     Loading metrics...
                   </CardContent>
                 </Card>
-              ) : executionTime === null || executionTime === undefined ? (
+              ) : !executionTime && localPerformanceMetrics.totalTime === 0 ? (
                 <Card>
                   <CardContent className="pt-6 text-center text-muted-foreground">
                     No query executed yet, or metrics not available.
                   </CardContent>
                 </Card>
               ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   {[
                     {
-                      title: "Total Execution Time",
-                      value: performanceMetrics.totalTime,
+                      title: "Total Time",
+                      tooltip: "Complete end-to-end query execution time",
+                      value: localPerformanceMetrics.totalTime,
                       icon: Timer,
                       unit: "time",
                     },
                     {
-                      title: "Server DB Query Time",
-                      value: performanceMetrics.apiResponseTime,
+                      title: "Server Processing",
+                      tooltip: "Database execution time on the server",
+                      value: localPerformanceMetrics.serverTime,
                       icon: Server,
                       unit: "time",
                     },
                     {
-                      title: "Render Time (UI)",
-                      value: performanceMetrics.renderTime,
-                      icon: MonitorPlay,
-                      unit: "time",
-                    },
-                    {
-                      title: "Network & Other Processing",
-                      value: performanceMetrics.networkTime,
-                      icon: Wifi,
-                      unit: "time",
-                    },
-                    {
-                      title: "JSON Parse Time (Server)",
-                      value: performanceMetrics.parseTime,
-                      icon: FileJson,
+                      title: "Network Transfer",
+                      tooltip: "Time spent transferring data over the network",
+                      value: localPerformanceMetrics.networkTime,
+                      icon: Share,
                       unit: "time",
                     },
                   ].map((metric, idx) => (
-                    <Card key={idx}>
-                      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium text-muted-foreground">
-                          {metric.title}
-                        </CardTitle>
-                        {metric.icon && (
-                          <metric.icon className="h-4 w-4 text-muted-foreground" />
-                        )}
-                      </CardHeader>
-                      <CardContent>
-                        <div className="text-2xl font-bold">
-                          {metric.unit === "time"
-                            ? formatExecutionTime(metric.value as number)
-                            : metric.value}
-                        </div>
-                      </CardContent>
-                    </Card>
+                    <TooltipProvider key={idx}>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Card>
+                            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                              <CardTitle className="text-sm font-medium text-muted-foreground">
+                                {metric.title}
+                              </CardTitle>
+                              {metric.icon && (
+                                <metric.icon className="h-4 w-4 text-muted-foreground" />
+                              )}
+                            </CardHeader>
+                            <CardContent>
+                              <div className="text-2xl font-bold">
+                                {metric.unit === "time"
+                                  ? formatExecutionTime(metric.value as number)
+                                  : metric.value}
+                              </div>
+                            </CardContent>
+                          </Card>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p className="max-w-xs">{metric.tooltip}</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
                   ))}
-
-                  {rawJson?.metrics &&
-                    Object.entries(rawJson.metrics).map(([key, value]) => {
-                      if (
-                        ["queryTime", "parseTime", "totalTime"].includes(key) ||
-                        performanceMetrics.hasOwnProperty(key)
-                      )
-                        return null;
-
-                      const formattedKey = key
-                        .replace(/([A-Z])/g, " $1")
-                        .replace(/^./, (str) => str.toUpperCase());
-
-                      return (
-                        <Card key={key}>
-                          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                            <CardTitle className="text-sm font-medium text-muted-foreground">
-                              {formattedKey}
-                            </CardTitle>
-                          </CardHeader>
-                          <CardContent>
-                            <div className="text-2xl font-bold">
-                              {typeof value === "number"
-                                ? formatExecutionTime(value)
-                                : String(value)}
-                            </div>
-                          </CardContent>
-                        </Card>
-                      );
-                    })}
                 </div>
               )}
             </div>

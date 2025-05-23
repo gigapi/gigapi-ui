@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useQuery } from "../contexts/QueryContext";
+import { useQuery } from "@/contexts/QueryContext";
 import {
   Sheet,
   SheetContent,
@@ -7,7 +7,7 @@ import {
   SheetHeader,
   SheetTitle,
   SheetTrigger,
-} from "./ui/sheet";
+} from "@/components/ui/sheet";
 import {
   Dialog,
   DialogContent,
@@ -15,9 +15,9 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "./ui/dialog";
-import { Button } from "./ui/button";
-import { ScrollArea } from "./ui/scroll-area";
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   History,
   Copy,
@@ -29,8 +29,8 @@ import {
   Table,
   Variable,
 } from "lucide-react";
-import { Badge } from "./ui/badge";
-import { Input } from "./ui/input";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 
 // Use the same type as in QueryContext
@@ -168,8 +168,8 @@ export default function QueryHistory() {
     <>
       <Sheet open={isOpen} onOpenChange={setIsOpen}>
         <SheetTrigger asChild>
-          <Button variant="outline" size="icon" title="Query History">
-            <History className="h-5 w-5" />
+          <Button variant="outline">
+            <History className="h-5 w-5" /> History
           </Button>
         </SheetTrigger>
         <SheetContent
@@ -254,7 +254,8 @@ export default function QueryHistory() {
                         </Badge>
                       )}
                       
-                      {item.timeField && (
+                      {/* Only show time field badge if query has time variables AND timeField is not null */}
+                      {item.timeField && hasTimeVariables(item.query) && (
                         <Badge
                           variant="outline"
                           className="h-5 px-1.5 flex items-center gap-1 font-normal bg-blue-500/10 hover:bg-blue-500/20 text-xs text-blue-600 dark:text-blue-400"
@@ -264,6 +265,7 @@ export default function QueryHistory() {
                         </Badge>
                       )}
                       
+                      {/* Only show variables badge if query has time variables */}
                       {hasTimeVariables(item.query) && (
                         <Badge
                           variant="outline"
@@ -297,7 +299,8 @@ export default function QueryHistory() {
                     {truncateQuery(item.query)}
                   </div>
                   
-                  {item.timeRange && (
+                  {/* Only show time range if query has time variables AND timeRange is not null */}
+                  {item.timeRange && hasTimeVariables(item.query) && (
                     <div className="mt-1 text-xs text-muted-foreground flex items-center gap-1">
                       <Clock className="h-3 w-3" />
                       <span>Range: {item.timeRange.display || `${item.timeRange.from} to ${item.timeRange.to}`}</span>

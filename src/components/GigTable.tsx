@@ -15,18 +15,18 @@ import type {
   ColumnSizingState,
 } from "@tanstack/react-table";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { formatBytes, formatDuration } from "../lib/utils"; // Assuming these are still needed for stats
+import { formatBytes, formatDuration } from "@/lib/utils"; // Assuming these are still needed for stats
 import { Download, Search, X, Clock, SlidersHorizontal } from "lucide-react";
-import { Button } from "./ui/button";
-import { Input } from "./ui/input";
-import { Checkbox } from "./ui/checkbox";
-import { Card, CardContent } from "./ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Card, CardContent } from "@/components/ui/card";
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
-} from "./ui/tooltip";
+} from "@/components/ui/tooltip";
 
 // Define a generic type for the data row
 type DataRow = Record<string, any>;
@@ -72,10 +72,14 @@ const GigTable: React.FC<GigTableProps> = ({
     pageIndex: 0,
     pageSize: initialPageSize,
   });
-  const [enabledColumns, setEnabledColumns] = useState<Record<string, boolean>>({});
+  const [enabledColumns, setEnabledColumns] = useState<Record<string, boolean>>(
+    {}
+  );
   const [showColumnSelector, setShowColumnSelector] = useState(false);
   const [columnSizing, setColumnSizing] = useState<ColumnSizingState>({});
-  const [userResizedColumns, setUserResizedColumns] = useState<Record<string, number>>({});
+  const [userResizedColumns, setUserResizedColumns] = useState<
+    Record<string, number>
+  >({});
   const [columnSelectorFilter, setColumnSelectorFilter] = useState("");
   // const [sorting, setSorting] = useState<SortingState>([]); // REMOVED
 
@@ -95,7 +99,8 @@ const GigTable: React.FC<GigTableProps> = ({
     if (data && data.length > 0 && data[0]) {
       const allKeys = Object.keys(data[0]);
       const initialEnabledCols = allKeys.reduce((acc, key) => {
-        acc[key] = enabledColumns[key] === undefined ? true : enabledColumns[key];
+        acc[key] =
+          enabledColumns[key] === undefined ? true : enabledColumns[key];
         return acc;
       }, {} as Record<string, boolean>);
       setEnabledColumns(initialEnabledCols);
@@ -119,9 +124,10 @@ const GigTable: React.FC<GigTableProps> = ({
     if (data && data.length > 0 && data[0]) {
       const newSizingState: ColumnSizingState = {};
       Object.keys(data[0]).forEach((key) => {
-        newSizingState[key] = userResizedColumns[key] !== undefined
-          ? userResizedColumns[key]
-          : DEFAULT_COLUMN_WIDTH; // Use default width
+        newSizingState[key] =
+          userResizedColumns[key] !== undefined
+            ? userResizedColumns[key]
+            : DEFAULT_COLUMN_WIDTH; // Use default width
       });
       if (JSON.stringify(columnSizing) !== JSON.stringify(newSizingState)) {
         setColumnSizing(newSizingState);
@@ -142,23 +148,43 @@ const GigTable: React.FC<GigTableProps> = ({
           accessorKey: key,
           minSize: MIN_COLUMN_WIDTH,
           maxSize: MAX_COLUMN_WIDTH,
-          header: () => ( // Simplified header
-            <div className="h-7 text-xs w-full flex items-center justify-start pl-0" title={key}>
+          header: () => (
+            // Simplified header
+            <div
+              className="h-7 text-xs w-full flex items-center justify-start pl-0"
+              title={key}
+            >
               <span className="truncate">{key}</span>
             </div>
           ),
           cell: ({ row }) => {
             const value = row.getValue(key);
-            const titleAttribute = typeof value === "object" ? JSON.stringify(value) : String(value ?? "");
+            const titleAttribute =
+              typeof value === "object"
+                ? JSON.stringify(value)
+                : String(value ?? "");
             let displayValue: React.ReactNode;
 
-            if (columnRenderers && columnRenderers[key] && value !== null && value !== undefined) {
+            if (
+              columnRenderers &&
+              columnRenderers[key] &&
+              value !== null &&
+              value !== undefined
+            ) {
               displayValue = columnRenderers[key](value);
             } else if (value === null || value === undefined) {
-              displayValue = <span className="text-neutral-400 italic text-xs opacity-50">null</span>;
+              displayValue = (
+                <span className="text-neutral-400 italic text-xs opacity-50">
+                  null
+                </span>
+              );
             } else if (typeof value === "object") {
               // Properly stringify objects for display
-              displayValue = <span className="font-mono text-xs text-blue-500">{JSON.stringify(value)}</span>;
+              displayValue = (
+                <span className="font-mono text-xs text-blue-500">
+                  {JSON.stringify(value)}
+                </span>
+              );
             } else {
               displayValue = String(value); // Default to string
             }
@@ -171,7 +197,8 @@ const GigTable: React.FC<GigTableProps> = ({
                   </div>
                 </TooltipTrigger>
                 <TooltipContent
-                  side="top" align="start"
+                  side="top"
+                  align="start"
                   className="max-w-md break-all bg-popover text-popover-foreground p-2 rounded-md shadow-md border text-xs"
                 >
                   <p>{titleAttribute}</p>
@@ -185,12 +212,17 @@ const GigTable: React.FC<GigTableProps> = ({
       })
       .filter((column) => {
         const accessorKey = (column as any).accessorKey as string;
-        return accessorKey === undefined || enabledColumns[accessorKey] !== false;
+        return (
+          accessorKey === undefined || enabledColumns[accessorKey] !== false
+        );
       });
   }, [data, enabledColumns, columnRenderers]);
 
-  const handleColumnSizeChange = (updater: React.SetStateAction<ColumnSizingState>) => {
-    const newSizingFromTable = typeof updater === "function" ? updater(columnSizing) : updater;
+  const handleColumnSizeChange = (
+    updater: React.SetStateAction<ColumnSizingState>
+  ) => {
+    const newSizingFromTable =
+      typeof updater === "function" ? updater(columnSizing) : updater;
     setColumnSizing(newSizingFromTable);
     setUserResizedColumns(newSizingFromTable);
   };
@@ -233,35 +265,51 @@ const GigTable: React.FC<GigTableProps> = ({
 
   const virtualRows = rowVirtualizer.getVirtualItems();
   const paddingTop = virtualRows.length > 0 ? virtualRows[0]?.start ?? 0 : 0;
-  const paddingBottom = virtualRows.length > 0
-      ? rowVirtualizer.getTotalSize() - (virtualRows[virtualRows.length - 1]?.end ?? 0)
+  const paddingBottom =
+    virtualRows.length > 0
+      ? rowVirtualizer.getTotalSize() -
+        (virtualRows[virtualRows.length - 1]?.end ?? 0)
       : 0;
 
   const exportToCSV = () => {
     if (!data || !data.length) return;
-    const visibleKeys = table.getVisibleLeafColumns().map(c => c.id);
-    const headers = visibleKeys.length > 0 ? visibleKeys : (data[0] ? Object.keys(data[0]) : []);
+    const visibleKeys = table.getVisibleLeafColumns().map((c) => c.id);
+    const headers =
+      visibleKeys.length > 0
+        ? visibleKeys
+        : data[0]
+        ? Object.keys(data[0])
+        : [];
     if (headers.length === 0) return;
 
     const csvRows = [headers.join(",")];
     // Export based on current filter, but original data (not paginated)
-    const dataToExport = table.getFilteredRowModel().rows.map(r => r.original);
+    const dataToExport = table
+      .getFilteredRowModel()
+      .rows.map((r) => r.original);
 
     for (const row of dataToExport) {
       const values = headers.map((header) => {
         const value = row[header];
         if (value === null || value === undefined) return "";
-        if (typeof value === "string" && value.includes(",")) return `"${value.replace(/"/g, '""')}"`;
-        if (typeof value === "object") return `"${JSON.stringify(value).replace(/"/g, '""')}"`;
+        if (typeof value === "string" && value.includes(","))
+          return `"${value.replace(/"/g, '""')}"`;
+        if (typeof value === "object")
+          return `"${JSON.stringify(value).replace(/"/g, '""')}"`;
         return String(value);
       });
       csvRows.push(values.join(","));
     }
-    const blob = new Blob([csvRows.join("\n")], { type: "text/csv;charset=utf-8;" });
+    const blob = new Blob([csvRows.join("\n")], {
+      type: "text/csv;charset=utf-8;",
+    });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.setAttribute("href", url);
-    link.setAttribute("download", `query-results-${new Date().toISOString().slice(0, 19)}.csv`);
+    link.setAttribute(
+      "download",
+      `gigapi-ui-query-results-${new Date().toISOString().slice(0, 19)}.csv`
+    );
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -290,38 +338,89 @@ const GigTable: React.FC<GigTableProps> = ({
 
     // Simplified filtering for column selector
     const filteredColumnKeys = useMemo(() => {
-        if (!columnSelectorFilter) return allColumnKeys;
-        return allColumnKeys.filter(key => key.toLowerCase().includes(columnSelectorFilter.toLowerCase()));
+      if (!columnSelectorFilter) return allColumnKeys;
+      return allColumnKeys.filter((key) =>
+        key.toLowerCase().includes(columnSelectorFilter.toLowerCase())
+      );
     }, [allColumnKeys, columnSelectorFilter]);
-
 
     return (
       <Card className="absolute right-0 top-12 z-20 w-[350px] bg-background shadow-lg rounded-md border p-2">
         <CardContent className="p-2">
           <div className="flex justify-between items-center mb-2">
-            <h3 className="text-sm font-semibold">Toggle Columns <span className="text-xs text-muted-foreground">({visibleCount}/{totalCount})</span></h3>
+            <h3 className="text-sm font-semibold">
+              Toggle Columns{" "}
+              <span className="text-xs text-muted-foreground">
+                ({visibleCount}/{totalCount})
+              </span>
+            </h3>
             <div className="flex gap-1">
-              <Button variant="outline" size="sm" className="h-7 px-1.5 text-xs" onClick={() => toggleAllColumns(true)}>All</Button>
-              <Button variant="outline" size="sm" className="h-7 px-1.5 text-xs" onClick={() => toggleAllColumns(false)}>None</Button>
-              <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setShowColumnSelector(false)}><X className="h-4 w-4" /></Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 px-1.5 text-xs"
+                onClick={() => toggleAllColumns(true)}
+              >
+                All
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 px-1.5 text-xs"
+                onClick={() => toggleAllColumns(false)}
+              >
+                None
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 w-7 p-0"
+                onClick={() => setShowColumnSelector(false)}
+              >
+                <X className="h-4 w-4" />
+              </Button>
             </div>
           </div>
           <div className="relative mb-3">
             <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 h-3 w-3 text-muted-foreground" />
-            <Input value={columnSelectorFilter} onChange={(e) => setColumnSelectorFilter(e.target.value)} placeholder="Filter columns..." className="pl-7 h-7 text-xs w-full" />
-            {columnSelectorFilter && <Button variant="ghost" size="sm" className="absolute right-1 top-1/2 transform -translate-y-1/2 h-5 w-5 p-0" onClick={() => setColumnSelectorFilter("")}><X className="h-3 w-3" /></Button>}
+            <Input
+              value={columnSelectorFilter}
+              onChange={(e) => setColumnSelectorFilter(e.target.value)}
+              placeholder="Filter columns..."
+              className="pl-7 h-7 text-xs w-full"
+            />
+            {columnSelectorFilter && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="absolute right-1 top-1/2 transform -translate-y-1/2 h-5 w-5 p-0"
+                onClick={() => setColumnSelectorFilter("")}
+              >
+                <X className="h-3 w-3" />
+              </Button>
+            )}
           </div>
           <div className="h-[350px] pr-1 overflow-y-auto space-y-1">
-            {filteredColumnKeys.map(columnId => (
+            {filteredColumnKeys.map((columnId) => (
               <div key={columnId} className="flex items-center space-x-2 pl-1">
-                <Checkbox id={`column-sel-${columnId}`} checked={enabledColumns[columnId] !== false} onCheckedChange={() => toggleColumnVisibility(columnId)} />
-                <label htmlFor={`column-sel-${columnId}`} className="text-xs cursor-pointer truncate max-w-[240px]" title={columnId}>{columnId}</label>
+                <Checkbox
+                  id={`column-sel-${columnId}`}
+                  checked={enabledColumns[columnId] !== false}
+                  onCheckedChange={() => toggleColumnVisibility(columnId)}
+                />
+                <label
+                  htmlFor={`column-sel-${columnId}`}
+                  className="text-xs cursor-pointer truncate max-w-[240px]"
+                  title={columnId}
+                >
+                  {columnId}
+                </label>
               </div>
             ))}
             {filteredColumnKeys.length === 0 && (
-                <div className="text-xs text-muted-foreground text-center py-2">
-                  No columns match your filter.
-                </div>
+              <div className="text-xs text-muted-foreground text-center py-2">
+                No columns match your filter.
+              </div>
             )}
           </div>
         </CardContent>
@@ -330,12 +429,19 @@ const GigTable: React.FC<GigTableProps> = ({
   };
 
   if (!data || data.length === 0) {
-    return <div className="flex justify-center items-center h-32 text-muted-foreground">No data available.</div>;
+    return (
+      <div className="flex justify-center items-center h-32 text-muted-foreground">
+        No data available.
+      </div>
+    );
   }
 
   return (
     <TooltipProvider>
-      <div className="flex flex-col h-full w-full overflow-hidden" ref={tableContainerRef}>
+      <div
+        className="flex flex-col h-full w-full overflow-hidden"
+        ref={tableContainerRef}
+      >
         {/* Top controls area */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 gap-2 flex-shrink-0">
           <div className="flex items-center gap-2 flex-1">
@@ -349,26 +455,75 @@ const GigTable: React.FC<GigTableProps> = ({
               />
             </div>
             <Button
-              variant="outline" size="sm"
-              onClick={() => { setGlobalFilterInput(""); table.resetColumnFilters(true);}}
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setGlobalFilterInput("");
+                table.resetColumnFilters(true);
+              }}
               className="h-8 text-xs"
-              disabled={!globalFilterInput && !table.getState().columnFilters.length}
+              disabled={
+                !globalFilterInput && !table.getState().columnFilters.length
+              }
             >
               Clear Filters
             </Button>
           </div>
           <div className="hidden md:flex items-center gap-x-4 text-xs text-muted-foreground px-2">
-            {executionTime !== null && executionTime !== undefined && (<div className="flex items-center gap-1" title="Query execution time"><Clock className="h-3 w-3" /><span>{formatDuration(executionTime)}</span></div>)}
-            {responseSize !== null && responseSize !== undefined && (<div className="flex items-center" title="Response size"><span>{formatBytes(responseSize)}</span></div>)}
-            <span title="Showing rows count">{table.getFilteredRowModel().rows.length} of {data.length} rows</span>
+            {executionTime !== null && executionTime !== undefined && (
+              <div
+                className="flex items-center gap-1"
+                title="Query execution time"
+              >
+                <Clock className="h-3 w-3" />
+                <span>{formatDuration(executionTime)}</span>
+              </div>
+            )}
+            {responseSize !== null && responseSize !== undefined && (
+              <div className="flex items-center" title="Response size">
+                <span>{formatBytes(responseSize)}</span>
+              </div>
+            )}
+            <span title="Showing rows count">
+              {data.length.toLocaleString()} rows
+            </span>
           </div>
           <div className="flex items-center gap-2">
             <div className="relative">
-              <Button variant="outline" size="sm" onClick={() => setShowColumnSelector(!showColumnSelector)} className="h-8 text-xs" title="Configure visible columns"><SlidersHorizontal className="h-3.5 w-3.5 mr-1" />Columns</Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowColumnSelector(!showColumnSelector)}
+                className="h-8 text-xs"
+                title="Configure visible columns"
+              >
+                <SlidersHorizontal className="h-3.5 w-3.5 mr-1" />
+                Columns
+              </Button>
               {showColumnSelector && <ColumnSelector />}
             </div>
-            {Object.keys(userResizedColumns).length > 0 && <Button variant="ghost" size="sm" onClick={() => setUserResizedColumns({})} className="h-8 text-xs" title="Reset column widths">Reset Size</Button>}
-            <Button variant="outline" size="sm" onClick={exportToCSV} className="h-8 text-xs" disabled={!data || !data.length} title="Export visible data as CSV"><Download className="mr-1 h-3.5 w-3.5" />Export CSV</Button>
+            {Object.keys(userResizedColumns).length > 0 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setUserResizedColumns({})}
+                className="h-8 text-xs"
+                title="Reset column widths"
+              >
+                Reset Size
+              </Button>
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={exportToCSV}
+              className="h-8 text-xs"
+              disabled={!data || !data.length}
+              title="Export visible data as CSV"
+            >
+              <Download className="mr-1 h-3.5 w-3.5" />
+              Export CSV
+            </Button>
           </div>
         </div>
 
@@ -377,13 +532,21 @@ const GigTable: React.FC<GigTableProps> = ({
           <div
             ref={horizontalScrollRef}
             className="h-full w-full overflow-auto"
-            style={{ height: typeof tableHeight === "string" ? tableHeight : `${tableHeight}px` }}
+            style={{
+              height:
+                typeof tableHeight === "string"
+                  ? tableHeight
+                  : `${tableHeight}px`,
+            }}
           >
-            <div style={{ width: table.getTotalSize(), position: 'relative' }}>
+            <div style={{ width: table.getTotalSize(), position: "relative" }}>
               <table className="w-full border-collapse table-fixed">
                 <thead className="sticky top-0 z-10 bg-muted/70 backdrop-blur-sm shadow-sm">
                   {table.getHeaderGroups().map((headerGroup) => (
-                    <tr key={headerGroup.id} className="border-b border-border/40">
+                    <tr
+                      key={headerGroup.id}
+                      className="border-b border-border/40"
+                    >
                       {headerGroup.headers.map((header) => (
                         <th
                           key={header.id}
@@ -395,16 +558,29 @@ const GigTable: React.FC<GigTableProps> = ({
                           }}
                         >
                           <div className="flex items-center justify-between w-full h-full px-2">
-                            {flexRender(header.column.columnDef.header, header.getContext())}
+                            {flexRender(
+                              header.column.columnDef.header,
+                              header.getContext()
+                            )}
                           </div>
                           {header.column.getCanResize() && (
                             <div
-                              className={`absolute right-0 top-0 h-full w-2 cursor-col-resize select-none touch-none group ${header.column.getIsResizing() ? "bg-primary/20" : ""}`}
+                              className={`absolute right-0 top-0 h-full w-2 cursor-col-resize select-none touch-none group ${
+                                header.column.getIsResizing()
+                                  ? "bg-primary/20"
+                                  : ""
+                              }`}
                               onMouseDown={header.getResizeHandler()}
                               onTouchStart={header.getResizeHandler()}
-                              style={{ userSelect: 'none' }}
+                              style={{ userSelect: "none" }}
                             >
-                              <div className={`w-[1px] h-4/6 my-auto ${header.column.getIsResizing() ? "bg-primary w-[2px]" : "bg-border/60 group-hover:bg-primary/60 group-hover:w-[2px]"}`} />
+                              <div
+                                className={`w-[1px] h-4/6 my-auto ${
+                                  header.column.getIsResizing()
+                                    ? "bg-primary w-[2px]"
+                                    : "bg-border/60 group-hover:bg-primary/60 group-hover:w-[2px]"
+                                }`}
+                              />
                             </div>
                           )}
                         </th>
@@ -425,7 +601,9 @@ const GigTable: React.FC<GigTableProps> = ({
                       <tr
                         key={virtualRow.key}
                         data-index={virtualRow.index}
-                        className={`transition-colors hover:bg-muted/30 ${row.getIsSelected() ? "bg-muted" : ""}`}
+                        className={`transition-colors hover:bg-muted/30 ${
+                          row.getIsSelected() ? "bg-muted" : ""
+                        }`}
                         style={{ height: `${ROW_HEIGHT}px` }} // Use fixed ROW_HEIGHT
                       >
                         {row.getVisibleCells().map((cell) => (
@@ -438,7 +616,10 @@ const GigTable: React.FC<GigTableProps> = ({
                               maxWidth: cell.column.columnDef.maxSize,
                             }}
                           >
-                            {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                            {flexRender(
+                              cell.column.columnDef.cell,
+                              cell.getContext()
+                            )}
                           </td>
                         ))}
                       </tr>
@@ -450,7 +631,14 @@ const GigTable: React.FC<GigTableProps> = ({
                     </tr>
                   )}
                   {rows.length === 0 && (
-                     <tr><td colSpan={columns.length || 1} className="h-24 text-center text-muted-foreground">No results match your filters.</td></tr>
+                    <tr>
+                      <td
+                        colSpan={columns.length || 1}
+                        className="h-24 text-center text-muted-foreground"
+                      >
+                        No results match your filters.
+                      </td>
+                    </tr>
                   )}
                 </tbody>
               </table>
@@ -460,26 +648,87 @@ const GigTable: React.FC<GigTableProps> = ({
 
         {/* Pagination controls */}
         <div className="flex items-center justify-between mt-4 flex-shrink-0">
-            <div className="flex items-center gap-2">
-                <Button variant="outline" size="sm" onClick={() => table.setPageIndex(0)} disabled={!table.getCanPreviousPage()} className="h-7 w-7 p-0 text-xs" title="First page">««</Button>
-                <Button variant="outline" size="sm" onClick={() => table.previousPage()} disabled={!table.getCanPreviousPage()} className="h-7 w-7 p-0 text-xs" title="Previous page">«</Button>
-                <Button variant="outline" size="sm" onClick={() => table.nextPage()} disabled={!table.getCanNextPage()} className="h-7 w-7 p-0 text-xs" title="Next page">»</Button>
-                <Button variant="outline" size="sm" onClick={() => table.setPageIndex(table.getPageCount() - 1)} disabled={!table.getCanNextPage()} className="h-7 w-7 p-0 text-xs" title="Last page">»»</Button>
-            </div>
-            <div className="flex items-center gap-2">
-                <span className="text-xs text-muted-foreground">Page {table.getState().pagination.pageIndex + 1} of {table.getPageCount() || 1}</span>
-                <select value={table.getState().pagination.pageSize} onChange={(e) => { table.setPageSize(Number(e.target.value)); }} className="text-xs border border-border/40 rounded-md h-7 px-2 bg-background" title="Rows per page">
-                    {[10, 25, 50, 100, 250, 500].map((pageSize) => (<option key={pageSize} value={pageSize}>{pageSize} rows</option>))}
-                </select>
-            </div>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => table.setPageIndex(0)}
+              disabled={!table.getCanPreviousPage()}
+              className="h-7 w-7 p-0 text-xs"
+              title="First page"
+            >
+              ««
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => table.previousPage()}
+              disabled={!table.getCanPreviousPage()}
+              className="h-7 w-7 p-0 text-xs"
+              title="Previous page"
+            >
+              «
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => table.nextPage()}
+              disabled={!table.getCanNextPage()}
+              className="h-7 w-7 p-0 text-xs"
+              title="Next page"
+            >
+              »
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => table.setPageIndex(table.getPageCount() - 1)}
+              disabled={!table.getCanNextPage()}
+              className="h-7 w-7 p-0 text-xs"
+              title="Last page"
+            >
+              »»
+            </Button>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-muted-foreground">
+              Page {table.getState().pagination.pageIndex + 1} of{" "}
+              {table.getPageCount() || 1}
+            </span>
+            <select
+              value={table.getState().pagination.pageSize}
+              onChange={(e) => {
+                table.setPageSize(Number(e.target.value));
+              }}
+              className="text-xs border border-border/40 rounded-md h-7 px-2 bg-background"
+              title="Rows per page"
+            >
+              {[10, 25, 50, 100, 250, 500].map((pageSize) => (
+                <option key={pageSize} value={pageSize}>
+                  {pageSize} rows
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
         {/* Mobile stats */}
         <div className="md:hidden flex items-center justify-between text-xs text-muted-foreground py-2 border-t border-border/30 mt-2 flex-shrink-0">
-            <span>{table.getFilteredRowModel().rows.length} of {data.length} rows</span>
-            <div className="flex items-center gap-x-3">
-              {executionTime !== null && executionTime !== undefined && (<div className="flex items-center gap-1"><Clock className="h-3 w-3" /><span>{formatDuration(executionTime)}</span></div>)}
-              {responseSize !== null && responseSize !== undefined && (<div className="flex items-center"><span>{formatBytes(responseSize)}</span></div>)}
-            </div>
+          <span>
+            {table.getFilteredRowModel().rows.length} of {data.length} rows
+          </span>
+          <div className="flex items-center gap-x-3">
+            {executionTime !== null && executionTime !== undefined && (
+              <div className="flex items-center gap-1">
+                <Clock className="h-3 w-3" />
+                <span>{formatDuration(executionTime)}</span>
+              </div>
+            )}
+            {responseSize !== null && responseSize !== undefined && (
+              <div className="flex items-center">
+                <span>{formatBytes(responseSize)}</span>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </TooltipProvider>

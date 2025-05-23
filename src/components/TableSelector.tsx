@@ -5,16 +5,16 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "./ui/select";
+} from "@/components/ui/select";
 import { Table } from "lucide-react";
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
-} from "./ui/tooltip";
+} from "@/components/ui/tooltip";
 import { useState, useEffect } from "react";
-import { Input } from "./ui/input";
+import { Input } from "@/components/ui/input";
 
 export default function TableSelector() {
   const {
@@ -31,7 +31,7 @@ export default function TableSelector() {
 
   // Auto-select the first table when available tables change and none is selected
   useEffect(() => {
-    if (availableTables.length > 0 && !selectedTable) {
+    if (availableTables.length > 0 && !selectedTable && selectedDb) {
       const firstTable = availableTables[0];
       setSelectedTable(firstTable);
       
@@ -41,7 +41,7 @@ export default function TableSelector() {
         setQuery(newQuery);
       }
     }
-  }, [availableTables, selectedTable, setSelectedTable, query, setQuery]);
+  }, [availableTables, selectedTable, setSelectedTable, query, setQuery, selectedDb]);
 
   // Handle table change
   const handleTableChange = (value: string) => {
@@ -102,9 +102,9 @@ export default function TableSelector() {
               Loading tables...
             </div>
           ) : availableTables.length === 0 ? (
-            <SelectItem value="" disabled>
+            <div className="p-2 text-sm text-center text-muted-foreground">
               No tables available
-            </SelectItem>
+            </div>
           ) : (
             <>
               {availableTables.length > 10 && (

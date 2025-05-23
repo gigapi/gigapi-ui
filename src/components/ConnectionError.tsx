@@ -1,15 +1,13 @@
 import { useRef, useEffect } from "react";
-import { ExternalLink, RefreshCw } from "lucide-react";
-import { useQuery } from "../contexts/QueryContext";
-import { Input } from "./ui/input";
-import { Button } from "./ui/button";
-import Loader from "./Loader";
+import { ExternalLink, RefreshCw, ServerCrash } from "lucide-react";
+import { useQuery } from "@/contexts/QueryContext";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import Loader from "@/components/Loader";
 
 const ConnectionError = () => {
   const { connectionState, connectionError, apiUrl, setApiUrl, loadDatabases } =
     useQuery();
-
-  // Use ref for uncontrolled input
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Set initial value when component mounts
@@ -33,14 +31,18 @@ const ConnectionError = () => {
   const ApiEndpointInput = () => (
     <div className="bg-card/50 border border-border rounded-md p-4 mb-6 w-full max-w-md">
       <p className="text-sm text-muted-foreground mb-3 text-center">
-        {connectionState === "error" ? "Update API endpoint:" : "API endpoint:"}
+        {connectionState === "error"
+          ? "We couldn't connect to:"
+          : "API endpoint:"}
       </p>
       <div className="flex flex-col gap-3">
         <Input
           ref={inputRef}
           type="text"
           placeholder="Enter API Endpoint URL"
-          className="bg-background"
+          className={`w-full h-9 text-sm border-0 focus-visible:ring-0 focus-visible:ring-offset-0 px-2 bg-card/50 ${
+            connectionState === "error" ? "bg-red-500/20! text-red-100" : ""
+          }`}
           defaultValue={apiUrl}
           onKeyDown={(e) => {
             if (e.key === "Enter") {
@@ -72,14 +74,14 @@ const ConnectionError = () => {
   // Different UI based on connection state
   if (connectionState === "empty") {
     return (
-      <div className="flex flex-col items-center justify-center h-[70vh]">
-        <div className="flex items-center justify-center mb-8">
-          <Loader className="h-16 w-16 text-primary opacity-50" />
+      <div className="flex flex-col items-center justify-center mt-20">
+        <div className="flex items-center justify-center mb-8 gap-6 ">
+          <Loader className="h-16 w-16" />
         </div>
-        <h2 className="text-2xl font-semibold mb-4">Connected Successfully</h2>
-        <div className="text-center mb-6 max-w-lg">
+
+        <div className="text-center mb-6">
           <p className="text-muted-foreground mb-4">
-            Your connection to <span className="font-mono">{apiUrl}</span> is
+            Your connection to <span className="font-mono p-1 rounded-md bg-green-500/20">{apiUrl}</span> is
             working, but no databases were found.
           </p>
           <p className="text-muted-foreground">
@@ -109,20 +111,16 @@ const ConnectionError = () => {
   if (connectionState === "error") {
     return (
       <div className="flex flex-col items-center justify-center h-[70vh]">
-        <h2 className="text-2xl font-semibold mb-4 text-red-500">
-          Connection Error
+        <h2 className="text-2xl font-semibold mb-4 text-red-500 flex items-center gap-2">
+          <ServerCrash /> API - Connection Error
         </h2>
-        <p className="text-center mb-2">
-          Failed to connect to the API endpoint:
-        </p>
-        <div className="bg-muted p-3 rounded-md font-mono text-sm mb-6 max-w-md overflow-hidden text-ellipsis">
-          {apiUrl}
-        </div>
 
         {connectionError && (
-          <div className="bg-red-950/30 border border-red-800 rounded-md p-4 mb-6 max-w-lg text-sm">
-            {connectionError}
-          </div>
+          <>
+            <div className="bg-red-950/30 border border-red-800 rounded-md p-4 mb-6 max-w-lg text-sm">
+              {connectionError}
+            </div>
+          </>
         )}
 
         <ApiEndpointInput />

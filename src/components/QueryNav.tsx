@@ -1,61 +1,46 @@
 import { useState, useEffect } from "react";
-import { useQuery } from "../contexts/QueryContext";
+import { useQuery } from "@/contexts/QueryContext";
 import {
   Database,
-  Settings,
-  ChevronDown,
   X,
   Edit,
   Save,
   ExternalLink,
-  FilePlus,
   RefreshCw,
   MessageSquareHeart,
-  FileJson2,
+  Menu,
+  Globe,
+  EllipsisVertical,
 } from "lucide-react";
-import { Button } from "./ui/button";
-import { Input } from "./ui/input";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
   DropdownMenuSeparator,
-} from "./ui/dropdown-menu";
+} from "@/components/ui/dropdown-menu";
 import {
   Sheet,
   SheetContent,
   SheetHeader,
   SheetTitle,
   SheetTrigger,
-} from "./ui/sheet";
-import DatabaseSelector from "./DatabaseSelector";
-import QueryHistory from "./QueryHistory";
-import { ModeToggle } from "./mode-toggle";
-import Logo from "../assets/logo.svg";
+} from "@/components/ui/sheet";
+import DatabaseSelector from "@/components/DatabaseSelector";
+import QueryHistory from "@/components/QueryHistory";
+import { ModeToggle } from "@/components/mode-toggle";
+import Logo from "@/assets/logo.svg";
 import { toast } from "sonner";
-import SettingsContent from "./Settings";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "./ui/dialog";
+
+const VERSION = import.meta.env.PACKAGE_VERSION;
 
 export default function QueryNav() {
-  const {
-    apiUrl,
-    setApiUrl,
-    loadDatabases,
-    selectedDb,
-    clearQuery,
-    setSelectedTable,
-  } = useQuery();
+  const { apiUrl, setApiUrl, loadDatabases } = useQuery();
   const [isEndpointEditing, setIsEndpointEditing] = useState(false);
   const [tempApiUrl, setTempApiUrl] = useState(apiUrl);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
 
   // Update temp URL when apiUrl changes
   useEffect(() => {
@@ -64,17 +49,19 @@ export default function QueryNav() {
 
   // Handle saving the endpoint
   const handleSaveEndpoint = () => {
-    if (tempApiUrl === apiUrl) {
+    if (tempApiUrl.trim() === apiUrl) {
       setIsEndpointEditing(false);
+      return;
+    }
+
+    if (!tempApiUrl.trim()) {
+      toast.error("API endpoint cannot be empty");
       return;
     }
 
     // Notice about endpoint change
     toast.info("Changing API endpoint and refreshing connections...");
-
-    // Update the API URL - this will trigger the useEffect in QueryContext
-    // that clears state and reloads databases
-    setApiUrl(tempApiUrl);
+    setApiUrl(tempApiUrl.trim());
     setIsEndpointEditing(false);
   };
 
@@ -88,258 +75,251 @@ export default function QueryNav() {
     }
   };
 
-  // Handle starting a new query
-  const handleNewQuery = () => {
-    clearQuery();
-    setSelectedTable(null);
-    toast.success("Started new query");
+  // Handle mobile endpoint save
+  const handleMobileEndpointSave = () => {
+    if (!tempApiUrl.trim()) {
+      toast.error("API endpoint cannot be empty");
+      return;
+    }
+
+    if (tempApiUrl.trim() !== apiUrl) {
+      toast.info("Changing API endpoint and refreshing connections...");
+      setApiUrl(tempApiUrl.trim());
+    }
+    setIsMobileMenuOpen(false);
   };
 
   return (
-    <header className="border-b px-4 py-2 flex items-center justify-between flex-shrink-0">
-      {/* Left Section - Logo and DB */}
-      <div className="flex items-center space-x-2 md:space-x-4">
-        <div className="flex items-center space-x-2">
-          <img src={Logo} alt="GigAPI Logo" className="h-6 w-6 text-primary" />
-          <h1 className="text-lg font-semibold hidden sm:inline-block md:hidden">
-            Gigapi Query UI
-          </h1>
-        </div>
-
-        {/* Database indicator - only show on non-mobile */}
-        {!isEndpointEditing && (
-          <div className="hidden md:flex items-center space-x-2 bg-muted/30 px-3 py-1 rounded-md">
-            <Database className="h-4 w-4 text-primary" />
-            <span className="text-sm font-medium truncate max-w-[200px]">
-              {selectedDb || "No database selected"}
-            </span>
+    <header className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-50">
+      <div className="px-4 py-2 flex items-center justify-between">
+        {/* Left Section - Logo and Brand */}
+        <div className="flex items-center space-x-3">
+          <div className="flex items-center space-x-2">
+            <img src={Logo} alt="GigAPI Logo" className="h-6 w-6" />
+            <div className="flex flex-col">
+              <h1 className="text-lg font-semibold leading-none">
+                <span className="hidden sm:inline">GigAPI Query UI</span>
+                <span className="sm:hidden">GigAPI</span>
+              </h1>
+            </div>
           </div>
-        )}
-      </div>
-
-      {/* Center Section - API Endpoint */}
-      <div className="flex-1 max-w-lg mx-4 hidden lg:block">
-        {isEndpointEditing ? (
-          <div className="flex items-center space-x-2 w-full">
-            <Input
-              value={tempApiUrl}
-              onChange={(e) => setTempApiUrl(e.target.value)}
-              onKeyDown={handleKeyDown}
-              className="font-mono text-sm bg-input text-foreground border border-border rounded"
-              placeholder="API Endpoint URL"
-              autoFocus
-            />
-            <Button
-              variant="default"
-              size="sm"
-              onClick={handleSaveEndpoint}
-              className="flex-shrink-0"
-            >
-              <Save className="h-4 w-4 mr-1" />
-              Save
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                setTempApiUrl(apiUrl);
-                setIsEndpointEditing(false);
-              }}
-              className="flex-shrink-0"
-            >
-              <X className="h-4 w-4 mr-1" />
-              Cancel
-            </Button>
-          </div>
-        ) : (
-          <div
-            className="text-center text-sm text-muted-foreground cursor-pointer border border-transparent hover:border-border rounded px-3 py-1.5 font-mono truncate bg-muted/30 flex items-center justify-center group"
-            onClick={() => setIsEndpointEditing(true)}
-            title="Click to edit endpoint"
-          >
-            <span className="truncate">{apiUrl}</span>
-            <Edit className="h-3.5 w-3.5 ml-2 opacity-0 group-hover:opacity-100 transition-opacity" />
-          </div>
-        )}
-      </div>
-
-      {/* Right Section - Actions */}
-      <div className="flex items-center space-x-1 md:space-x-2">
-        {/* Always visible controls */}
-        <div className="hidden sm:block">
-          <DatabaseSelector />
-        </div>
-        <div className="hidden sm:block">
-          <QueryHistory />
-        </div>
-        <ModeToggle />
-
-        {/* Settings modal trigger for desktop */}
-        <div className="hidden md:block">
-          <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
-            <DialogTrigger asChild>
-              <Button variant="outline" size="icon" title="Settings">
-                <FileJson2 className="h-4 w-4" />
-              </Button>
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Settings</DialogTitle>
-              </DialogHeader>
-              <SettingsContent />
-            </DialogContent>
-          </Dialog>
         </div>
 
-        {/* Settings in dropdown for smaller screens (existing dropdown menu) */}
-        <div className="hidden md:block">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="icon">
-                <Settings className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={handleNewQuery}>
-                <FilePlus className="h-4 w-4 mr-2" />
-                New Query
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => loadDatabases()}>
-                <RefreshCw className="h-4 w-4 mr-2" />
-                Refresh Schema
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setIsEndpointEditing(true)}>
-                <Edit className="h-4 w-4 mr-2" />
-                Edit API Endpoint
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                onClick={() =>
-                  window.open(
-                    "https://gigapipe.com?utm_source=gigapi-ui&utm_medium=nav_link",
-                    "_blank"
-                  )
-                }
-                className="text-muted-foreground"
-              >
-                <ExternalLink className="h-4 w-4 mr-2" />
-                About Gigapipe
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() =>
-                  window.open(
-                    "https://github.com/gigapi/gigapi-ui/issues",
-                    "_blank"
-                  )
-                }
-                className="text-muted-foreground"
-              >
-                <MessageSquareHeart className="h-4 w-4 mr-2" />
-                Feedback & Issues
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-
-        {/* Mobile menu button */}
-        <Sheet open={isMobileMenuOpen} onOpenChange={setIsMobileMenuOpen}>
-          <SheetTrigger asChild>
-            <Button variant="outline" size="icon" className="md:hidden">
-              <ChevronDown className="h-4 w-4" />
-            </Button>
-          </SheetTrigger>
-          <SheetContent side="top" className="pt-10">
-            <SheetHeader>
-              <SheetTitle>GigAPI Querier</SheetTitle>
-            </SheetHeader>
-            <div className="py-4 space-y-4">
-              {/* Mobile DB selector */}
-              <div className="space-y-2">
-                <h3 className="text-sm font-medium">Select Database</h3>
-                <div className="w-full">
-                  <DatabaseSelector />
-                </div>
+        {/* Center Section - API Endpoint (large screens) */}
+        <div className="flex-1 max-w-md mx-6 hidden xl:block">
+          {isEndpointEditing ? (
+            <div className="flex items-center space-x-2">
+              <div className="relative flex-1">
+                <Globe className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  value={tempApiUrl}
+                  onChange={(e) => setTempApiUrl(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  className="font-mono text-sm pl-10 bg-background"
+                  placeholder="https://api.example.com"
+                  autoFocus
+                />
               </div>
-
-              {/* Mobile API URL editor */}
-              <div className="space-y-2">
-                <h3 className="text-sm font-medium">API Endpoint</h3>
-                <div className="flex gap-2">
-                  <Input
-                    value={tempApiUrl}
-                    onChange={(e) => setTempApiUrl(e.target.value)}
-                    className="font-mono text-sm bg-input text-foreground"
-                    placeholder="API URL"
-                  />
-                  <Button
-                    size="sm"
-                    onClick={() => {
-                      toast.info(
-                        "Changing API endpoint and refreshing connections..."
-                      );
-                      setApiUrl(tempApiUrl);
-                      setIsMobileMenuOpen(false);
-                    }}
-                  >
-                    Save
-                  </Button>
-                </div>
-              </div>
-
-              {/* Mobile actions */}
-              <div className="space-y-2">
-                <h3 className="text-sm font-medium">Actions</h3>
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleNewQuery}
-                    className="flex-1"
-                  >
-                    <FilePlus className="h-4 w-4 mr-2" />
-                    New Query
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      loadDatabases();
-                      setIsMobileMenuOpen(false);
-                    }}
-                    className="flex-1"
-                  >
-                    <RefreshCw className="h-4 w-4 mr-2" />
-                    Refresh Schema
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setIsMobileMenuOpen(false)}
-                    className="flex-1"
-                  >
-                    <QueryHistory />
-                    History
-                  </Button>
-                  {/* Settings button for mobile */}
-                  <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
-                    <DialogTrigger asChild>
-                      <Button variant="outline" size="sm" className="flex-1">
-                        <Settings className="h-4 w-4 mr-2" />
-                        Settings
-                      </Button>
-                    </DialogTrigger>
-                    <DialogContent>
-                      <DialogHeader>
-                        <DialogTitle>Settings</DialogTitle>
-                      </DialogHeader>
-                      <SettingsContent />
-                    </DialogContent>
-                  </Dialog>
-                </div>
+              <Button
+                variant="default"
+                size="sm"
+                onClick={handleSaveEndpoint}
+                disabled={!tempApiUrl.trim()}
+              >
+                <Save className="h-4 w-4 mr-1" />
+                Save
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setTempApiUrl(apiUrl);
+                  setIsEndpointEditing(false);
+                }}
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+          ) : (
+            <div
+              className="group cursor-pointer border border-transparent hover:border-border rounded-lg px-4 py-2 bg-muted/20 hover:bg-muted/40 transition-colors"
+              onClick={() => setIsEndpointEditing(true)}
+              title="Click to edit API endpoint"
+            >
+              <div className="flex items-center justify-center space-x-2">
+                <Globe className="h-4 w-4 text-muted-foreground" />
+                <span className="font-mono text-sm truncate max-w-[300px]">
+                  {apiUrl}
+                </span>
+                <Edit className="h-3.5 w-3.5 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground" />
               </div>
             </div>
-          </SheetContent>
-        </Sheet>
+          )}
+        </div>
+
+        {/* Right Section - Desktop Actions */}
+        <div className="flex items-center space-x-2">
+          {/* Desktop controls */}
+          <div className="hidden md:flex items-center space-x-2">
+            <DatabaseSelector />
+            <QueryHistory />
+            <ModeToggle />
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="icon" title="More options">
+                  <EllipsisVertical className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuItem
+                  onClick={() =>
+                    window.open(
+                      "https://gigapipe.com?utm_source=gigapi-ui&utm_medium=nav_link",
+                      "_blank"
+                    )
+                  }
+                >
+                  <ExternalLink className="h-4 w-4 mr-2" />
+                  About Gigapipe
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() =>
+                    window.open(
+                      "https://github.com/gigapi/gigapi-ui/issues/new?title=&body=gigapi-ui%20v$%7BVERSION%7D%0A%0A%3C-Describe%20your%20issue%20here-%3E",
+                      "_blank"
+                    )
+                  }
+                >
+                  <MessageSquareHeart className="h-4 w-4 mr-2" />
+                  Feedback & Issues
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <span className="text-muted-foreground/70 text-xs px-2 py-1">
+                  Query UI v{VERSION}
+                </span>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+
+          {/* Mobile controls */}
+          <div className="flex md:hidden items-center space-x-2 ">
+            <ModeToggle />
+            <Sheet open={isMobileMenuOpen} onOpenChange={setIsMobileMenuOpen}>
+              <SheetTrigger asChild className="flex items-center">
+                <Button variant="outline" size="icon" title="Menu">
+                  <Menu className="h-4 w-4" />
+                </Button>
+              </SheetTrigger>
+              <SheetContent side="top" className="pt-4 px-4">
+                <SheetHeader className="text-left">
+                  <SheetTitle className="flex items-center space-x-2">
+                    <img src={Logo} alt="GigAPI Logo" className="h-5 w-5" />
+                    <span>GigAPI Querier</span>
+                  </SheetTitle>
+                </SheetHeader>
+
+                <div className="py-6 space-y-6">
+                  {/* Mobile Database Section */}
+                  <div className="space-y-3">
+                    <h3 className="text-sm font-semibold flex items-center space-x-2">
+                      <Database className="h-4 w-4" />
+                      <span>Database Connection</span>
+                    </h3>
+                    <div className="pl-6 space-y-3">
+                      <DatabaseSelector />
+                    </div>
+                  </div>
+
+                  {/* Mobile API Endpoint Section */}
+                  <div className="space-y-3">
+                    <h3 className="text-sm font-semibold flex items-center space-x-2">
+                      <Globe className="h-4 w-4" />
+                      <span>API Endpoint</span>
+                    </h3>
+                    <div className="pl-6 space-y-3">
+                      <div className="flex space-x-2">
+                        <Input
+                          value={tempApiUrl}
+                          onChange={(e) => setTempApiUrl(e.target.value)}
+                          className="font-mono text-sm"
+                          placeholder="https://mygigapipe.endpoint.com/query"
+                        />
+                        <Button
+                          size="sm"
+                          onClick={handleMobileEndpointSave}
+                          disabled={!tempApiUrl.trim()}
+                        >
+                          <Save className="h-4 w-4 mr-1" />
+                          Save
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Mobile Actions Section */}
+                  <div className="space-y-3">
+                    <h3 className="text-sm font-semibold">Quick Actions</h3>
+                    <div className="pl-6 space-y-2">
+                      <div className="flex space-x-2">
+                        <div className="flex space-x-2">
+                          <QueryHistory />
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            loadDatabases();
+                            setIsMobileMenuOpen(false);
+                          }}
+                        >
+                          <RefreshCw className="h-4 w-4 mr-2" />
+                          Refresh
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Mobile Links Section */}
+                  <div className="space-y-3 pt-4 border-t">
+                    <h3 className="text-sm font-semibold">Links</h3>
+                    <div className="pl-6 space-y-2">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          window.open(
+                            "https://gigapipe.com?utm_source=gigapi-ui&utm_medium=nav_link",
+                            "_blank"
+                          );
+                          setIsMobileMenuOpen(false);
+                        }}
+                        className="w-full justify-start"
+                      >
+                        <ExternalLink className="h-4 w-4 mr-2" />
+                        About Gigapipe
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          window.open(
+                            "https://github.com/gigapi/gigapi-ui/issues",
+                            "_blank"
+                          );
+                          setIsMobileMenuOpen(false);
+                        }}
+                        className="w-full justify-start"
+                      >
+                        <MessageSquareHeart className="h-4 w-4 mr-2" />
+                        Feedback & Issues
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              </SheetContent>
+            </Sheet>
+          </div>
+        </div>
       </div>
     </header>
   );
