@@ -52,7 +52,6 @@ export default function QueryResults() {
 
   // Simplified state management
   const [activeTab, setActiveTab] = useState("results");
-  const [chartsLoaded, setChartsLoaded] = useState(false);
 
   // Track query info with better naming
   const [currentExecutedQuery, setCurrentExecutedQuery] = useState(query);
@@ -82,7 +81,7 @@ export default function QueryResults() {
 
       const metrics = calculatePerformanceMetrics(
         executionTime,
-        serverMetrics,
+        serverMetrics || undefined,
         renderTime
       );
 
@@ -121,12 +120,6 @@ export default function QueryResults() {
     }
   };
 
-  // Load charts only when the tab is selected
-  useEffect(() => {
-    if (activeTab === "charts") {
-      setChartsLoaded(true);
-    }
-  }, [activeTab]);
 
   function renderResultsContent() {
     if (isLoading) {

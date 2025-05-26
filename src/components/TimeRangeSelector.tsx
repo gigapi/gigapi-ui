@@ -252,8 +252,8 @@ export default function TimeRangeSelector({
     
     if (fromError || toError || !validateTimeInputs(fromInput, toInput)) {
       showErrorToast({ 
-        message: "Invalid time range", 
-        detail: fromError || toError || "Please check your time range inputs" 
+        message: `Invalid time range inputs "${fromInput}" to "${toInput}"`, 
+        detail: fromError || toError || `Please check your time range inputs and try again.`
       });
       return;
     }

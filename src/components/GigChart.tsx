@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useState } from "react";
 import * as echarts from "echarts";
 import { cn } from "@/lib/utils";
-import { useTheme } from "../theme-provider";
+import { useTheme } from "@/components/theme-provider";
 import { isDateTimeField, isTimestamp, isDateString } from "@/lib/date-utils";
 import { format, parseISO, isValid } from "date-fns";
 
@@ -427,7 +427,7 @@ export const GigChart: React.FC<GigChartProps> = ({
                 if (typeof value === 'number') {
                   const date = new Date(value);
                   if (!isNaN(date.getTime())) {
-                    return format(date, 'MMM d, HH:mm');
+                    return format(date, 'MMM d, HH:mm:ss');
                   }
                 }
 
@@ -436,7 +436,7 @@ export const GigChart: React.FC<GigChartProps> = ({
                   try {
                     const date = parseISO(value);
                     if (isValid(date)) {
-                      return format(date, 'MMM d, HH:mm');
+                      return format(date, 'MMM d, HH:mm:ss');
                     }
                   } catch (e) {
                     // Fall back to default formatting if parseISO fails
@@ -489,7 +489,7 @@ export const GigChart: React.FC<GigChartProps> = ({
                     try {
                       const date = parseISO(firstParam.axisValue);
                       if (isValid(date)) {
-                        header = `<div style="font-weight:bold;margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid ${currentTheme === 'dark' ? 'rgba(100, 100, 100, 0.8)' : 'rgba(220, 220, 220, 0.8)'}">${format(date, 'PPp')}</div>`;
+                        header = `<div style="font-weight:bold;margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid ${currentTheme === 'dark' ? 'rgba(100, 100, 100, 0.8)' : 'rgba(220, 220, 220, 0.8)'}">${format(date, 'PPP \'at\' HH:mm:ss.SSS')}</div>`;
                       } else {
                         header = `<div style="font-weight:bold;margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid ${currentTheme === 'dark' ? 'rgba(100, 100, 100, 0.8)' : 'rgba(220, 220, 220, 0.8)'}">${firstParam.axisValue}</div>`;
                       }
@@ -501,7 +501,7 @@ export const GigChart: React.FC<GigChartProps> = ({
                   else if (typeof firstParam.axisValue === 'number') {
                     const date = new Date(firstParam.axisValue);
                     if (!isNaN(date.getTime())) {
-                      header = `<div style="font-weight:bold;margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid ${currentTheme === 'dark' ? 'rgba(100, 100, 100, 0.8)' : 'rgba(220, 220, 220, 0.8)'}">${format(date, 'PPp')}</div>`;
+                      header = `<div style="font-weight:bold;margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid ${currentTheme === 'dark' ? 'rgba(100, 100, 100, 0.8)' : 'rgba(220, 220, 220, 0.8)'}">${format(date, 'PPP \'at\' HH:mm:ss.SSS')}</div>`;
                     } else {
                       header = `<div style="font-weight:bold;margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid ${currentTheme === 'dark' ? 'rgba(100, 100, 100, 0.8)' : 'rgba(220, 220, 220, 0.8)'}">${firstParam.axisValue}</div>`;
                     }
@@ -1040,7 +1040,23 @@ export const createBarChart = (
   }
   
   // If custom series data is provided (for grouped data), use that instead
-  const series = customSeries || (xIsDateTime ? 
+  const series = customSeries && customSeries.length > 0 ? customSeries.map(customSeries => ({
+    ...customSeries,
+    type: "bar" as const,
+    label: {
+      show: false,
+      position: "top"
+    },
+    itemStyle: {
+      borderRadius: [3, 3, 0, 0]
+    },
+    emphasis: {
+      itemStyle: {
+        shadowBlur: 10,
+        shadowColor: 'rgba(0, 0, 0, 0.3)'
+      }
+    }
+  })) : (xIsDateTime ? 
     yFields.map(field => ({
       name: field,
       type: "bar" as const,
@@ -1420,7 +1436,23 @@ export const createLineChart = (
   }
   
   // If custom series data is provided (for grouped data), use that instead
-  const series = customSeries || (xIsDateTime ? 
+  const series = customSeries && customSeries.length > 0 ? customSeries.map(customSeries => ({
+    ...customSeries,
+    type: "line" as const,
+    smooth: true,
+    symbolSize: 6,
+    symbol: 'circle',
+    lineStyle: {
+      width: 2,
+      cap: 'round'
+    },
+    emphasis: {
+      focus: 'series',
+      lineStyle: {
+        width: 3
+      }
+    }
+  })) : (xIsDateTime ? 
     yFields.map(field => ({
       name: field,
       type: "line" as const,
@@ -1666,7 +1698,48 @@ export const createAreaChart = (
   ];
   
   // If custom series data is provided (for grouped data), use that instead
-  const series = customSeries || (xIsDateTime ? 
+  const series = customSeries && customSeries.length > 0 ? customSeries.map((customSeries, index) => {
+    const color = chartColors[index % chartColors.length];
+    const colorWithoutOpacity = color.replace(/,[^,]*\)$/, ')');
+    
+    return {
+      ...customSeries,
+      type: "line" as const,
+      smooth: true,
+      symbolSize: 5,
+      symbol: 'circle',
+      lineStyle: {
+        width: 2,
+        cap: 'round'
+      },
+      areaStyle: {
+        opacity: 0.2,
+        color: {
+          type: 'linear',
+          x: 0,
+          y: 0,
+          x2: 0,
+          y2: 1,
+          colorStops: [
+            {
+              offset: 0,
+              color: color
+            },
+            {
+              offset: 1,
+              color: colorWithoutOpacity.replace(')', ', 0.1)')
+            }
+          ]
+        }
+      },
+      emphasis: {
+        focus: 'series',
+        areaStyle: {
+          opacity: 0.3
+        }
+      }
+    }
+  }) : (xIsDateTime ? 
     yFields.map((field, index) => {
       // Get a color for this series
       const color = chartColors[index % chartColors.length];

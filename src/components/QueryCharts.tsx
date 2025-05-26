@@ -11,7 +11,7 @@ import {
   createBarChart,
   createLineChart,
   createAreaChart,
-} from "@/components/ui/gig_chart";
+} from "@/components/GigChart";
 import { Info, Calendar, Hash } from "lucide-react";
 import {
   Select,
@@ -1064,10 +1064,8 @@ export default function QueryCharts() {
                 yValue = 0;
               }
 
-              return {
-                x: xValue,
-                y: yValue,
-              };
+              // For time series data, return [timestamp, value] format
+              return [xValue, yValue];
             }),
             type: effectiveChartType,
           };

@@ -11,6 +11,7 @@ import {
   Menu,
   Globe,
   EllipsisVertical,
+  Github,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -194,6 +195,17 @@ export default function QueryNav() {
                   Feedback & Issues
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
+                                <DropdownMenuItem
+                  onClick={() =>
+                    window.open(
+                      "https://github.com/gigapi/gigapi",
+                      "_blank"
+                    )
+                  }
+                >
+                  <Github className="h-4 w-4 mr-2" />
+                  Gitub Repository
+                </DropdownMenuItem>
                 <span className="text-muted-foreground/70 text-xs px-2 py-1">
                   Query UI v{VERSION}
                 </span>

@@ -2,7 +2,7 @@ import { useRef, useEffect, useState, useCallback, useMemo } from "react";
 import { useQuery } from "@/contexts/QueryContext";
 import Editor, { useMonaco } from "@monaco-editor/react";
 import { Button } from "@/components/ui/button";
-import { Play, Copy, Eraser } from "lucide-react";
+import { Play, Copy, Eraser, Share } from "lucide-react";
 import { useTheme } from "@/components/theme-provider";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
@@ -22,8 +22,8 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { extractTableName } from "@/lib/time-range-utils";
 import { Badge } from "@/components/ui/badge";
+import HashQueryUtils from "@/lib/hash-query-utils";
 
 export default function QueryEditor() {
   const {
@@ -45,9 +45,6 @@ export default function QueryEditor() {
 
   const { theme } = useTheme();
   const [isEditorReady, setIsEditorReady] = useState(false);
-  const [detectedTableName, setDetectedTableName] = useState<
-    string | undefined
-  >(undefined);
   const [hasManualEdits, setHasManualEdits] = useState(false);
 
   // Create refs for editor and Monaco
@@ -61,7 +58,7 @@ export default function QueryEditor() {
 
   // Update editor query with time filter - modified to not auto-add
   const updateEditorQueryWithTimeFilter = useCallback(
-    (timeField: string, customTimeRange = timeRange) => {
+    (timeField: string, _ = timeRange) => {
       // If manual edits flag is set, don't modify the query
       if (hasManualEdits) {
         return;
@@ -160,11 +157,7 @@ export default function QueryEditor() {
         // Let user add it explicitly using the "Use filter" button
       }
     },
-    [
-      timeRange,
-      setTimeRange,
-      setSelectedTimeField,
-    ]
+    [timeRange, setTimeRange, setSelectedTimeField]
   );
 
   // Handle execution with validation
@@ -233,15 +226,6 @@ export default function QueryEditor() {
     return timeFields;
   }, [selectedDb, selectedTable, schema, timeFields]);
 
-  // Detect table name from query
-  useEffect(() => {
-    if (query) {
-      const tableName = extractTableName(query);
-      setDetectedTableName(tableName || undefined);
-    } else {
-      setDetectedTableName(undefined);
-    }
-  }, [query]);
 
   // Handle time range changes from TimeRangeSelector
   const handleTimeRangeChange = useCallback(
@@ -264,7 +248,7 @@ export default function QueryEditor() {
       setTimeRange,
       updateEditorQueryWithTimeFilter,
       updateEditorQueryWithoutTimeFilter,
-      hasTimeVariables
+      hasTimeVariables,
     ]
   );
 
@@ -285,7 +269,7 @@ export default function QueryEditor() {
         ) {
           // Auto-select the first time field if time variables are detected
           setSelectedTimeField(timeFieldOptions[0]);
-          
+
           // Make sure time filter is enabled
           if (timeRange && timeRange.enabled === false) {
             setTimeRange({
@@ -702,7 +686,7 @@ export default function QueryEditor() {
         return;
       }
     }
-    
+
     // Add empty cleanup function for consistent behavior
     return () => {};
   }, [
@@ -792,7 +776,7 @@ export default function QueryEditor() {
   useEffect(() => {
     let isMounted = true;
     let timeoutId: number | null = null;
-    
+
     if (isEditorReady && isMounted) {
       try {
         // Use timeout to ensure we don't have race conditions with editor updates
@@ -805,7 +789,7 @@ export default function QueryEditor() {
         // Suppress errors during highlighting
       }
     }
-    
+
     return () => {
       isMounted = false;
       if (timeoutId !== null) {
@@ -818,7 +802,7 @@ export default function QueryEditor() {
   useEffect(() => {
     let styleElement: HTMLStyleElement | null = null;
     let isMounted = true;
-    
+
     if (monaco && isMounted) {
       try {
         monacoRef.current = monaco;
@@ -876,6 +860,45 @@ export default function QueryEditor() {
 
             {/* Common Query Actions */}
             <div className="flex items-center">
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 w-8 p-0"
+                      onClick={() => {
+                        const params = {
+                          query: editorRef.current.getValue(),
+                          db: selectedDb,
+                          table: selectedTable || undefined,
+                          timeField: selectedTimeField || undefined,
+                          timeFrom: timeRange?.from,
+                          timeTo: timeRange?.to,
+                        };
+
+                        HashQueryUtils.copyShareableUrl(params).then(
+                          (success) => {
+                            if (success) {
+                              toast.success(
+                                "Shareable URL copied to clipboard"
+                              );
+                            } else {
+                              toast.error("Failed to copy URL");
+                            }
+                          }
+                        );
+                      }}
+                    >
+                      <Share className="h-3.5 w-3.5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">
+                    <p className="text-xs">Copy shareable URL</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+
               <TooltipProvider>
                 <Tooltip>
                   <TooltipTrigger asChild>
