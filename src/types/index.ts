@@ -199,6 +199,71 @@ export type AppEvent =
   | { type: 'USER_ACTION'; payload: { action: string; context?: any } };
 
 // ============================================================================
+// MCP (Model Context Protocol) Types
+// ============================================================================
+
+export type AIProvider = 'ollama';
+
+export interface AIModel {
+  id: string;
+  name: string;
+  provider: AIProvider;
+  maxTokens?: number;
+  supportsStreaming?: boolean;
+  size?: number; // Model size in bytes (for Ollama)
+  modifiedAt?: string; // When the model was last modified
+}
+
+export interface MCPConnection {
+  id: string;
+  provider: AIProvider;
+  name: string;
+  apiKey?: string;
+  baseUrl?: string; // For Ollama or custom endpoints
+  model: string;
+  isConnected: boolean;
+  lastUsed?: string;
+}
+
+export interface ChatMessage {
+  id: string;
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  timestamp: string;
+  metadata?: {
+    queryGenerated?: string;
+    dataContext?: {
+      database?: string;
+      table?: string;
+      schema?: ColumnSchema[];
+      timeRange?: TimeRange;
+    };
+  };
+}
+
+export interface ChatSession {
+  id: string;
+  title: string;
+  messages: ChatMessage[];
+  createdAt: string;
+  updatedAt: string;
+  modelUsed: string;
+  context?: {
+    currentDatabase?: string;
+    currentTable?: string;
+    availableSchema?: SchemaInfo;
+  };
+}
+
+export interface MCPServerCapabilities {
+  queryGeneration: boolean;
+  dataAnalysis: boolean;
+  chartSuggestions: boolean;
+  naturalLanguageToSQL: boolean;
+  sqlOptimization: boolean;
+}
+
+// ============================================================================
 // Utility Types
 // ============================================================================
 

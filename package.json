@@ -1,6 +1,6 @@
 {
   "name": "gigapi-ui",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "type": "module",
   "description": "UI interface for GigAPI: The Infinite Timeseries Lakehouse. GigAPI UI provides a slick web interface to query time-series using GigAPI Catalog Metadata + DuckDB",
   "scripts": {
@@ -19,7 +19,7 @@
     "@hookform/resolvers": "^5.0.1",
     "@monaco-editor/react": "^4.7.0",
     "@radix-ui/react-checkbox": "^1.3.1",
-    "@radix-ui/react-dialog": "^1.1.13",
+    "@radix-ui/react-dialog": "^1.1.14",
     "@radix-ui/react-dropdown-menu": "^2.1.14",
     "@radix-ui/react-icons": "^1.3.2",
     "@radix-ui/react-label": "^2.1.6",
@@ -50,6 +50,7 @@
     "react-day-picker": "^8.10.1",
     "react-dom": "^19.1.0",
     "react-hook-form": "^7.56.3",
+    "react-markdown": "^10.1.0",
     "react-resizable-panels": "^3.0.1",
     "sonner": "^2.0.3",
     "tailwind-merge": "^3.3.0",

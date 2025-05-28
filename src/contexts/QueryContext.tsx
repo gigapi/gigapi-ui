@@ -278,11 +278,12 @@ export function QueryProvider({ children }: { children: ReactNode }) {
       }
     } catch (e) {
       console.error("Failed to parse saved time range", e);
+      toast.error("Failed to load saved time range, using default");
     }
     return {
-      from: "now-24h",
+      from: "now-5m",
       to: "now",
-      display: "Last 24 hours",
+      display: "Last 5 minutes",
       enabled: true,
     };
   });
@@ -299,6 +300,7 @@ export function QueryProvider({ children }: { children: ReactNode }) {
       }
     } catch (e) {
       console.error("Failed to parse saved query history", e);
+      toast.error("Failed to load saved query history, using empty history");
     }
     return [];
   });
@@ -358,7 +360,7 @@ export function QueryProvider({ children }: { children: ReactNode }) {
     try {
       return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
     } catch (e) {
-      return "UTC"; // Fallback if Intl API fails or not available
+      return "UTC";
     }
   });
 
@@ -386,6 +388,23 @@ export function QueryProvider({ children }: { children: ReactNode }) {
       // Replace all variables in the query
       let processedQuery = rawQuery;
 
+      // Get field details to determine type and format (used by multiple variable replacements)
+      const fieldDetails = getColumnsForTable(selectedTable || "")?.find(
+        (col) => col.columnName === selectedTimeField
+      );
+
+      let timeType = "timestamp"; // Default to timestamp
+      if (fieldDetails) {
+        const dataType = fieldDetails.dataType.toLowerCase();
+        if (dataType.includes("int") || dataType.includes("long")) {
+          timeType = "epoch";
+          // Use timeUnit if available
+          if (fieldDetails.timeUnit) {
+            timeType = `epoch_${fieldDetails.timeUnit}`;
+          }
+        }
+      }
+
       // Replace timeField variable with the actual field name
       if (processedQuery.includes("$__timeField")) {
         processedQuery = processedQuery.replace(
@@ -396,36 +415,11 @@ export function QueryProvider({ children }: { children: ReactNode }) {
 
       // Replace timeFilter variable with the actual WHERE condition
       if (processedQuery.includes("$__timeFilter")) {
-        // Get field details to determine type and format
-        const fieldDetails = getColumnsForTable(selectedTable || "")?.find(
-          (col) => col.columnName === selectedTimeField
-        );
-
-        let timeType = "timestamp"; // Default to timestamp
-        if (fieldDetails) {
-          const dataType = fieldDetails.dataType.toLowerCase();
-          if (dataType.includes("int") || dataType.includes("long")) {
-            timeType = "epoch";
-            // Use timeUnit if available
-            if (fieldDetails.timeUnit) {
-              timeType = `epoch_${fieldDetails.timeUnit}`;
-            }
-          }
-        }
-
         let timeCondition = "";
         // Format dates based on timeType
         if (timeType === "timestamp") {
-          // Use SQL format for timestamps
-          timeCondition = `${selectedTimeField} BETWEEN ${
-            isAbsoluteDate(timeRange.from)
-              ? `${formatDateForSql(startTime)}`
-              : `${formatDateForSql(startTime)}`
-          } AND ${
-            isAbsoluteDate(timeRange.to)
-              ? `${formatDateForSql(endTime)}`
-              : `${formatDateForSql(endTime)}`
-          }`;
+          // Use SQL format for timestamps (formatDateForSql already includes quotes)
+          timeCondition = `${selectedTimeField} BETWEEN ${formatDateForSql(startTime)} AND ${formatDateForSql(endTime)}`;
         } else if (timeType.startsWith("epoch")) {
           // For epoch time, convert to seconds, milliseconds, etc.
           const startEpoch = convertDateToScaledEpoch(
@@ -447,16 +441,28 @@ export function QueryProvider({ children }: { children: ReactNode }) {
 
       // Replace timeFrom and timeTo variables with actual values
       if (processedQuery.includes("$__timeFrom")) {
-        const fromStr = isAbsoluteDate(timeRange.from)
-          ? `'${formatDateForSql(startTime)}'`
-          : `'${formatDateForSql(startTime)}'`;
+        let fromStr: string;
+        if (timeType.startsWith("epoch")) {
+          // For epoch fields, use the scaled epoch value without quotes
+          const startEpoch = convertDateToScaledEpoch(startTime, fieldDetails?.timeUnit);
+          fromStr = startEpoch.toString();
+        } else {
+          // For timestamp fields, use SQL format (formatDateForSql already includes quotes)
+          fromStr = formatDateForSql(startTime);
+        }
         processedQuery = processedQuery.replace(/\$__timeFrom/g, fromStr);
       }
 
       if (processedQuery.includes("$__timeTo")) {
-        const toStr = isAbsoluteDate(timeRange.to)
-          ? `'${formatDateForSql(endTime)}'`
-          : `'${formatDateForSql(endTime)}'`;
+        let toStr: string;
+        if (timeType.startsWith("epoch")) {
+          // For epoch fields, use the scaled epoch value without quotes
+          const endEpoch = convertDateToScaledEpoch(endTime, fieldDetails?.timeUnit);
+          toStr = endEpoch.toString();
+        } else {
+          // For timestamp fields, use SQL format (formatDateForSql already includes quotes)
+          toStr = formatDateForSql(endTime);
+        }
         processedQuery = processedQuery.replace(/\$__timeTo/g, toStr);
       }
 
@@ -1036,11 +1042,6 @@ export function QueryProvider({ children }: { children: ReactNode }) {
     if (databases.length > 0 && connectionState === "connected") {
       // Ensure connection is stable and DBs are loaded
       const savedQuery = localStorage.getItem(STORAGE_KEYS.LAST_QUERY);
-
-      // Don't automatically select a table, only if explicitly coming from history or URL
-      // if (savedTable && availableTables.includes(savedTable)) {
-      //  setSelectedTableState(savedTable); // Use internal setter
-      // }
 
       if (savedQuery) setQueryWithCheck(savedQuery);
     }

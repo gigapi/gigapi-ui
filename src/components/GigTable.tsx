@@ -15,7 +15,7 @@ import type {
   ColumnSizingState,
 } from "@tanstack/react-table";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { formatBytes, formatDuration } from "@/lib/utils"; // Assuming these are still needed for stats
+import { formatBytes, formatDuration } from "@/lib/utils";
 import { Download, Search, X, Clock, SlidersHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";

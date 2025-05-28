@@ -1,4 +1,4 @@
-import type { TimeRange } from "../components/TimeRangeSelector";
+import type { TimeRange } from "../types";
 
 // Field type constants
 export const TIME_FIELD_TYPES = [
@@ -199,103 +199,136 @@ export function determineTimestampType(
   return "datetime";
 }
 
-// Generate SQL time filters based on the selected time range
+// Generate SQL time filters based on the selected time range and field metadata
 export function generateTimeFilter(
   timeRange: TimeRange,
   timeField: string,
-  fieldDataType: string = ""
+  fieldDataType: string = "",
+  timeUnit?: 's' | 'ms' | 'us' | 'ns'
 ): string {
-  // Check if time filtering is enabled
   if (!timeRange || !timeField || timeRange.enabled === false || !timeRange.from || !timeRange.to) {
     return '';
   }
 
-  // Determine timestamp type
-  const timestampType = determineTimestampType(timeField, fieldDataType);
-
   const { from, to } = timeRange;
+  
+  // Determine the actual timestamp type based on data type and timeUnit
+  const isEpochField = fieldDataType.toLowerCase().includes('bigint') || 
+                     fieldDataType.toLowerCase().includes('int') ||
+                     fieldDataType.toLowerCase().includes('numeric');
+  
+  // Get the actual time unit from metadata or infer it
+  const actualTimeUnit = timeUnit || inferTimeUnit(timeField, fieldDataType);
+  
   let fromSql = '';
   let toSql = '';
 
-  // Check if we're dealing with absolute dates
-  const isFromAbsolute = isAbsoluteDate(from);
-  const isToAbsolute = isAbsoluteDate(to);
-
-  if (isFromAbsolute) {
-    // Handle absolute from date
-    fromSql = formatDateForSql(from);
+  // Process from time
+  if (isAbsoluteDate(from)) {
+    const fromDate = new Date(from);
+    fromSql = isEpochField ? 
+      convertDateToEpoch(fromDate, actualTimeUnit).toString() : 
+      formatDateForSql(fromDate);
   } else {
-    // Handle relative from time (now-based)
-    // DuckDB syntax
-    const fromAmount = getTimeRangeAmount(from);
-    const fromUnit = getTimeRangeUnitForDatabase(from);
-
-    if (from === 'now') {
-      fromSql = 'NOW()';
-    } else if (from.startsWith('now-')) {
-      fromSql = `NOW() - INTERVAL ${fromAmount} ${fromUnit}`;
-    } else if (from.startsWith('now/')) {
-      // DuckDB date_trunc has different format
-      const unit = from.substring(4).toUpperCase();
-      fromSql = `DATE_TRUNC('${unit}', NOW())`;
-    } else {
-      // Fallback
-      fromSql = `NOW() - INTERVAL 24 HOUR`;
-    }
+    fromSql = processRelativeTime(from, isEpochField, actualTimeUnit);
   }
 
-  if (isToAbsolute) {
-    // Handle absolute to date
-    toSql = formatDateForSql(to);
+  // Process to time
+  if (isAbsoluteDate(to)) {
+    const toDate = new Date(to);
+    toSql = isEpochField ? 
+      convertDateToEpoch(toDate, actualTimeUnit).toString() : 
+      formatDateForSql(toDate);
   } else {
-    // Handle relative to time (now-based)
-    // To time is usually simpler
-    if (to === 'now') {
-      toSql = 'NOW()';
-    } else {
-      // Similar handling for other to time formats
-      const toAmount = getTimeRangeAmount(to);
-      const toUnit = getTimeRangeUnitForDatabase(to);
-
-      if (to.startsWith('now-')) {
-        toSql = `NOW() - INTERVAL ${toAmount} ${toUnit}`;
-      } else if (to.startsWith('now/')) {
-        const unit = to.substring(4).toUpperCase();
-        toSql = `DATE_TRUNC('${unit}', NOW())`;
-      } else {
-        try {
-          const date = new Date(to);
-          if (!isNaN(date.getTime())) {
-            toSql = `'${date.toISOString()}'`;
-          } else {
-            toSql = 'NOW()';
-          }
-        } catch (e) {
-          toSql = 'NOW()';
-        }
-      }
-    }
+    toSql = processRelativeTime(to, isEpochField, actualTimeUnit);
   }
 
-  // Format SQL based on timestamp type for DuckDB
-  if (timestampType === "milliseconds") {
-    // For millisecond timestamps, use epoch_ms for now-based expressions
-    // For absolute dates, convert them to milliseconds
-    let fromEpoch = isFromAbsolute ? `epoch_ms(${fromSql})` : `epoch_ms(${fromSql})`;
-    let toEpoch = isToAbsolute ? `epoch_ms(${toSql})` : `epoch_ms(${toSql})`;
+  return `${timeField} >= ${fromSql} AND ${timeField} <= ${toSql}`;
+}
+
+// Convert Date to epoch with specific time unit
+function convertDateToEpoch(date: Date, timeUnit: 's' | 'ms' | 'us' | 'ns'): number {
+  const ms = date.getTime();
+  switch (timeUnit) {
+    case 's': return Math.floor(ms / 1000);
+    case 'ms': return ms;
+    case 'us': return ms * 1000;
+    case 'ns': return ms * 1000000;
+    default: return ms;
+  }
+}
+
+// Process relative time expressions (now-1h, etc.)
+function processRelativeTime(timeExpr: string, isEpochField: boolean, timeUnit: 's' | 'ms' | 'us' | 'ns'): string {
+  if (timeExpr === 'now') {
+    return isEpochField ? getEpochNowExpression(timeUnit) : 'NOW()';
+  }
+
+  if (timeExpr.startsWith('now-')) {
+    const amount = getTimeRangeAmount(timeExpr);
+    const unit = getTimeRangeUnitForDatabase(timeExpr);
+    const intervalExpr = `NOW() - INTERVAL ${amount} ${unit}`;
     
-    return `${timeField} >= ${fromEpoch} AND ${timeField} <= ${toEpoch}`;
-  } else if (timestampType === "seconds") {
-    // For second timestamps, use epoch for now-based expressions
-    // For absolute dates, convert them to seconds
-    let fromEpoch = isFromAbsolute ? `epoch(${fromSql})` : `epoch(${fromSql})`;
-    let toEpoch = isToAbsolute ? `epoch(${toSql})` : `epoch(${toSql})`;
-    
-    return `${timeField} >= ${fromEpoch} AND ${timeField} <= ${toEpoch}`;
-  } else {
-    // Datetime fields - use the timestamp directly for comparison
-    return `${timeField} >= ${fromSql} AND ${timeField} <= ${toSql}`;
+    return isEpochField ? 
+      `EXTRACT(EPOCH FROM ${intervalExpr})${getEpochMultiplier(timeUnit)}` : 
+      intervalExpr;
   }
+
+  if (timeExpr.startsWith('now/')) {
+    const unit = timeExpr.substring(4).toUpperCase();
+    const truncExpr = `DATE_TRUNC('${unit}', NOW())`;
+    
+    return isEpochField ? 
+      `EXTRACT(EPOCH FROM ${truncExpr})${getEpochMultiplier(timeUnit)}` : 
+      truncExpr;
+  }
+
+  // Fallback
+  return isEpochField ? getEpochNowExpression(timeUnit) : 'NOW()';
+}
+
+// Get epoch NOW expression for different time units
+function getEpochNowExpression(timeUnit: 's' | 'ms' | 'us' | 'ns'): string {
+  switch (timeUnit) {
+    case 's': return 'EXTRACT(EPOCH FROM NOW())';
+    case 'ms': return 'EXTRACT(EPOCH FROM NOW()) * 1000';
+    case 'us': return 'EXTRACT(EPOCH FROM NOW()) * 1000000';
+    case 'ns': return 'EXTRACT(EPOCH FROM NOW()) * 1000000000';
+    default: return 'EXTRACT(EPOCH FROM NOW()) * 1000';
+  }
+}
+
+// Get multiplier for epoch conversion
+function getEpochMultiplier(timeUnit: 's' | 'ms' | 'us' | 'ns'): string {
+  switch (timeUnit) {
+    case 's': return '';
+    case 'ms': return ' * 1000';
+    case 'us': return ' * 1000000';
+    case 'ns': return ' * 1000000000';
+    default: return ' * 1000';
+  }
+}
+
+// Infer time unit from field name and data type
+function inferTimeUnit(fieldName: string, dataType: string): 's' | 'ms' | 'us' | 'ns' {
+  const field = fieldName.toLowerCase();
+  const type = dataType.toLowerCase();
+
+  // Check explicit suffixes first
+  if (field.endsWith('_ns') || field.includes('nano')) return 'ns';
+  if (field.endsWith('_us') || field.includes('micro')) return 'us';
+  if (field.endsWith('_ms') || field.includes('milli')) return 'ms';
+  if (field.endsWith('_s') || field.includes('sec')) return 's';
+
+  // Check common field names
+  if (field === '__timestamp') return 'ns'; // Common high-precision timestamp
+  if (field === 'created_at' || field === 'updated_at') return 'ms';
+
+  // For bigint without explicit unit, assume milliseconds (most common)
+  if (type.includes('bigint') || type.includes('int')) return 'ms';
+
+  // Default to milliseconds
+  return 'ms';
 }
 
 // Extract the amount from a time range string (e.g., "now-24h" -> "24")

@@ -30,7 +30,7 @@ const ConnectionError = () => {
   // Common API input component used in all states
   const ApiEndpointInput = () => (
     <div className="bg-card/50 border border-border rounded-md p-4 mb-6 w-full max-w-md">
-      <p className="text-sm text-muted-foreground mb-3 text-center">
+      <p className="text-sm text-muted-foreground mb-3 text-center ">
         {connectionState === "error"
           ? "We couldn't connect to:"
           : "API endpoint:"}
@@ -41,7 +41,7 @@ const ConnectionError = () => {
           type="text"
           placeholder="Enter API Endpoint URL"
           className={`w-full h-9 text-sm border-0 focus-visible:ring-0 focus-visible:ring-offset-0 px-2 bg-card/50 ${
-            connectionState === "error" ? "bg-red-500/20! text-red-100" : ""
+            connectionState === "error" ? "bg-red-500/20! text-red-500" : ""
           }`}
           defaultValue={apiUrl}
           onKeyDown={(e) => {
@@ -117,7 +117,7 @@ const ConnectionError = () => {
 
         {connectionError && (
           <>
-            <div className="bg-red-950/30 border border-red-800 rounded-md p-4 mb-6 max-w-lg text-sm">
+            <div className="border border-red-500 rounded-md bg-red-400/20 p-4 mb-6 max-w-lg text-sm text-red-500 font-mono">
               {connectionError}
             </div>
           </>

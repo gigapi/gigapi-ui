@@ -372,17 +372,6 @@ export default function QueryResults() {
                   </pre>
                 </div>
 
-                {currentExecutedQuery && currentExecutedQuery !== query && (
-                  <div>
-                    <h3 className="text-xs uppercase text-muted-foreground mb-1 font-bold">
-                      Executed Query
-                    </h3>
-                    <pre className="bg-muted p-3 rounded-md overflow-x-auto text-sm break-words whitespace-pre-wrap">
-                      {currentExecutedQuery}
-                    </pre>
-                  </div>
-                )}
-
                 {transformedQuery &&
                   transformedQuery !== currentExecutedQuery &&
                   transformedQuery !== query && (

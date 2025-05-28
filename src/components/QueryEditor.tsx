@@ -1,14 +1,16 @@
 import { useRef, useEffect, useState, useCallback, useMemo } from "react";
 import { useQuery } from "@/contexts/QueryContext";
+import { useMCP } from "@/contexts/MCPContext";
 import Editor, { useMonaco } from "@monaco-editor/react";
 import { Button } from "@/components/ui/button";
-import { Play, Copy, Eraser, Share } from "lucide-react";
+import { Play, Copy, Eraser, Share, MessageCircle, Bot } from "lucide-react";
 import { useTheme } from "@/components/theme-provider";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import Loader from "@/components/Loader";
 import TimeRangeSelector from "@/components/TimeRangeSelector";
 import TableSelector from "@/components/TableSelector";
+import ChatPanel from "@/components/ChatPanel";
 import {
   Select,
   SelectContent,
@@ -43,9 +45,12 @@ export default function QueryEditor() {
     hasTimeVariables,
   } = useQuery();
 
+  const { isConnected: mcpConnected } = useMCP();
+
   const { theme } = useTheme();
   const [isEditorReady, setIsEditorReady] = useState(false);
   const [hasManualEdits, setHasManualEdits] = useState(false);
+  const [showChatPanel, setShowChatPanel] = useState(false);
 
   // Create refs for editor and Monaco
   const editorRef = useRef<any>(null);
@@ -166,10 +171,21 @@ export default function QueryEditor() {
       toast.error("Please select a database first");
       return;
     }
+    
+    // Get the current query from the editor
+    const currentQuery = editorRef.current?.getValue() || "";
+    
+    // Update the context with the current query before executing
+    setQuery(currentQuery);
+    
     // Reset manual edits flag when running a query
     setHasManualEdits(false);
-    executeQuery();
-  }, [selectedDb, executeQuery]);
+    
+    // Execute with a small delay to ensure state update
+    setTimeout(() => {
+      executeQuery();
+    }, 10);
+  }, [selectedDb, executeQuery, setQuery]);
 
   // Copy query to clipboard
   const copyQuery = useCallback(() => {
@@ -319,7 +335,15 @@ export default function QueryEditor() {
           toast.error("Please select a database first");
           return;
         }
-        executeQuery();
+        
+        // Get the current query from the editor and update context
+        const currentQuery = editorRef.current?.getValue() || "";
+        setQuery(currentQuery);
+        
+        // Execute with a small delay to ensure state update
+        setTimeout(() => {
+          executeQuery();
+        }, 10);
       }
     );
 
@@ -327,7 +351,7 @@ export default function QueryEditor() {
     if (disposable && typeof disposable !== "string") {
       keyboardDisposableRef.current = disposable;
     }
-  }, [selectedDb, executeQuery]);
+  }, [selectedDb, executeQuery, setQuery]);
 
   // Set up Monaco intellisense for SQL
   const setupIntellisense = useCallback(() => {
@@ -934,6 +958,35 @@ export default function QueryEditor() {
                   </TooltipContent>
                 </Tooltip>
               </TooltipProvider>
+
+              <div className="h-5 w-px bg-border mx-1"></div>
+
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant={showChatPanel ? "default" : "ghost"}
+                      size="sm"
+                      className="h-8 w-8 p-0"
+                      onClick={() => setShowChatPanel(!showChatPanel)}
+                    >
+                      {mcpConnected ? (
+                        <Bot className="h-3.5 w-3.5" />
+                      ) : (
+                        <MessageCircle className="h-3.5 w-3.5" />
+                      )}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">
+                    <p className="text-xs">
+                      <Badge variant="outline" className="mr-1 bg-purple-100 text-purple-800">
+                        Alpha
+                      </Badge>
+                      {mcpConnected ? "AI chat (Connected)" : "AI chat (Disconnected)"}
+                    </p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
             </div>
 
             {/* Add table and time controls inline */}
@@ -1010,32 +1063,45 @@ export default function QueryEditor() {
         </div>
       </div>
 
-      {/* Monaco SQL Editor */}
-      <div className="flex-grow relative min-h-[200px] border rounded-md overflow-hidden">
-        {!isEditorReady && <Skeleton className="h-full w-full" />}
-        <Editor
-          defaultLanguage="sql"
-          defaultValue={query}
-          theme={editorTheme}
-          onChange={handleEditorChange}
-          onMount={handleEditorDidMount}
-          options={{
-            minimap: { enabled: false },
-            scrollBeyondLastLine: false,
-            fontFamily: "monospace",
-            fontSize: 12,
-            padding: {
-              top: 10,
-              bottom: 10,
-            },
-            lineNumbers: "on",
-            tabSize: 2,
-            wordWrap: "on",
-            automaticLayout: true,
-          }}
-          className="h-full"
-          loading={<Loader className="h-10 w-10" />}
-        />
+      {/* Main content area with optional split view */}
+      <div className="flex-1 flex gap-2 min-h-0">
+        {/* Monaco SQL Editor */}
+        <div className={`flex-grow relative min-h-[200px] border rounded-md overflow-hidden ${showChatPanel ? 'w-1/2' : 'w-full'}`}>
+          {!isEditorReady && <Skeleton className="h-full w-full" />}
+          <Editor
+            defaultLanguage="sql"
+            defaultValue={query}
+            theme={editorTheme}
+            onChange={handleEditorChange}
+            onMount={handleEditorDidMount}
+            options={{
+              minimap: { enabled: false },
+              scrollBeyondLastLine: false,
+              fontFamily: "monospace",
+              fontSize: 12,
+              padding: {
+                top: 10,
+                bottom: 10,
+              },
+              lineNumbers: "on",
+              tabSize: 2,
+              wordWrap: "on",
+              automaticLayout: true,
+            }}
+            className="h-full"
+            loading={<Loader className="h-10 w-10" />}
+          />
+        </div>
+
+        {/* Chat Panel */}
+        {showChatPanel && (
+          <div className="w-1/2 min-h-[200px]">
+            <ChatPanel 
+              isOpen={showChatPanel} 
+              onClose={() => setShowChatPanel(false)}
+            />
+          </div>
+        )}
       </div>
     </div>
   );

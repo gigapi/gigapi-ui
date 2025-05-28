@@ -7,7 +7,6 @@ import { toast } from "sonner";
 export default function AppContent() {
   const {
     setQuery,
-    executeQuery,
     setSelectedDb,
     setSelectedTable,
     setSelectedTimeField,
@@ -84,18 +83,6 @@ export default function AppContent() {
         setTimeRange(timeRange);
       }
 
-      // Execute the query automatically after a short delay to allow UI to settle
-      setTimeout(() => {
-        executeQuery().catch((execError: Error) => {
-          console.error("Error executing query from URL hash:", execError);
-          toast.error(
-            `Failed to execute shared query: ${
-              execError.message || String(execError)
-            }`
-          );
-        });
-      }, 300); // Adjusted delay slightly
-
       toast.success("Loaded query from shared URL");
     } else if (dbFromHash && !query) {
       toast.info(`Switched to database '${dbFromHash}' from shared URL.`);
@@ -107,7 +94,6 @@ export default function AppContent() {
     schema,
     hashParamsApplied,
     setQuery,
-    executeQuery,
     setSelectedDb,
     setSelectedTable,
     setSelectedTimeField,

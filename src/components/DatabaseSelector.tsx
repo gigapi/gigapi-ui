@@ -1,14 +1,14 @@
-import { useQuery } from "@/contexts/QueryContext"; // Assuming this context exists and works
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { useQuery } from "@/contexts/QueryContext";
+import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
-import { Database, RefreshCcw } from "lucide-react";
-import { cn } from "@/lib/utils"; // Make sure you have cn utility
+import { Input } from "@/components/ui/input";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { Database, RefreshCcw, Check, ChevronsUpDown } from "lucide-react";
+import { cn } from "@/lib/utils"; 
 
 export default function DatabaseSelector() {
   const {
@@ -20,69 +20,125 @@ export default function DatabaseSelector() {
     isLoading,
   } = useQuery();
 
+  const [open, setOpen] = useState(false);
+  const [searchValue, setSearchValue] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Clear search when popover opens and focus input
+  useEffect(() => {
+    if (open) {
+      setSearchValue("");
+      // Focus the input after a small delay to ensure it's rendered
+      setTimeout(() => {
+        inputRef.current?.focus();
+      }, 50);
+    }
+  }, [open]);
+
   function getPlaceholderText() {
     if (error?.includes("databases")) {
-      return "Error loading DBs"; // Shortened for better fit
+      return "Error loading DBs";
     }
     if (isLoading && !databases.length) {
-      return "Loading DBs..."; // Shortened
+      return "Loading DBs...";
     }
     if (!databases.length) {
-      return "No DBs found"; // Shortened
+      return "No DBs found";
     }
     return "Select database";
   }
 
   const isDisabled = isLoading || !!error?.includes("databases") || !databases.length;
 
+  // Filter databases based on search
+  const filteredDatabases = databases.filter((db) =>
+    db.database_name.toLowerCase().includes(searchValue.toLowerCase())
+  );
+
+  const handleSelectDatabase = (dbName: string) => {
+    setSelectedDb(dbName);
+    setSearchValue("");
+    setOpen(false);
+  };
+
   return (
     <div className="space-y-3">
       <div className="flex space-x-2 items-center">
-        {/* The Database icon is now INSIDE the SelectTrigger */}
-        <Select
-          value={selectedDb || ""} // Ensure value is not undefined for controlled component
-          onValueChange={setSelectedDb}
-          disabled={isDisabled}
-        >
-          <SelectTrigger
-            className={cn(
-              "bg-background w-full sm:w-[200px] md:w-[240px]", // Adjust width as needed
-              { "text-destructive": error?.includes("databases") }
-            )}
-          >
-            <div className="flex items-center gap-2"> {/* Flex container for icon and text */}
+        <Popover open={open} onOpenChange={setOpen}>
+          <PopoverTrigger asChild>
+            <Button
+              variant="outline"
+              role="combobox"
+              aria-expanded={open}
+              disabled={isDisabled}
+              className={cn(
+                "w-full sm:w-[200px] md:w-[240px] justify-start",
+                { "text-destructive border-destructive": error?.includes("databases") }
+              )}
+            >
               <Database className={cn(
-                "h-4 w-4",
+                "h-4 w-4 mr-2",
                 isDisabled ? "text-muted-foreground/50" : "text-muted-foreground"
               )} />
-              <SelectValue
-                placeholder={
-                  <span className={error?.includes("databases") ? "text-destructive" : ""}>
+              <span className="truncate">
+                {selectedDb || (
+                  <span className={error?.includes("databases") ? "text-destructive" : "text-muted-foreground"}>
                     {getPlaceholderText()}
                   </span>
-                }
-                className="truncate" // Apply truncate to the SelectValue text
-              />
+                )}
+              </span>
+              <ChevronsUpDown className="ml-auto h-4 w-4 shrink-0 opacity-50" />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-[240px] p-0" align="start">
+            <div className="flex flex-col max-h-[400px]">
+              {/* Search Input */}
+              <div className="flex items-center border-b px-3 py-2 flex-shrink-0">
+                <Input
+                  ref={inputRef}
+                  placeholder="Search databases..."
+                  value={searchValue}
+                  onChange={(e) => setSearchValue(e.target.value)}
+                  className="h-8 border-0 bg-transparent px-0 focus-visible:ring-0 focus-visible:ring-offset-0"
+                />
+              </div>
+              
+              {/* Database List with native scrolling */}
+              <div className="flex-1 overflow-y-auto min-h-0">
+                <div className="p-1">
+                  {isLoading && !databases.length ? (
+                    <div className="px-2 py-1.5 text-sm text-muted-foreground">
+                      Loading databases...
+                    </div>
+                  ) : filteredDatabases.length === 0 ? (
+                    <div className="px-2 py-1.5 text-sm text-muted-foreground">
+                      {searchValue ? "No matching databases found." : "No databases found."}
+                    </div>
+                  ) : (
+                    filteredDatabases.map((db) => (
+                      <button
+                        key={db.database_name}
+                        onClick={() => handleSelectDatabase(db.database_name)}
+                        className={cn(
+                          "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground focus:outline-none",
+                          selectedDb === db.database_name && "bg-accent"
+                        )}
+                      >
+                        <Check
+                          className={cn(
+                            "h-4 w-4",
+                            selectedDb === db.database_name ? "opacity-100" : "opacity-0"
+                          )}
+                        />
+                        <span className="truncate">{db.database_name}</span>
+                      </button>
+                    ))
+                  )}
+                </div>
+              </div>
             </div>
-          </SelectTrigger>
-          <SelectContent className="bg-popover text-popover-foreground">
-            {databases.map((db) => (
-              <SelectItem key={db.database_name} value={db.database_name} className="truncate">
-                {db.database_name}
-              </SelectItem>
-            ))}
-            {/* Optional: Show a message if loading or no databases in dropdown */}
-            {isLoading && !databases.length && (
-              <div className="px-2 py-1.5 text-sm text-muted-foreground">Loading databases...</div>
-            )}
-            {!isLoading && !databases.length && !error?.includes("databases") && (
-               <div className="px-2 py-1.5 text-sm text-muted-foreground">No databases found.</div>
-            )}
-            {error?.includes("databases") && (
-              <div className="px-2 py-1.5 text-sm text-destructive">Error loading databases.</div>
-            )}
-          </SelectContent>
-        </Select>
+          </PopoverContent>
+        </Popover>
         <Button
           variant="outline"
           size="icon"
