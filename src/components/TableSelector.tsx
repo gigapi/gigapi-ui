@@ -1,4 +1,5 @@
-import { useQuery } from "../contexts/QueryContext";
+import { useDatabase } from "@/contexts/DatabaseContext";
+import { useQuery } from "@/contexts/QueryContext";
 import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,7 +15,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { cn } from "@/lib/utils";
+import { cn } from "@/lib/";
 
 export default function TableSelector() {
   const {
@@ -23,9 +24,8 @@ export default function TableSelector() {
     availableTables,
     isLoadingSchema,
     selectedDb,
-    query,
-    setQuery
-  } = useQuery();
+  } = useDatabase();
+  const { query, setQuery } = useQuery();
 
   const [open, setOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");

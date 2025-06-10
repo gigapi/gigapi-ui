@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { Label } from "@/components/ui/label";
-import { cn } from "@/lib/utils";
+import { cn } from "@/lib/";
 
 interface DateTimePickerProps {
   value: string;

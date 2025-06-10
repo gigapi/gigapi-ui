@@ -1,5 +1,8 @@
 import { useState, useEffect } from "react";
 import { useQuery } from "@/contexts/QueryContext";
+import { useTime } from "@/contexts/TimeContext";
+import { useDatabase } from "@/contexts/DatabaseContext";
+import { checkForTimeVariables } from "@/lib/";
 import {
   Sheet,
   SheetContent,
@@ -32,6 +35,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
+import { formatDate } from "@/lib/";
 
 // Use the same type as in QueryContext
 type HistoryItem = {
@@ -49,15 +53,9 @@ type HistoryItem = {
 };
 
 export default function QueryHistory() {
-  const { 
-    setQuery, 
-    setSelectedDb, 
-    setSelectedTable, 
-    setSelectedTimeField, 
-    setTimeRange, 
-    queryHistory, 
-    clearQueryHistory 
-  } = useQuery();
+  const { setQuery, queryHistory, clearQueryHistory } = useQuery();
+  const { setSelectedTimeField, setTimeRange } = useTime();
+  const { setSelectedDb, setSelectedTable } = useDatabase();
   const [localHistory, setLocalHistory] = useState<HistoryItem[]>([]);
   const [isOpen, setIsOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
@@ -74,25 +72,25 @@ export default function QueryHistory() {
   function loadQueryFromHistory(item: HistoryItem) {
     // First set the database (this might trigger schema loading)
     setSelectedDb(item.db);
-    
+
     // Restore the original query with variables
     setQuery(item.query);
-    
+
     // Restore the table if available
     if (item.table) {
       setSelectedTable(item.table);
     }
-    
+
     // Restore the time field if available
     if (item.timeField) {
       setSelectedTimeField(item.timeField);
     }
-    
+
     // Restore the time range if available
     if (item.timeRange) {
       setTimeRange(item.timeRange);
     }
-    
+
     setIsOpen(false);
     toast.success("Query context restored");
   }
@@ -105,41 +103,6 @@ export default function QueryHistory() {
     setConfirmDialogOpen(false);
   }
 
-  // Format date for display
-  function formatDate(dateStr: string): string {
-    try {
-      const date = new Date(dateStr);
-      // If today, just show time
-      const today = new Date();
-      if (date.toDateString() === today.toDateString()) {
-        return `Today at ${date.toLocaleTimeString([], {
-          hour: "2-digit",
-          minute: "2-digit",
-        })}`;
-      }
-
-      // If yesterday, show "Yesterday"
-      const yesterday = new Date(today);
-      yesterday.setDate(yesterday.getDate() - 1);
-      if (date.toDateString() === yesterday.toDateString()) {
-        return `Yesterday at ${date.toLocaleTimeString([], {
-          hour: "2-digit",
-          minute: "2-digit",
-        })}`;
-      }
-
-      // Otherwise full date
-      return date.toLocaleString([], {
-        month: "short",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      });
-    } catch (e) {
-      return dateStr;
-    }
-  }
-
   // Truncate query for display
   function truncateQuery(query: string, maxLength: number = 120): string {
     if (query.length <= maxLength) return query;
@@ -148,7 +111,7 @@ export default function QueryHistory() {
 
   // Check if query contains time variables
   function hasTimeVariables(query: string): boolean {
-    return query.includes('$__time') || query.includes('$__from') || query.includes('$__to');
+    return checkForTimeVariables(query);
   }
 
   // Filter the history based on search term
@@ -243,7 +206,7 @@ export default function QueryHistory() {
                         <DbIcon className="h-3 w-3" />
                         {item.db}
                       </Badge>
-                      
+
                       {item.table && (
                         <Badge
                           variant="outline"
@@ -253,7 +216,7 @@ export default function QueryHistory() {
                           {item.table}
                         </Badge>
                       )}
-                      
+
                       {/* Only show time field badge if query has time variables AND timeField is not null */}
                       {item.timeField && hasTimeVariables(item.query) && (
                         <Badge
@@ -264,7 +227,7 @@ export default function QueryHistory() {
                           {item.timeField}
                         </Badge>
                       )}
-                      
+
                       {/* Only show variables badge if query has time variables */}
                       {hasTimeVariables(item.query) && (
                         <Badge
@@ -275,7 +238,7 @@ export default function QueryHistory() {
                           Variables
                         </Badge>
                       )}
-                      
+
                       <span className="text-xs flex items-center gap-1 text-muted-foreground">
                         <Calendar className="h-3 w-3" />
                         {formatDate(item.timestamp)}
@@ -298,12 +261,16 @@ export default function QueryHistory() {
                   <div className="font-mono text-xs text-foreground/80 whitespace-pre-wrap break-all leading-snug bg-muted/30 rounded p-1.5 max-h-24 overflow-hidden">
                     {truncateQuery(item.query)}
                   </div>
-                  
+
                   {/* Only show time range if query has time variables AND timeRange is not null */}
                   {item.timeRange && hasTimeVariables(item.query) && (
                     <div className="mt-1 text-xs text-muted-foreground flex items-center gap-1">
                       <Clock className="h-3 w-3" />
-                      <span>Range: {item.timeRange.display || `${item.timeRange.from} to ${item.timeRange.to}`}</span>
+                      <span>
+                        Range:{" "}
+                        {item.timeRange.display ||
+                          `${item.timeRange.from} to ${item.timeRange.to}`}
+                      </span>
                     </div>
                   )}
                 </div>

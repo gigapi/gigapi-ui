@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useQuery } from "@/contexts/QueryContext";
+import { useConnection } from "@/contexts/ConnectionContext";
 import {
   Database,
   X,
@@ -38,7 +38,7 @@ import { toast } from "sonner";
 const VERSION = import.meta.env.PACKAGE_VERSION;
 
 export default function QueryNav() {
-  const { apiUrl, setApiUrl, loadDatabases } = useQuery();
+  const { apiUrl, setApiUrl, loadDatabases } = useConnection();
   const [isEndpointEditing, setIsEndpointEditing] = useState(false);
   const [tempApiUrl, setTempApiUrl] = useState(apiUrl);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -106,62 +106,55 @@ export default function QueryNav() {
           </div>
         </div>
 
-        {/* Center Section - API Endpoint (large screens) */}
-        <div className="flex-1 max-w-md mx-6 hidden xl:block">
-          {isEndpointEditing ? (
-            <div className="flex items-center space-x-2">
-              <div className="relative flex-1">
-                <Globe className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  value={tempApiUrl}
-                  onChange={(e) => setTempApiUrl(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  className="font-mono text-sm pl-10 bg-background"
-                  placeholder="https://api.example.com"
-                  autoFocus
-                />
-              </div>
-              <Button
-                variant="default"
-                size="sm"
-                onClick={handleSaveEndpoint}
-                disabled={!tempApiUrl.trim()}
-              >
-                <Save className="h-4 w-4 mr-1" />
-                Save
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  setTempApiUrl(apiUrl);
-                  setIsEndpointEditing(false);
-                }}
-              >
-                <X className="h-4 w-4" />
-              </Button>
-            </div>
-          ) : (
-            <div
-              className="group cursor-pointer border border-transparent hover:border-border rounded-lg px-4 py-2 bg-muted/20 hover:bg-muted/40 transition-colors"
-              onClick={() => setIsEndpointEditing(true)}
-              title="Click to edit API endpoint"
-            >
-              <div className="flex items-center justify-center space-x-2">
-                <Globe className="h-4 w-4 text-muted-foreground" />
-                <span className="font-mono text-sm truncate max-w-[300px]">
-                  {apiUrl}
-                </span>
-                <Edit className="h-3.5 w-3.5 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground" />
-              </div>
-            </div>
-          )}
-        </div>
-
         {/* Right Section - Desktop Actions */}
         <div className="flex items-center space-x-2">
           {/* Desktop controls */}
           <div className="hidden md:flex items-center space-x-2">
+            {isEndpointEditing ? (
+              <div className="flex items-center space-x-2">
+                <div className="relative flex-1">
+                  <Globe className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    value={tempApiUrl}
+                    onChange={(e) => setTempApiUrl(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    className="font-mono text-sm pl-10 bg-background min-w-[400px]"
+                    placeholder="https://api.example.com"
+                    autoFocus
+                  />
+                </div>
+                <Button
+                  variant="default"
+                  onClick={handleSaveEndpoint}
+                  disabled={!tempApiUrl.trim()}
+                >
+                  <Save className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setTempApiUrl(apiUrl);
+                    setIsEndpointEditing(false);
+                  }}
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            ) : (
+              <div
+                className="group cursor-pointer border border-transparent hover:border-border rounded-lg px-4 py-2 bg-muted/20 hover:bg-muted/40 transition-colors"
+                onClick={() => setIsEndpointEditing(true)}
+                title="Click to edit API endpoint"
+              >
+                <div className="flex items-center justify-center space-x-2">
+                  <Globe className="h-4 w-4 text-muted-foreground" />
+                  <span className="font-mono text-sm truncate max-w-[300px]">
+                    {apiUrl}
+                  </span>
+                  <Edit className="h-3.5 w-3.5 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground" />
+                </div>
+              </div>
+            )}
             <DatabaseSelector />
             <QueryHistory />
             <ModeToggle />
@@ -195,12 +188,9 @@ export default function QueryNav() {
                   Feedback & Issues
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                                <DropdownMenuItem
+                <DropdownMenuItem
                   onClick={() =>
-                    window.open(
-                      "https://github.com/gigapi/gigapi",
-                      "_blank"
-                    )
+                    window.open("https://github.com/gigapi/gigapi", "_blank")
                   }
                 >
                   <Github className="h-4 w-4 mr-2" />

@@ -11,9 +11,9 @@ import {
 } from "@/components/ui/resizable";
 import Logo from "@/assets/logo.svg";
 import AppContent from "@/components/AppContent";
-import { useQuery } from "@/contexts/QueryContext";
+import { useConnection } from "@/contexts/ConnectionContext";
 import { CheckCircle } from "lucide-react";
-import ConnectionError from "./components/ConnectionError";
+import ConnectionError from "@/components/ConnectionError";
 
 const VERSION = import.meta.env.PACKAGE_VERSION;
 
@@ -102,7 +102,7 @@ const setupGlobalErrorHandlers = () => {
 };
 
 export default function App() {
-  const { connectionState } = useQuery();
+  const { connectionState } = useConnection();
 
   // Set up global error handlers
   useEffect(() => {

@@ -5,17 +5,15 @@ import {
   getFilteredRowModel,
   getPaginationRowModel,
   useReactTable,
-} from "@tanstack/react-table";
-import type {
-  ColumnDef,
-  FilterFn,
-  ColumnFiltersState,
-  ColumnResizeMode,
-  PaginationState,
-  ColumnSizingState,
+  type ColumnDef,
+  type FilterFn,
+  type ColumnFiltersState,
+  type ColumnResizeMode,
+  type PaginationState,
+  type ColumnSizingState,
 } from "@tanstack/react-table";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { formatBytes, formatDuration } from "@/lib/utils";
+import { formatBytes, formatDuration } from "@/lib/";
 import { Download, Search, X, Clock, SlidersHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";

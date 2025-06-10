@@ -9,7 +9,7 @@ import {
   formatTimezone,
   getTimezoneOffset,
   getBrowserTimezone,
-} from "@/lib/time-parsing-utils";
+} from "@/lib/";
 
 interface TimezoneSelectorProps {
   selectedTimeZone: string;

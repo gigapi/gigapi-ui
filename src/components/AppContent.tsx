@@ -1,19 +1,15 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@/contexts/QueryContext";
-import HashQueryUtils from "@/lib/hash-query-utils";
+import { useDatabase } from "@/contexts/DatabaseContext";
+import { useTime } from "@/contexts/TimeContext";
+import { HashQueryUtils } from "@/lib/";
 import type { TimeRange } from "@/types/index";
 import { toast } from "sonner";
 
 export default function AppContent() {
-  const {
-    setQuery,
-    setSelectedDb,
-    setSelectedTable,
-    setSelectedTimeField,
-    setTimeRange,
-    selectedDb,
-    schema,
-  } = useQuery();
+  const { setQuery } = useQuery();
+  const { setSelectedDb, setSelectedTable, selectedDb, schema } = useDatabase();
+  const { setSelectedTimeField, setTimeRange } = useTime();
 
   const [hashParamsApplied, setHashParamsApplied] = useState(false);
 

@@ -11,15 +11,13 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { cn } from "@/lib/utils";
+import { cn } from "@/lib/";
 import { format } from "date-fns";
 import { Card } from "@/components/ui/card";
-import {
-  DEFAULT_TIME_RANGE,
-  NO_TIME_FILTER,
-  QUICK_RANGES,
-} from "@/lib/time-constants";
+import { DEFAULT_TIME_RANGE } from "@/lib/";
+import { NO_TIME_FILTER, QUICK_RANGES } from "@/types/utils.types";
 import { Badge } from "@/components/ui/badge";
+import { useTime } from "@/contexts/TimeContext";
 import { useQuery } from "@/contexts/QueryContext";
 import {
   Tooltip,
@@ -33,15 +31,12 @@ import {
   getDisplayTime,
   validateTimeInputs,
   convertDateInput,
-} from "@/lib/time-parsing-utils";
-import {
-  showErrorToast,
-  showSuccessToast,
   validateInput,
-} from "@/lib/error-utils";
+} from "@/lib/";
 import TimezoneSelector from "@/components/TimezoneSelector";
 import DateTimePicker from "@/components/DateTimePicker";
 import QuickRanges from "@/components/QuickRanges";
+import { toast } from "sonner";
 
 // TimeRange is now imported from the centralized types file
 
@@ -75,10 +70,9 @@ export default function TimeRangeSelector({
     selectedTimeZone,
     setSelectedTimeZone,
     hasTimeVariables,
-    query,
-    setQuery,
     selectedTimeField,
-  } = useQuery();
+  } = useTime();
+  const { query, setQuery } = useQuery();
 
   // Get browser timezone and current time
   useEffect(() => {
@@ -127,7 +121,8 @@ export default function TimeRangeSelector({
     }
 
     const quickRange = QUICK_RANGES.find(
-      (r: TimeRange) => r.from === safeTimeRange.from && r.to === safeTimeRange.to
+      (r: TimeRange) =>
+        r.from === safeTimeRange.from && r.to === safeTimeRange.to
     );
 
     if (quickRange) {
@@ -155,6 +150,7 @@ export default function TimeRangeSelector({
       !hasTimeVariables &&
       safeTimeRange.enabled !== false &&
       selectedTimeField !== null &&
+      selectedTimeField !== "_none_" &&
       query.trim() !== ""
     );
   }, [hasTimeVariables, safeTimeRange, selectedTimeField, query]);
@@ -162,10 +158,7 @@ export default function TimeRangeSelector({
   // Function to add time filter to query
   const addTimeFilterToQuery = () => {
     if (!selectedTimeField || !query) {
-      showErrorToast({
-        message: "Cannot add time filter",
-        detail: "Please select a time field and ensure you have a query"
-      });
+      toast.error("No time field selected or query is empty");
       return;
     }
 
@@ -215,10 +208,7 @@ export default function TimeRangeSelector({
 
     // Update the query
     setQuery(newQuery);
-    showSuccessToast(
-      "Time filter added to query",
-      "The query now includes $__timeFilter which will be replaced with time conditions"
-    );
+    toast.success("Time filter added to query");
   };
 
   // Apply quick range selection
@@ -235,8 +225,8 @@ export default function TimeRangeSelector({
       ...range,
       enabled: true, // Explicitly set to true for all other options
       raw: {
-        from: new Date(parseRelativeTime(range.from)),
-        to: new Date(parseRelativeTime(range.to)),
+        from: new Date(parseRelativeTime(range.from) || Date.now()),
+        to: new Date(parseRelativeTime(range.to) || Date.now()),
       },
     };
 
@@ -249,21 +239,22 @@ export default function TimeRangeSelector({
     // Validate inputs before applying
     const fromError = validateInput(fromInput, { required: true }, "From time");
     const toError = validateInput(toInput, { required: true }, "To time");
-    
+
     if (fromError || toError || !validateTimeInputs(fromInput, toInput)) {
-      showErrorToast({ 
-        message: `Invalid time range inputs "${fromInput}" to "${toInput}"`, 
-        detail: fromError || toError || `Please check your time range inputs and try again.`
-      });
+      toast.error(
+        `Invalid time inputs: ${
+          fromError || toError || "From must be before To"
+        }`
+      );
       return;
     }
 
     // Convert inputs to appropriate values
     const fromValue = convertDateInput(fromInput);
     const toValue = convertDateInput(toInput);
-    
-    const fromTimestamp = parseRelativeTime(fromValue);
-    const toTimestamp = parseRelativeTime(toValue);
+
+    const fromTimestamp = parseRelativeTime(fromValue) || Date.now();
+    const toTimestamp = parseRelativeTime(toValue) || Date.now();
 
     const newRange = {
       from: fromValue,

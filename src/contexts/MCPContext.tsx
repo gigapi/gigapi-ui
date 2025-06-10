@@ -15,8 +15,10 @@ import type {
   ChatMessage,
   ChatSession,
   MCPServerCapabilities,
+  MCPContextType, // Added MCPContextType
 } from "@/types";
-import { useQuery } from "@/contexts/QueryContext";
+import { useDatabase } from "@/contexts/DatabaseContext";
+import { useTime } from "@/contexts/TimeContext";
 
 // Storage keys
 const MCP_STORAGE_KEYS = {
@@ -26,39 +28,6 @@ const MCP_STORAGE_KEYS = {
   ACTIVE_CONNECTION: "ai_active_connection",
 } as const;
 
-
-interface MCPContextType {
-  // Connection management
-  connections: MCPConnection[];
-  activeConnection: MCPConnection | null;
-  addConnection: (connection: Omit<MCPConnection, "id" | "isConnected">) => Promise<void>;
-  removeConnection: (connectionId: string) => void;
-  testConnection: (connectionId: string) => Promise<boolean>;
-  setActiveConnection: (connectionId: string | null) => void;
-  fetchModels: (baseUrl: string) => Promise<AIModel[]>;
-  
-  // Chat functionality
-  chatSessions: ChatSession[];
-  activeSession: ChatSession | null;
-  createChatSession: (title?: string) => ChatSession;
-  switchChatSession: (sessionId: string) => void;
-  deleteChatSession: (sessionId: string) => void;
-  renameChatSession: (sessionId: string, newTitle: string) => void;
-  sendMessage: (content: string) => Promise<void>;
-  
-  // AI capabilities
-  generateQuery: (prompt: string) => Promise<string>;
-  analyzeData: (data: any[], prompt: string) => Promise<string>;
-  optimizeQuery: (query: string) => Promise<string>;
-  
-  // State
-  isConnected: boolean;
-  isLoading: boolean;
-  error: string | null;
-  availableModels: AIModel[];
-  capabilities: MCPServerCapabilities;
-}
-
 const MCPContext = createContext<MCPContextType | undefined>(undefined);
 
 export function MCPProvider({ children }: { children: ReactNode }) {
@@ -66,8 +35,9 @@ export function MCPProvider({ children }: { children: ReactNode }) {
     selectedDb,
     selectedTable,
     schema,
-    timeRange,
-  } = useQuery();
+  } = useDatabase();
+
+  const { timeRange } = useTime();
 
   // State management - connections are persisted for Ollama
   const [connections, setConnections] = useState<MCPConnection[]>(() => {

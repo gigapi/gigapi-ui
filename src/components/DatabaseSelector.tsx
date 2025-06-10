@@ -1,4 +1,5 @@
-import { useQuery } from "@/contexts/QueryContext";
+import { useConnection } from "@/contexts/ConnectionContext";
+import { useDatabase } from "@/contexts/DatabaseContext";
 import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,17 +9,11 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { Database, RefreshCcw, Check, ChevronsUpDown } from "lucide-react";
-import { cn } from "@/lib/utils"; 
+import { cn } from "@/lib/"; 
 
 export default function DatabaseSelector() {
-  const {
-    selectedDb,
-    setSelectedDb,
-    databases,
-    loadDatabases,
-    error,
-    isLoading,
-  } = useQuery();
+  const { databases, loadDatabases, connectionError, connectionState } = useConnection();
+  const { selectedDb, setSelectedDb } = useDatabase();
 
   const [open, setOpen] = useState(false);
   const [searchValue, setSearchValue] = useState("");
@@ -36,10 +31,10 @@ export default function DatabaseSelector() {
   }, [open]);
 
   function getPlaceholderText() {
-    if (error?.includes("databases")) {
+    if (connectionError) {
       return "Error loading DBs";
     }
-    if (isLoading && !databases.length) {
+    if (connectionState === "connecting" && !databases.length) {
       return "Loading DBs...";
     }
     if (!databases.length) {
@@ -48,7 +43,7 @@ export default function DatabaseSelector() {
     return "Select database";
   }
 
-  const isDisabled = isLoading || !!error?.includes("databases") || !databases.length;
+  const isDisabled = connectionState === "connecting" || !!connectionError || !databases.length;
 
   // Filter databases based on search
   const filteredDatabases = databases.filter((db) =>
@@ -73,7 +68,7 @@ export default function DatabaseSelector() {
               disabled={isDisabled}
               className={cn(
                 "w-full sm:w-[200px] md:w-[240px] justify-start",
-                { "text-destructive border-destructive": error?.includes("databases") }
+                { "text-destructive border-destructive": connectionError }
               )}
             >
               <Database className={cn(
@@ -82,7 +77,7 @@ export default function DatabaseSelector() {
               )} />
               <span className="truncate">
                 {selectedDb || (
-                  <span className={error?.includes("databases") ? "text-destructive" : "text-muted-foreground"}>
+                  <span className={connectionError ? "text-destructive" : "text-muted-foreground"}>
                     {getPlaceholderText()}
                   </span>
                 )}
@@ -106,7 +101,7 @@ export default function DatabaseSelector() {
               {/* Database List with native scrolling */}
               <div className="flex-1 overflow-y-auto min-h-0">
                 <div className="p-1">
-                  {isLoading && !databases.length ? (
+                  {connectionState === "connecting" && !databases.length ? (
                     <div className="px-2 py-1.5 text-sm text-muted-foreground">
                       Loading databases...
                     </div>
@@ -143,11 +138,11 @@ export default function DatabaseSelector() {
           variant="outline"
           size="icon"
           onClick={loadDatabases}
-          disabled={isLoading}
+          disabled={connectionState === "connecting"}
           aria-label="Refresh database list"
         >
           <RefreshCcw
-            className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`}
+            className={`h-4 w-4 ${connectionState === "connecting" ? "animate-spin" : ""}`}
           />
         </Button>
       </div>

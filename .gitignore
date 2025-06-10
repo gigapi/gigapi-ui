@@ -35,3 +35,5 @@ dist-ssr
 coverage 
 
 .claude
+
+/checks

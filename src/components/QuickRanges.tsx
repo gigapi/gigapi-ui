@@ -1,8 +1,8 @@
 import { useState, useMemo } from "react";
-import { Button } from "./ui/button";
-import { Input } from "./ui/input";
-import { ScrollArea } from "./ui/scroll-area";
-import { QUICK_RANGES, NO_TIME_FILTER } from "../lib/time-constants";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { QUICK_RANGES, NO_TIME_FILTER } from "@/types/utils.types";
 import type { TimeRange } from "@/types/index";
 
 interface QuickRangesProps {

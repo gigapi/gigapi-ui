@@ -10,14 +10,16 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
-import { formatBytes } from "../lib/utils";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { formatBytes } from "@/lib/";
 import { useQuery } from "@/contexts/QueryContext";
-import QueryCharts from "@/components/QueryCharts";
+import { useDatabase } from "@/contexts/DatabaseContext";
+import { useTime } from "@/contexts/TimeContext";
 import GigTable from "@/components/GigTable";
+import GigChart from "@/components/GigChart";
 import Loader from "@/components/Loader";
 import { Button } from "@/components/ui/button";
-import HashQueryUtils from "@/lib/hash-query-utils";
+import { HashQueryUtils, formatExecutionTime } from "@/lib/";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Tooltip,
@@ -25,13 +27,14 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import {
-  calculatePerformanceMetrics,
-  formatExecutionTime,
-  extractServerMetrics,
-  extractTransformedQuery,
-  type PerformanceMetrics,
-} from "@/lib/performance-utils";
+
+// Local interface for display-specific performance metrics
+interface DisplayPerformanceMetrics {
+  totalTime: number;
+  serverTime: number;
+  networkTime: number;
+  clientTime: number;
+}
 
 export default function QueryResults() {
   const {
@@ -40,60 +43,65 @@ export default function QueryResults() {
     isLoading,
     error,
     queryErrorDetail,
-    executionTime,
+    executionTime, // This is server execution time
     responseSize,
     query,
-    selectedDb,
-    selectedTable,
-    selectedTimeField,
-    timeRange,
     queryHistory,
+    actualExecutedQuery, // Added from previous context reading
   } = useQuery();
 
-  // Simplified state management
-  const [activeTab, setActiveTab] = useState("results");
+  const { selectedDb, selectedTable } = useDatabase();
 
-  // Track query info with better naming
+  const { selectedTimeField, timeRange } = useTime();
+
+  const [activeTab, setActiveTab] = useState("results");
   const [currentExecutedQuery, setCurrentExecutedQuery] = useState(query);
   const [transformedQuery, setTransformedQuery] = useState("");
 
-  // Performance metrics - simplified
   const [localPerformanceMetrics, setLocalPerformanceMetrics] =
-    useState<PerformanceMetrics>({
+    useState<DisplayPerformanceMetrics>({
       totalTime: 0,
       serverTime: 0,
       networkTime: 0,
       clientTime: 0,
     });
 
-  // Refs for performance tracking
   const renderStartTime = useRef(0);
-  const queryStartTime = useRef(0);
+  const queryStartTime = useRef(0); // For overall client-perceived time
 
-  // Simplified performance tracking
   useEffect(() => {
     if (isLoading) {
       renderStartTime.current = performance.now();
-      queryStartTime.current = performance.now();
-    } else if (results !== null && executionTime) {
-      const renderTime = performance.now() - renderStartTime.current;
-      const serverMetrics = extractServerMetrics(rawJson);
+      queryStartTime.current = performance.now(); // Start of client-perceived operation
+    } else if (
+      results !== null &&
+      executionTime !== null &&
+      executionTime !== undefined
+    ) {
+      const clientRenderTime = performance.now() - renderStartTime.current;
+      const overallClientPerceivedTime =
+        performance.now() - queryStartTime.current;
 
-      const metrics = calculatePerformanceMetrics(
-        executionTime,
-        serverMetrics || undefined,
-        renderTime
-      );
+      const serverProcTime = executionTime; // from useQuery, assumed as server processing time
+      const clientProcTime = clientRenderTime;
 
-      setLocalPerformanceMetrics(metrics);
+      let netTime =
+        overallClientPerceivedTime - serverProcTime - clientProcTime;
+      if (netTime < 0) {
+        // Sanity check, network time can't be negative
+        netTime = 0;
+      }
+
+      setLocalPerformanceMetrics({
+        totalTime: overallClientPerceivedTime,
+        serverTime: serverProcTime,
+        networkTime: netTime,
+        clientTime: clientProcTime,
+      });
     }
-  }, [results, isLoading, executionTime, rawJson]);
-
-  // Simplified query tracking
-  const { actualExecutedQuery } = useQuery();
+  }, [results, isLoading, executionTime]); // Removed rawJson as extractServerMetrics is no longer used here
 
   useEffect(() => {
-    // Update current executed query from latest history
     if (queryHistory.length > 0) {
       const latestQuery = queryHistory[0];
       setCurrentExecutedQuery(latestQuery.query || query);
@@ -102,24 +110,43 @@ export default function QueryResults() {
     }
   }, [queryHistory, query]);
 
+  const extractTransformedQuery = (jsonData: any): string | undefined => {
+    if (
+      typeof jsonData === "object" &&
+      jsonData !== null &&
+      jsonData._processed_query
+    ) {
+      return jsonData._processed_query;
+    }
+    if (typeof jsonData === "string") {
+      try {
+        const parsed = JSON.parse(jsonData);
+        if (
+          typeof parsed === "object" &&
+          parsed !== null &&
+          parsed._processed_query
+        ) {
+          return parsed._processed_query;
+        }
+      } catch (e) {
+        // Not a parseable JSON object string or doesn't contain the field
+      }
+    }
+    return undefined;
+  };
+
   useEffect(() => {
-    // Update transformed query from context or try to extract from response
     if (actualExecutedQuery) {
       setTransformedQuery(actualExecutedQuery);
     } else {
-      // Try to extract from raw data as fallback
-      updateTransformedQuery();
+      const extracted = extractTransformedQuery(rawJson);
+      if (extracted) {
+        setTransformedQuery(extracted);
+      } else {
+        setTransformedQuery(""); // Clear if not found
+      }
     }
   }, [actualExecutedQuery, rawJson]);
-
-  // Helper function to extract transformed query from raw response
-  const updateTransformedQuery = () => {
-    const extracted = extractTransformedQuery(rawJson);
-    if (extracted) {
-      setTransformedQuery(extracted);
-    }
-  };
-
 
   function renderResultsContent() {
     if (isLoading) {
@@ -210,9 +237,10 @@ export default function QueryResults() {
     return (
       <GigTable
         data={results}
-        executionTime={executionTime}
-        responseSize={responseSize}
-        initialPageSize={25} // Enable pagination with smaller initial page size
+        // Pass relevant performance data if GigTable uses it
+        // executionTime={localPerformanceMetrics.serverTime}
+        // responseSize={responseSize}
+        initialPageSize={25}
       />
     );
   }
@@ -234,17 +262,18 @@ export default function QueryResults() {
               Results
             </TabsTrigger>
             <TabsTrigger
+              value="chart"
+              className="px-3 py-1 rounded-md text-sm data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=inactive]:text-muted-foreground"
+            >
+              Chart
+            </TabsTrigger>
+            <TabsTrigger
               value="raw"
               className="px-3 py-1 rounded-md text-sm data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=inactive]:text-muted-foreground"
             >
               Raw
             </TabsTrigger>
-            <TabsTrigger
-              value="charts"
-              className="px-3 py-1 rounded-md text-sm data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=inactive]:text-muted-foreground"
-            >
-              Charts
-            </TabsTrigger>
+
             <TabsTrigger
               value="query"
               className="px-3 py-1 rounded-md text-sm data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=inactive]:text-muted-foreground"
@@ -273,6 +302,33 @@ export default function QueryResults() {
 
         <TabsContent value="results" className="flex-1 overflow-auto min-h-0">
           {renderResultsContent()}
+        </TabsContent>
+
+        <TabsContent value="chart" className="flex-1 overflow-auto min-h-0">
+          {isLoading ? (
+            <div className="flex flex-col items-center justify-center h-64">
+              <Loader className="h-24 w-24" />
+              <p className="mt-4 text-muted-foreground">Executing query...</p>
+            </div>
+          ) : error ? (
+            <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+              <AlertCircle className="h-12 w-12 mb-4 text-red-500" />
+              <p className="text-lg">Cannot create chart due to query error</p>
+              <p className="text-sm mt-2">Check the Results tab for error details</p>
+            </div>
+          ) : !results || results.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+              <Database className="h-12 w-12 mb-4 opacity-50" />
+              <p className="text-lg">No data available for chart</p>
+              <p className="text-sm mt-2">Execute a query that returns data to create charts</p>
+            </div>
+          ) : (
+            <div className="p-4">
+              <GigChart 
+                data={results}
+              />
+            </div>
+          )}
         </TabsContent>
 
         <TabsContent value="raw" className="flex-1 overflow-auto min-h-0">
@@ -310,18 +366,6 @@ export default function QueryResults() {
           </ScrollArea>
         </TabsContent>
 
-        <TabsContent value="charts" className="flex-1 overflow-auto min-h-0">
-          {activeTab === "charts" ? (
-            <QueryCharts />
-          ) : (
-            <div className="flex flex-col items-center justify-center h-full">
-              <p className="text-muted-foreground">
-                Charts will load when this tab is selected
-              </p>
-            </div>
-          )}
-        </TabsContent>
-
         <TabsContent value="query" className="flex-1 overflow-auto min-h-0">
           <ScrollArea className="h-full rounded-md border bg-card">
             <div className="absolute top-2 right-2 flex gap-2">
@@ -339,7 +383,6 @@ export default function QueryResults() {
                 variant="outline"
                 size="sm"
                 onClick={() => {
-                  // Generate shareable URL with current query params
                   const params = {
                     query,
                     db: selectedDb,
@@ -348,14 +391,15 @@ export default function QueryResults() {
                     timeFrom: timeRange?.from,
                     timeTo: timeRange?.to,
                   };
-
-                  HashQueryUtils.copyShareableUrl(params).then((success) => {
-                    if (success) {
-                      toast.success("Shareable URL copied to clipboard");
-                    } else {
-                      toast.error("Failed to copy URL");
+                  HashQueryUtils.copyShareableUrl(params).then(
+                    (success: boolean) => {
+                      if (success) {
+                        toast.success("Shareable URL copied to clipboard");
+                      } else {
+                        toast.error("Failed to copy URL");
+                      }
                     }
-                  });
+                  );
                 }}
               >
                 <Share className="h-4 w-4 mr-1" /> Share
@@ -444,7 +488,8 @@ export default function QueryResults() {
                     Loading metrics...
                   </CardContent>
                 </Card>
-              ) : !executionTime && localPerformanceMetrics.totalTime === 0 ? (
+              ) : localPerformanceMetrics.totalTime === 0 &&
+                executionTime === null ? (
                 <Card>
                   <CardContent className="pt-6 text-center text-muted-foreground">
                     No query executed yet, or metrics not available.
@@ -455,7 +500,8 @@ export default function QueryResults() {
                   {[
                     {
                       title: "Total Time",
-                      tooltip: "Complete end-to-end query execution time",
+                      tooltip:
+                        "Complete end-to-end query execution time (client-perceived)",
                       value: localPerformanceMetrics.totalTime,
                       icon: Timer,
                       unit: "time",
@@ -469,9 +515,17 @@ export default function QueryResults() {
                     },
                     {
                       title: "Network Transfer",
-                      tooltip: "Time spent transferring data over the network",
+                      tooltip:
+                        "Estimated time spent transferring data over the network",
                       value: localPerformanceMetrics.networkTime,
                       icon: Share,
+                      unit: "time",
+                    },
+                    {
+                      title: "Client Rendering",
+                      tooltip: "Time spent rendering results in the browser",
+                      value: localPerformanceMetrics.clientTime,
+                      icon: CheckCircle2, // Example icon
                       unit: "time",
                     },
                   ].map((metric, idx) => (

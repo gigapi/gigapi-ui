@@ -1,13 +1,13 @@
 import { useRef, useEffect } from "react";
 import { ExternalLink, RefreshCw, ServerCrash } from "lucide-react";
-import { useQuery } from "@/contexts/QueryContext";
+import { useConnection } from "@/contexts/ConnectionContext";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import Loader from "@/components/Loader";
 
 const ConnectionError = () => {
   const { connectionState, connectionError, apiUrl, setApiUrl, loadDatabases } =
-    useQuery();
+    useConnection();
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Set initial value when component mounts

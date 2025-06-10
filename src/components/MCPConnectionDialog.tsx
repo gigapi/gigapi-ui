@@ -45,6 +45,24 @@ const PROVIDER_INFO = {
     defaultUrl: "http://localhost:11434",
     requiresApiKey: false,
   },
+  openai: {
+    name: "OpenAI",
+    description: "OpenAI GPT models via API",
+    defaultUrl: "https://api.openai.com/v1",
+    requiresApiKey: true,
+  },
+  anthropic: {
+    name: "Anthropic",
+    description: "Claude models via Anthropic API",
+    defaultUrl: "https://api.anthropic.com/v1",
+    requiresApiKey: true,
+  },
+  custom: {
+    name: "Custom",
+    description: "Custom AI provider with your own configuration",
+    defaultUrl: "",
+    requiresApiKey: false,
+  },
 };
 
 export default function ConnectionDialog({ isOpen, onClose }: ConnectionDialogProps) {
