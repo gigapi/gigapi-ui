@@ -376,7 +376,6 @@ export function updateChartConfiguration(
         break;
       default:
         echartsConfig = {
-          title: { text: config.title || "Chart", textStyle: { color: themeColors.textColor } },
           tooltip: { trigger: "item" },
           series: [{ type: "line", data: [] }],
         };
@@ -578,10 +577,6 @@ function generateLineChartConfig(
   }
 
   return {
-    title: {
-      text: config.title || "Line Chart",
-      textStyle: { color: themeColors.textColor },
-    },
     tooltip: {
       trigger: "axis",
       backgroundColor: themeColors.tooltipBackgroundColor,
@@ -589,27 +584,65 @@ function generateLineChartConfig(
       formatter: (params: any) => {
         if (Array.isArray(params) && params.length > 0) {
           const param = params[0];
+          const color = param.color || DEFAULT_COLORS[0];
+          const seriesName = param.seriesName || yField || 'Value';
+          const colorDot = `<span style="display:inline-block;margin-right:4px;border-radius:50%;width:10px;height:10px;background-color:${color};"></span>`;
+          
           // Format timestamp for tooltip
           if (isTimeX && typeof param.value[0] === 'number') {
             const date = new Date(param.value[0]);
             const dateStr = date.toLocaleString();
-            const seriesName = param.seriesName || yField || 'Value';
-            return `${dateStr}<br/><strong>${seriesName}</strong>: ${param.value[1]}`;
+            return `<div style="margin: 0px 0 0;line-height:1;">
+              <div style="font-size:14px;color:#666;font-weight:400;line-height:1;">${dateStr}</div>
+              <div style="margin: 10px 0 0;line-height:1;">
+                <div style="margin: 0px 0 0;line-height:1;">
+                  ${colorDot}<span style="font-size:14px;color:#666;font-weight:400;margin-left:2px">${seriesName}</span>
+                  <span style="float:right;margin-left:20px;font-size:14px;color:#666;font-weight:900">${param.value[1]}</span>
+                  <div style="clear:both"></div>
+                </div>
+                <div style="clear:both"></div>
+              </div>
+              <div style="clear:both"></div>
+            </div>`;
           } else if (Array.isArray(param.value) && param.value.length >= 2) {
-            const seriesName = param.seriesName || yField || 'Value';
-            return `${xField}: ${param.value[0]}<br/><strong>${seriesName}</strong>: ${param.value[1]}`;
+            return `<div style="margin: 0px 0 0;line-height:1;">
+              <div style="font-size:14px;color:#666;font-weight:400;line-height:1;">${xField}: ${param.value[0]}</div>
+              <div style="margin: 10px 0 0;line-height:1;">
+                <div style="margin: 0px 0 0;line-height:1;">
+                  ${colorDot}<span style="font-size:14px;color:#666;font-weight:400;margin-left:2px">${seriesName}</span>
+                  <span style="float:right;margin-left:20px;font-size:14px;color:#666;font-weight:900">${param.value[1]}</span>
+                  <div style="clear:both"></div>
+                </div>
+                <div style="clear:both"></div>
+              </div>
+              <div style="clear:both"></div>
+            </div>`;
           } else {
-            const seriesName = param.seriesName || yField || 'Value';
-            return `<strong>${seriesName}</strong>: ${param.value}`;
+            return `<div style="margin: 0px 0 0;line-height:1;">
+              <div style="margin: 10px 0 0;line-height:1;">
+                <div style="margin: 0px 0 0;line-height:1;">
+                  ${colorDot}<span style="font-size:14px;color:#666;font-weight:400;margin-left:2px">${seriesName}</span>
+                  <span style="float:right;margin-left:20px;font-size:14px;color:#666;font-weight:900">${param.value}</span>
+                  <div style="clear:both"></div>
+                </div>
+                <div style="clear:both"></div>
+              </div>
+              <div style="clear:both"></div>
+            </div>`;
           }
         }
         return null; // Use default formatting
       },
     },
-    legend: groupBy ? {
+    legend: {
       show: config.styling?.showLegend !== false,
-      textStyle: { color: themeColors.textColor },
-    } : undefined,
+      type: 'scroll',
+      top: 10,
+      left: 'center',
+      textStyle: { color: themeColors.textColor, fontSize: 12 },
+      itemWidth: 14,
+      itemHeight: 14,
+    },
     xAxis: {
       type: isTimeX ? "time" : "category",
       data: !isTimeX ? (xAxisCategories || sortedData.map((d) => String(d[xField]))) : undefined,
@@ -642,7 +675,7 @@ function generateLineChartConfig(
       left: "10%",
       right: "10%",
       bottom: "15%",
-      top: "15%",
+      top: config.styling?.showLegend !== false ? "50px" : "10%",
     },
     backgroundColor: themeColors.chartBackgroundColor,
   };
@@ -736,19 +769,42 @@ function generateBarChartConfig(
   }
 
   return {
-    title: {
-      text: config.title || "Bar Chart",
-      textStyle: { color: themeColors.textColor },
-    },
     tooltip: {
       trigger: "axis",
       backgroundColor: themeColors.tooltipBackgroundColor,
       textStyle: { color: themeColors.tooltipTextColor },
+      formatter: (params: any) => {
+        if (Array.isArray(params) && params.length > 0) {
+          const param = params[0];
+          const color = param.color || DEFAULT_COLORS[0];
+          const seriesName = param.seriesName || yField || 'Value';
+          const colorDot = `<span style="display:inline-block;margin-right:4px;border-radius:50%;width:10px;height:10px;background-color:${color};"></span>`;
+          
+          return `<div style="margin: 0px 0 0;line-height:1;">
+            <div style="font-size:14px;color:#666;font-weight:400;line-height:1;">${xField}: ${param.axisValue}</div>
+            <div style="margin: 10px 0 0;line-height:1;">
+              <div style="margin: 0px 0 0;line-height:1;">
+                ${colorDot}<span style="font-size:14px;color:#666;font-weight:400;margin-left:2px">${seriesName}</span>
+                <span style="float:right;margin-left:20px;font-size:14px;color:#666;font-weight:900">${param.value}</span>
+                <div style="clear:both"></div>
+              </div>
+              <div style="clear:both"></div>
+            </div>
+            <div style="clear:both"></div>
+          </div>`;
+        }
+        return null;
+      },
     },
-    legend: groupBy ? {
+    legend: {
       show: config.styling?.showLegend !== false,
-      textStyle: { color: themeColors.textColor },
-    } : undefined,
+      type: 'scroll',
+      top: 10,
+      left: 'center',
+      textStyle: { color: themeColors.textColor, fontSize: 12 },
+      itemWidth: 14,
+      itemHeight: 14,
+    },
     xAxis: {
       type: "category",
       data: xAxisData,
@@ -776,7 +832,7 @@ function generateBarChartConfig(
       left: "10%",
       right: "10%",
       bottom: xAxisData.some(label => label.length > 10) ? "25%" : "15%",
-      top: "15%",
+      top: config.styling?.showLegend !== false ? "50px" : "10%",
     },
     backgroundColor: themeColors.chartBackgroundColor,
   };
@@ -830,10 +886,6 @@ function generateAreaChartConfig(
 
   return {
     ...lineConfig,
-    title: {
-      text: config.title || "Area Chart",
-      textStyle: { color: themeColors.textColor },
-    },
   };
 }
 
