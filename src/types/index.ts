@@ -429,19 +429,11 @@ export interface ThemeColors {
   axisColor?: string;
   tooltipBackgroundColor?: string;
   tooltipTextColor?: string;
-  seriesColors?: string[];
   gridColor?: string;
   chartBackgroundColor?: string;
 }
 
-// ============================================================================
-// Utility Types (from previous utils.types.ts, to be integrated or kept separate)
-// ============================================================================
 
-// It seems many types from the old utils.types.ts are context-specific or UI-specific
-// rather than core data types. Reviewing which ones belong here.
-
-// Core time-related types (already have TimeRange, TimeUnit)
 export interface ResolvedTimeRange {
   fromDate: Date;
   toDate: Date;
@@ -628,6 +620,7 @@ export interface ColumnInfo {
   role?: ColumnRole;
   contentType?: ColumnContentType;
   stats?: ColumnStats;
+  originalType?: string; // Original database schema type
 }
 
 /**

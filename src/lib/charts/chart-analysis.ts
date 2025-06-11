@@ -2,11 +2,24 @@ import type {
   ChartConfiguration,
   QueryResult,
   ColumnInfo,
+  ColumnSchema,
   TimeUnit,
   ThemeColors,
 } from "@/types";
 
 import { generateId } from "@/lib/formatting/general-formatting";
+
+// Default color palette
+const DEFAULT_COLORS = [
+  '#3b82f6', // blue
+  '#ef4444', // red
+  '#10b981', // emerald
+  '#f59e0b', // amber
+  '#8b5cf6', // violet
+  '#06b6d4', // cyan
+  '#84cc16', // lime
+  '#f97316', // orange
+];
 
 function isTimestamp(value: string | number): boolean {
   if (value === null || value === undefined) return false;
@@ -51,9 +64,13 @@ function normalizeTimestampToMs(value: number): number {
 }
 
 /**
- * Analyze columns from query results to extract field information
+ * Analyze columns from query results with optional schema information to extract field information
+ * This is the unified approach that leverages database schema when available
  */
-export function analyzeColumns(data: QueryResult[]): ColumnInfo[] {
+export function analyzeColumns(
+  data: QueryResult[], 
+  schemaColumns?: ColumnSchema[]
+): ColumnInfo[] {
   if (!data || data.length === 0) return [];
 
   const columns: ColumnInfo[] = [];
@@ -63,13 +80,20 @@ export function analyzeColumns(data: QueryResult[]): ColumnInfo[] {
     const columnData = data.map((row) => row[columnName]);
     const nonNullData = columnData.filter((val) => val !== null && val !== undefined);
 
+    // Find schema information for this column if available
+    const schemaInfo = schemaColumns?.find(
+      (col) => col.columnName === columnName
+    );
+
     if (nonNullData.length === 0) {
       columns.push({
         name: columnName,
-        type: "string",
+        label: columnName,
+        type: schemaInfo ? mapSchemaTypeToDataType(schemaInfo.dataType) : "string",
         role: "dimension",
         contentType: "categorical",
         isTimeField: false,
+        originalType: schemaInfo?.dataType,
       });
       return;
     }
@@ -77,10 +101,10 @@ export function analyzeColumns(data: QueryResult[]): ColumnInfo[] {
     // Sample values for analysis
     const sampleValues = nonNullData.slice(0, Math.min(100, nonNullData.length));
     
-    // Determine data type
-    let type: ColumnInfo["type"] = "string";
+    // Start with schema-derived information if available
+    let type: ColumnInfo["type"] = schemaInfo ? mapSchemaTypeToDataType(schemaInfo.dataType) : "string";
     let isTimeField = false;
-    let timeUnit: TimeUnit | undefined;
+    let timeUnit: TimeUnit | undefined = schemaInfo?.timeUnit;
 
     // Check for known timestamp field names first
     const lowerColumnName = columnName.toLowerCase();
@@ -92,42 +116,65 @@ export function analyzeColumns(data: QueryResult[]): ColumnInfo[] {
                            lowerColumnName === "created_at" ||
                            lowerColumnName === "updated_at";
 
-    // Check if all values are numbers
-    const numericValues = sampleValues.filter((val) => 
-      typeof val === "number" || !isNaN(Number(val))
-    );
-
-    if (numericValues.length === sampleValues.length) {
-      // All values are numeric
-      const hasDecimals = numericValues.some((val) => 
-        Number(val) % 1 !== 0
-      );
-      type = hasDecimals ? "float" : "integer";
-
-      // Check if it could be a timestamp - prioritize known time fields
-      if (type === "integer" && (isKnownTimeField || numericValues.some(val => isTimestamp(val)))) {
-        const numValues = numericValues.map((val) => Number(val));
+    // Use schema information first, then fall back to data analysis
+    if (schemaInfo) {
+      // Trust schema type information
+      type = mapSchemaTypeToDataType(schemaInfo.dataType);
+      timeUnit = schemaInfo.timeUnit;
+      
+      // Determine if it's a time field based on schema and data
+      if (timeUnit || isKnownTimeField) {
         isTimeField = true;
-        // Determine time unit based on value magnitude
-        const avgValue = numValues.reduce((a, b) => a + b, 0) / numValues.length;
-        timeUnit = getTimestampScale(avgValue);
+      } else if ((type === "integer" || type === "bigint") && isKnownTimeField) {
+        // Schema says it's numeric but name suggests time - validate with data
+        const numericValues = sampleValues.filter((val) => 
+          typeof val === "number" || !isNaN(Number(val))
+        );
+        if (numericValues.length > 0 && numericValues.some(val => isTimestamp(val))) {
+          isTimeField = true;
+          const avgValue = numericValues.map(v => Number(v)).reduce((a, b) => a + b, 0) / numericValues.length;
+          timeUnit = timeUnit || getTimestampScale(avgValue);
+        }
       }
     } else {
-      // Check if values could be dates
-      const dateValues = sampleValues.filter((val) => {
-        try {
-          const date = new Date(val);
-          return !isNaN(date.getTime());
-        } catch {
-          return false;
-        }
-      });
+      // Fall back to original data-based analysis when no schema
+      // Check if all values are numbers
+      const numericValues = sampleValues.filter((val) => 
+        typeof val === "number" || !isNaN(Number(val))
+      );
 
-      if (dateValues.length > sampleValues.length * 0.8 || isKnownTimeField) {
-        type = "datetime";
-        isTimeField = true;
+      if (numericValues.length === sampleValues.length) {
+        // All values are numeric
+        const hasDecimals = numericValues.some((val) => 
+          Number(val) % 1 !== 0
+        );
+        type = hasDecimals ? "float" : "integer";
+
+        // Check if it could be a timestamp - prioritize known time fields
+        if (type === "integer" && (isKnownTimeField || numericValues.some(val => isTimestamp(val)))) {
+          const numValues = numericValues.map((val) => Number(val));
+          isTimeField = true;
+          // Determine time unit based on value magnitude
+          const avgValue = numValues.reduce((a, b) => a + b, 0) / numValues.length;
+          timeUnit = getTimestampScale(avgValue);
+        }
       } else {
-        type = "string";
+        // Check if values could be dates
+        const dateValues = sampleValues.filter((val) => {
+          try {
+            const date = new Date(val);
+            return !isNaN(date.getTime());
+          } catch {
+            return false;
+          }
+        });
+
+        if (dateValues.length > sampleValues.length * 0.8 || isKnownTimeField) {
+          type = "datetime";
+          isTimeField = true;
+        } else {
+          type = "string";
+        }
       }
     }
 
@@ -135,7 +182,7 @@ export function analyzeColumns(data: QueryResult[]): ColumnInfo[] {
     let role: ColumnInfo["role"] = "dimension";
     let contentType: ColumnInfo["contentType"] = "categorical";
 
-    if (type === "integer" || type === "float") {
+    if (type === "integer" || type === "float" || type === "bigint") {
       role = "measure";
       contentType = "numeric";
     } else if (isTimeField) {
@@ -153,11 +200,13 @@ export function analyzeColumns(data: QueryResult[]): ColumnInfo[] {
 
     columns.push({
       name: columnName,
+      label: columnName,
       type,
       role,
       contentType,
       isTimeField,
       timeUnit,
+      originalType: schemaInfo?.dataType,
       stats: {
         cardinality: new Set(nonNullData).size,
       },
@@ -165,6 +214,37 @@ export function analyzeColumns(data: QueryResult[]): ColumnInfo[] {
   });
 
   return columns;
+}
+
+/**
+ * Map database schema types to our standardized data types
+ */
+function mapSchemaTypeToDataType(schemaType: string): ColumnInfo["type"] {
+  const lowerType = schemaType.toLowerCase();
+  
+  if (lowerType.includes('bigint') || lowerType.includes('long')) {
+    return 'bigint';
+  }
+  if (lowerType.includes('int') || lowerType.includes('integer')) {
+    return 'integer';
+  }
+  if (lowerType.includes('float') || lowerType.includes('double') || lowerType.includes('decimal') || lowerType.includes('numeric')) {
+    return 'float';
+  }
+  if (lowerType.includes('bool')) {
+    return 'boolean';
+  }
+  if (lowerType.includes('timestamp') || lowerType.includes('datetime')) {
+    return 'datetime';
+  }
+  if (lowerType.includes('date')) {
+    return 'date';
+  }
+  if (lowerType.includes('time')) {
+    return 'time';
+  }
+  
+  return 'string';
 }
 
 /**
@@ -370,22 +450,49 @@ function generateLineChartConfig(
       name,
       type: "line",
       data: points,
-      itemStyle: { color: themeColors.seriesColors?.[index % (themeColors.seriesColors?.length || 1)] || "#8884d8" },
-      lineStyle: { color: themeColors.seriesColors?.[index % (themeColors.seriesColors?.length || 1)] || "#8884d8" },
+      itemStyle: { color: DEFAULT_COLORS[index % DEFAULT_COLORS.length] },
+      lineStyle: { 
+        color: DEFAULT_COLORS[index % DEFAULT_COLORS.length],
+        width: 2
+      },
       symbol: "circle",
       symbolSize: 4,
+      emphasis: {
+        focus: 'series',
+        lineStyle: {
+          width: 3
+        },
+        itemStyle: {
+          borderWidth: 2,
+          borderColor: '#fff'
+        }
+      }
     }));
   } else if (isTimeX) {
     // For time series without grouping
     seriesData = sortedData.map((d) => [d[xField], d[yField]]);
     series = [{
+      name: yField, // Use actual field name instead of generic name
       type: "line",
       data: seriesData,
-      itemStyle: { color: themeColors.seriesColors?.[0] || "#8884d8" },
-      lineStyle: { color: themeColors.seriesColors?.[0] || "#8884d8" },
+      itemStyle: { color: DEFAULT_COLORS[0] },
+      lineStyle: { 
+        color: DEFAULT_COLORS[0],
+        width: 2
+      },
       symbol: "circle",
-      symbolSize: 6,
+      symbolSize: 4,
       smooth: config.styling?.smooth,
+      emphasis: {
+        focus: 'series',
+        lineStyle: {
+          width: 3
+        },
+        itemStyle: {
+          borderWidth: 2,
+          borderColor: '#fff'
+        }
+      }
     }];
   } else if (groupBy) {
     // For categorical x-axis with grouping
@@ -422,24 +529,51 @@ function generateLineChartConfig(
       name,
       type: "line",
       data: categories.map(cat => points[cat] !== undefined ? points[cat] : null),
-      itemStyle: { color: themeColors.seriesColors?.[index % (themeColors.seriesColors?.length || 1)] || "#8884d8" },
-      lineStyle: { color: themeColors.seriesColors?.[index % (themeColors.seriesColors?.length || 1)] || "#8884d8" },
+      itemStyle: { color: DEFAULT_COLORS[index % DEFAULT_COLORS.length] },
+      lineStyle: { 
+        color: DEFAULT_COLORS[index % DEFAULT_COLORS.length],
+        width: 2
+      },
       symbol: "circle",
       symbolSize: 4,
       smooth: config.styling?.smooth,
       connectNulls: false, // Don't connect null values with lines
+      emphasis: {
+        focus: 'series',
+        lineStyle: {
+          width: 3
+        },
+        itemStyle: {
+          borderWidth: 2,
+          borderColor: '#fff'
+        }
+      }
     }));
   } else {
     // Simple line chart with categorical x-axis
     seriesData = sortedData.map((d) => d[yField]);
     series = [{
+      name: yField, // Use actual field name
       type: "line",
       data: seriesData,
-      itemStyle: { color: themeColors.seriesColors?.[0] || "#8884d8" },
-      lineStyle: { color: themeColors.seriesColors?.[0] || "#8884d8" },
+      itemStyle: { color: DEFAULT_COLORS[0] },
+      lineStyle: { 
+        color: DEFAULT_COLORS[0],
+        width: 2
+      },
       symbol: "circle",
-      symbolSize: 6,
+      symbolSize: 4,
       smooth: config.styling?.smooth,
+      emphasis: {
+        focus: 'series',
+        lineStyle: {
+          width: 3
+        },
+        itemStyle: {
+          borderWidth: 2,
+          borderColor: '#fff'
+        }
+      }
     }];
   }
 
@@ -459,7 +593,14 @@ function generateLineChartConfig(
           if (isTimeX && typeof param.value[0] === 'number') {
             const date = new Date(param.value[0]);
             const dateStr = date.toLocaleString();
-            return `${dateStr}<br/>${param.seriesName || 'Value'}: ${param.value[1]}`;
+            const seriesName = param.seriesName || yField || 'Value';
+            return `${dateStr}<br/><strong>${seriesName}</strong>: ${param.value[1]}`;
+          } else if (Array.isArray(param.value) && param.value.length >= 2) {
+            const seriesName = param.seriesName || yField || 'Value';
+            return `${xField}: ${param.value[0]}<br/><strong>${seriesName}</strong>: ${param.value[1]}`;
+          } else {
+            const seriesName = param.seriesName || yField || 'Value';
+            return `<strong>${seriesName}</strong>: ${param.value}`;
           }
         }
         return null; // Use default formatting
@@ -481,13 +622,20 @@ function generateLineChartConfig(
         rotate: !isTimeX ? 0 : undefined, // Allow rotation for long category names
       },
       axisLine: { lineStyle: { color: themeColors.axisColor } },
+      splitLine: { 
+        show: config.styling?.showGrid !== false,
+        lineStyle: { color: themeColors.gridColor } 
+      },
       boundaryGap: !isTimeX, // No boundary gap for time series, gap for categories
     },
     yAxis: {
       type: "value",
       axisLabel: { color: themeColors.axisColor },
       axisLine: { lineStyle: { color: themeColors.axisColor } },
-      splitLine: { lineStyle: { color: themeColors.gridColor } },
+      splitLine: { 
+        show: config.styling?.showGrid !== false,
+        lineStyle: { color: themeColors.gridColor } 
+      },
     },
     series: series,
     grid: {
@@ -567,7 +715,7 @@ function generateBarChartConfig(
         type: "bar",
         data: seriesData,
         stack: config.styling?.stack ? 'total' : undefined,
-        itemStyle: { color: themeColors.seriesColors?.[index % (themeColors.seriesColors?.length || 1)] || "#8884d8" },
+        itemStyle: { color: DEFAULT_COLORS[index % DEFAULT_COLORS.length] },
       };
     });
   } else {
@@ -580,9 +728,10 @@ function generateBarChartConfig(
       return String(d[xField]);
     });
     series = [{
+      name: yField, // Use actual field name
       type: "bar",
       data: sortedData.map(d => Number(d[yField]) || 0),
-      itemStyle: { color: themeColors.seriesColors?.[0] || "#8884d8" },
+      itemStyle: { color: DEFAULT_COLORS[0] },
     }];
   }
 
@@ -608,12 +757,19 @@ function generateBarChartConfig(
         rotate: xAxisData.some(label => label.length > 10) ? 45 : 0
       },
       axisLine: { lineStyle: { color: themeColors.axisColor } },
+      splitLine: { 
+        show: config.styling?.showGrid !== false,
+        lineStyle: { color: themeColors.gridColor } 
+      },
     },
     yAxis: {
       type: "value",
       axisLabel: { color: themeColors.axisColor },
       axisLine: { lineStyle: { color: themeColors.axisColor } },
-      splitLine: { lineStyle: { color: themeColors.gridColor } },
+      splitLine: { 
+        show: config.styling?.showGrid !== false,
+        lineStyle: { color: themeColors.gridColor } 
+      },
     },
     series: series,
     grid: {
@@ -634,14 +790,41 @@ function generateAreaChartConfig(
   // Area chart is similar to line chart but with filled areas
   const lineConfig = generateLineChartConfig(data, config, themeColors);
   
-  // Convert line series to area series
+  // Convert line series to area series with proper styling
   if (lineConfig.series) {
-    lineConfig.series = lineConfig.series.map((s: any) => ({
+    lineConfig.series = lineConfig.series.map((s: any, index: number) => ({
       ...s,
       type: "line",
       areaStyle: {
+        color: {
+          type: 'linear',
+          x: 0,
+          y: 0,
+          x2: 0,
+          y2: 1,
+          colorStops: [{
+            offset: 0,
+            color: s.itemStyle?.color || DEFAULT_COLORS[index % DEFAULT_COLORS.length]
+          }, {
+            offset: 1,
+            color: 'rgba(136, 132, 216, 0.1)' // Fade to transparent
+          }]
+        },
         opacity: 0.6,
       },
+      lineStyle: {
+        ...s.lineStyle,
+        width: 2
+      },
+      emphasis: {
+        focus: 'series',
+        areaStyle: {
+          opacity: 0.8
+        },
+        lineStyle: {
+          width: 3
+        }
+      }
     }));
   }
 

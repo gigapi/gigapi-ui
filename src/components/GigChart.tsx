@@ -32,7 +32,12 @@ import {
   PanelRightOpen,
 } from "lucide-react";
 import { toast } from "sonner";
-import type { ChartConfiguration, QueryResult, ColumnInfo } from "@/types";
+import type {
+  ChartConfiguration,
+  QueryResult,
+  ColumnInfo,
+  ColumnSchema,
+} from "@/types";
 import {
   analyzeColumns,
   createDefaultChartConfiguration,
@@ -41,6 +46,7 @@ import {
   importChartConfiguration,
 } from "@/lib/charts/chart-analysis";
 import { useTheme } from "@/components/theme-provider";
+import { useDatabase } from "@/contexts/DatabaseContext";
 
 function useDebounce<T extends (...args: any[]) => any>(
   callback: T,
@@ -113,6 +119,7 @@ interface GigChartProps {
   onConfigurationChange?: (config: ChartConfiguration) => void;
   height?: number;
   debounceDelay?: number;
+  schemaColumns?: ColumnSchema[]; // Optional schema information
 }
 
 const chartTypeIcons = {
@@ -164,43 +171,55 @@ const GigChart: React.FC<GigChartProps> = ({
   initialConfiguration,
   onConfigurationChange,
   debounceDelay = 300,
+  schemaColumns,
 }) => {
   const { theme } = useTheme();
+  const { selectedTable, getColumnsForTable } = useDatabase();
   const chartRef = useRef<HTMLDivElement>(null);
   const echartsInstanceRef = useRef<echarts.ECharts | null>(null);
 
-  // Analyze columns and auto-configure
+  // Analyze columns and auto-configure with schema information
   const columns: ColumnInfo[] = useMemo(() => {
     if (!data || data.length === 0) return [];
-    return analyzeColumns(data);
-  }, [data]);
 
-  // Internal configuration state
-  const [configuration, setConfiguration] = useState<ChartConfiguration>(
-    () => initialConfiguration || createDefaultChartConfiguration(data || [], columns)
-  );
+    // Get schema columns from props or database context
+    let tableSchemaColumns = schemaColumns;
+    if (!tableSchemaColumns && selectedTable) {
+      tableSchemaColumns = getColumnsForTable(selectedTable) || undefined;
+    }
+
+    return analyzeColumns(data, tableSchemaColumns);
+  }, [data, schemaColumns, selectedTable, getColumnsForTable]);
+
+  // Internal configuration state with schema support
+  const [configuration, setConfiguration] = useState<ChartConfiguration>(() => {
+    if (initialConfiguration) return initialConfiguration;
+
+    // Get schema columns for default configuration
+    let tableSchemaColumns = schemaColumns;
+    if (!tableSchemaColumns && selectedTable) {
+      tableSchemaColumns = getColumnsForTable(selectedTable) || undefined;
+    }
+
+    return createDefaultChartConfiguration(data || [], columns);
+  });
 
   // UI state
   const [showPanel, setShowPanel] = useState(true);
 
   // Get theme-based colors
   const themeColors = useMemo(() => {
-    const isDark = theme === 'dark';
-    
+    const isDark = theme === "dark";
+
     return {
-      textColor: isDark ? 'hsl(0 0% 98%)' : 'hsl(240 10% 3.9%)',
-      axisColor: isDark ? 'hsl(240 5% 64.9%)' : 'hsl(240 3.8% 46.1%)',
-      tooltipBackgroundColor: isDark ? 'hsl(240 10% 3.9%)' : 'hsl(0 0% 100%)',
-      tooltipTextColor: isDark ? 'hsl(0 0% 98%)' : 'hsl(240 10% 3.9%)',
-      gridColor: isDark ? 'hsl(240 5% 64.9% / 0.15)' : 'hsl(240 3.8% 46.1% / 0.15)',
-      chartBackgroundColor: 'transparent',
-      seriesColors: [
-        isDark ? 'hsl(220 70% 50%)' : 'hsl(173 58% 39%)',
-        isDark ? 'hsl(340 75% 55%)' : 'hsl(12 76% 61%)',
-        isDark ? 'hsl(30 80% 55%)' : 'hsl(197 37% 24%)',
-        isDark ? 'hsl(280 65% 60%)' : 'hsl(43 74% 66%)',
-        isDark ? 'hsl(160 60% 45%)' : 'hsl(27 87% 67%)',
-      ],
+      textColor: isDark ? "hsl(0 0% 98%)" : "hsl(240 10% 3.9%)",
+      axisColor: isDark ? "hsl(240 5% 64.9%)" : "hsl(240 3.8% 46.1%)",
+      tooltipBackgroundColor: isDark ? "hsl(240 10% 3.9%)" : "hsl(0 0% 100%)",
+      tooltipTextColor: isDark ? "hsl(0 0% 98%)" : "hsl(240 10% 3.9%)",
+      gridColor: isDark
+        ? "hsl(240 5% 64.9% / 0.15)"
+        : "hsl(240 3.8% 46.1% / 0.15)",
+      chartBackgroundColor: "transparent",
     };
   }, [theme]);
 
@@ -242,7 +261,9 @@ const GigChart: React.FC<GigChartProps> = ({
         modified = true;
       } else {
         const numericXCandidate = columns.find(
-          (col) => (col.type === "integer" || col.type === "float") && col.name !== newFieldMapping.yAxis
+          (col) =>
+            (col.type === "integer" || col.type === "float") &&
+            col.name !== newFieldMapping.yAxis
         );
         if (numericXCandidate) {
           newFieldMapping.xAxis = numericXCandidate.name;
@@ -273,12 +294,16 @@ const GigChart: React.FC<GigChartProps> = ({
       if (!yCandidate) {
         // Fallback: any numeric field not used for X-axis
         yCandidate = columns.find(
-          (col) => (col.type === "integer" || col.type === "float") && col.name !== newFieldMapping.xAxis
+          (col) =>
+            (col.type === "integer" || col.type === "float") &&
+            col.name !== newFieldMapping.xAxis
         );
       }
       if (!yCandidate) {
         // Fallback: first numeric field available, even if it's the X-axis (chart will show something)
-        yCandidate = columns.find((col) => col.type === "integer" || col.type === "float");
+        yCandidate = columns.find(
+          (col) => col.type === "integer" || col.type === "float"
+        );
       }
       // Fallback: if no numeric field, use any field not X (less ideal)
       if (!yCandidate) {
@@ -314,7 +339,11 @@ const GigChart: React.FC<GigChartProps> = ({
         updatedAt: new Date().toISOString(),
       };
 
-      const updatedConfigWithTheme = updateChartConfiguration(newConfig, data, themeColors);
+      const updatedConfigWithTheme = updateChartConfiguration(
+        newConfig,
+        data,
+        themeColors
+      );
       setConfiguration(updatedConfigWithTheme);
       // Don't debounce auto-configuration - it should be immediate
       if (onConfigurationChange) {
@@ -335,7 +364,11 @@ const GigChart: React.FC<GigChartProps> = ({
   useEffect(() => {
     if (!data?.length) return;
 
-    const updatedConfig = updateChartConfiguration(configuration, data, themeColors);
+    const updatedConfig = updateChartConfiguration(
+      configuration,
+      data,
+      themeColors
+    );
 
     // Only update if the echarts config actually changed
     if (
@@ -362,7 +395,7 @@ const GigChart: React.FC<GigChartProps> = ({
       console.error("ECharts library not loaded");
       return;
     }
-    
+
     // Dispose of old instance if it exists
     if (echartsInstanceRef.current) {
       echartsInstanceRef.current.dispose();
@@ -371,11 +404,14 @@ const GigChart: React.FC<GigChartProps> = ({
     try {
       // Initialize with current theme
       echartsInstanceRef.current = echarts.init(chartRef.current, theme);
-      
+
       // Apply configuration
       echartsInstanceRef.current.setOption(configuration.echartsConfig, true);
-      
-      console.log("Chart initialized successfully with config:", configuration.echartsConfig);
+
+      console.log(
+        "Chart initialized successfully with config:",
+        configuration.echartsConfig
+      );
     } catch (error) {
       console.error("Error initializing or updating chart:", error);
     }
@@ -437,7 +473,11 @@ const GigChart: React.FC<GigChartProps> = ({
         updatedAt: new Date().toISOString(),
       };
 
-      const updatedConfigWithData = updateChartConfiguration(newConfig, data, themeColors);
+      const updatedConfigWithData = updateChartConfiguration(
+        newConfig,
+        data,
+        themeColors
+      );
 
       updateInternalConfiguration(updatedConfigWithData);
     },
@@ -445,7 +485,7 @@ const GigChart: React.FC<GigChartProps> = ({
   );
 
   const handleChartTypeChange = useCallback(
-    (type: 'line' | 'bar' | 'area') => {
+    (type: "line" | "bar" | "area") => {
       updateConfig({ type });
     },
     [updateConfig]
@@ -513,7 +553,11 @@ const GigChart: React.FC<GigChartProps> = ({
       reader.onload = (e) => {
         try {
           const jsonString = e.target?.result as string;
-          const importedConfig = importChartConfiguration(jsonString, data, themeColors);
+          const importedConfig = importChartConfiguration(
+            jsonString,
+            data,
+            themeColors
+          );
 
           setConfiguration(importedConfig);
           onConfigurationChange?.(importedConfig);
@@ -554,7 +598,9 @@ const GigChart: React.FC<GigChartProps> = ({
         {/* Chart Header */}
         <div className="flex items-center justify-between p-4 border-b border-border">
           <div className="flex items-center gap-4">
-            <h2 className="text-lg font-semibold">{configuration.title || "Chart"}</h2>
+            <h2 className="text-lg font-semibold">
+              {configuration.title || "Chart"}
+            </h2>
           </div>
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" onClick={handleExport}>
@@ -628,7 +674,11 @@ const GigChart: React.FC<GigChartProps> = ({
                   Chart type
                 </Label>
                 <div className="grid grid-cols-3 gap-1 mt-2">
-                  {(Object.keys(chartTypeIcons) as Array<keyof typeof chartTypeIcons>).map((type) => {
+                  {(
+                    Object.keys(chartTypeIcons) as Array<
+                      keyof typeof chartTypeIcons
+                    >
+                  ).map((type) => {
                     const Icon = chartTypeIcons[type];
                     return (
                       <Button
@@ -676,8 +726,13 @@ const GigChart: React.FC<GigChartProps> = ({
                           <div className="flex items-center gap-2">
                             <span>{column.name}</span>
                             <Badge variant="outline" className="text-xs">
-                              {column.type}
+                              {column.originalType || column.type}
                             </Badge>
+                            {column.timeUnit && (
+                              <Badge variant="secondary" className="text-xs">
+                                {column.timeUnit}
+                              </Badge>
+                            )}
                             {column.isTimeField && (
                               <Badge variant="secondary" className="text-xs">
                                 Time
@@ -714,8 +769,13 @@ const GigChart: React.FC<GigChartProps> = ({
                           <div className="flex items-center gap-2">
                             <span>{column.name}</span>
                             <Badge variant="outline" className="text-xs">
-                              {column.type}
+                              {column.originalType || column.type}
                             </Badge>
+                            {column.timeUnit && (
+                              <Badge variant="secondary" className="text-xs">
+                                {column.timeUnit}
+                              </Badge>
+                            )}
                           </div>
                         </SelectItem>
                       ))}
@@ -747,8 +807,13 @@ const GigChart: React.FC<GigChartProps> = ({
                           <div className="flex items-center gap-2">
                             <span>{column.name}</span>
                             <Badge variant="outline" className="text-xs">
-                              {column.type}
+                              {column.originalType || column.type}
                             </Badge>
+                            {column.timeUnit && (
+                              <Badge variant="secondary" className="text-xs">
+                                {column.timeUnit}
+                              </Badge>
+                            )}
                           </div>
                         </SelectItem>
                       ))}

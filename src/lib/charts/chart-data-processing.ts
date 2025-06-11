@@ -110,17 +110,17 @@ export function aggregateData(
 
     if (aggregateField && rows.length > 0) {
       const values = rows
-        .map((row) => Number(row[aggregateField]))
-        .filter((val) => !isNaN(val));
+        .map((row: QueryResult) => Number(row[aggregateField]))
+        .filter((val: number) => !isNaN(val));
 
       switch (aggregationType) {
         case "sum":
-          baseRow[aggregateField] = values.reduce((sum, val) => sum + val, 0);
+          baseRow[aggregateField] = values.reduce((sum: number, val: number) => sum + val, 0);
           break;
         case "avg":
           baseRow[aggregateField] =
             values.length > 0
-              ? values.reduce((sum, val) => sum + val, 0) / values.length
+              ? values.reduce((sum: number, val: number) => sum + val, 0) / values.length
               : 0;
           break;
         case "count":
