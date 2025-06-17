@@ -32,6 +32,7 @@ import {
   checkForTimeVariables,
   detectTimeFieldsFromSchema,
 } from "@/lib/";
+import { isLoadingFromUrl } from "@/components/AppContent";
 
 export default function QueryEditor() {
   const { query, setQuery, executeQuery, isLoading } = useQuery();
@@ -414,14 +415,26 @@ export default function QueryEditor() {
 
   // Sync editor content when query changes from context (e.g., query history)
   useEffect(() => {
+    console.log('QueryEditor: query changed:', query);
+    console.log('QueryEditor: isEditorReady:', isEditorReady);
+    console.log('QueryEditor: editorRef.current exists:', !!editorRef.current);
+    
     if (
       editorRef.current &&
       isEditorReady &&
       query !== editorRef.current.getValue()
     ) {
+      console.log('QueryEditor: Setting editor value to:', query);
       editorRef.current.setValue(query);
+    } else {
+      console.log('QueryEditor: Not updating editor. Current editor value:', editorRef.current?.getValue());
     }
   }, [query, isEditorReady]);
+
+  // Debug: Log when query from context changes
+  useEffect(() => {
+    console.log('QueryContext query changed to:', query);
+  }, [query]);
 
   // Add a getter for the time field details
   const getTimeFieldDetails = useCallback(
@@ -489,15 +502,21 @@ export default function QueryEditor() {
 
   // Generate simple query when table is selected and editor is empty
   useEffect(() => {
-    if (!selectedTable || !editorRef.current) return;
+    if (!selectedTable || !editorRef.current || isLoadingFromUrl) return;
 
     const currentQuery = editorRef.current.getValue().trim();
-    if (!currentQuery) {
+    const contextQuery = query.trim();
+    
+    // Only generate a simple query if both editor and context are empty
+    if (!currentQuery && !contextQuery) {
+      console.log('QueryEditor: Generating simple query for table:', selectedTable);
       const newQuery = `SELECT * FROM ${selectedTable}`;
       editorRef.current.setValue(newQuery);
       setQuery(newQuery);
+    } else {
+      console.log('QueryEditor: Not generating simple query. Editor has:', currentQuery, 'Context has:', contextQuery);
     }
-  }, [selectedTable, setQuery]);
+  }, [selectedTable, setQuery, query]);
 
   // Update Monaco instance when available
   useEffect(() => {
