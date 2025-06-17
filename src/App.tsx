@@ -11,7 +11,11 @@ import {
 } from "@/components/ui/resizable";
 import Logo from "@/assets/logo.svg";
 import AppContent from "@/components/AppContent";
-import { useConnection } from "@/contexts/ConnectionContext";
+import { useConnection, ConnectionProvider } from "@/contexts/ConnectionContext";
+import { DatabaseProvider } from "@/contexts/DatabaseContext";
+import { TimeProvider } from "@/contexts/TimeContext";
+import { QueryProvider } from "@/contexts/QueryContext";
+import { MCPProvider } from "@/contexts/MCPContext";
 import { CheckCircle } from "lucide-react";
 import ConnectionError from "@/components/ConnectionError";
 
@@ -101,7 +105,7 @@ const setupGlobalErrorHandlers = () => {
   });
 };
 
-export default function App() {
+function AppInternal() {
   const { connectionState } = useConnection();
 
   // Set up global error handlers
@@ -183,5 +187,21 @@ export default function App() {
         </div>
       </ThemeProvider>
     </ErrorBoundary>
+  );
+}
+
+export default function App() {
+  return (
+    <ConnectionProvider>
+      <DatabaseProvider>
+        <TimeProvider>
+          <QueryProvider>
+            <MCPProvider>
+              <AppInternal />
+            </MCPProvider>
+          </QueryProvider>
+        </TimeProvider>
+      </DatabaseProvider>
+    </ConnectionProvider>
   );
 }

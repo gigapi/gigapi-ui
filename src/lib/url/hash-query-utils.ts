@@ -46,11 +46,7 @@ export class HashQueryUtils {
         cleanQuery += '=';
       }
       
-      console.log('Attempting to decode base64:', cleanQuery);
-      
       const decoded = atob(cleanQuery);
-      console.log('Decoded string:', decoded);
-      
       const parsed = JSON.parse(decoded);
       
       // Validate the parsed object has expected structure
@@ -118,18 +114,13 @@ export class HashQueryUtils {
    * Test encoding and decoding with a sample object (for debugging)
    */
   static testEncodeDecode(params: HashQueryParams): void {
-    console.log('Original params:', params);
     const encoded = this.encodeHashQuery(params);
-    console.log('Encoded:', encoded);
     
     // Temporarily set the query param to test decoding
     const originalUrl = window.location.href;
     const url = new URL(window.location.href);
     url.searchParams.set('q', encoded);
     window.history.replaceState(null, '', url.toString());
-    
-    const decoded = this.decodeHashQuery();
-    console.log('Decoded:', decoded);
     
     // Restore original URL
     window.history.replaceState(null, '', originalUrl);

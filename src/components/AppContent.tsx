@@ -6,33 +6,25 @@ import { HashQueryUtils } from "@/lib/";
 import type { TimeRange } from "@/types/index";
 import { toast } from "sonner";
 
-// Global flag to prevent auto-generation when loading from URL
-let isLoadingFromUrl = false;
-
-export { isLoadingFromUrl };
-
 export default function AppContent() {
-  const { setQuery } = useQuery();
+  const { setQuery, isInitializing, finishInitializing } = useQuery();
   const { setSelectedDb, setSelectedTable, selectedDb, schema } = useDatabase();
   const { setSelectedTimeField, setTimeRange } = useTime();
 
-  const [hashParamsApplied, setHashParamsApplied] = useState(false);
+  const [paramsApplied, setParamsApplied] = useState(false);
 
   useEffect(() => {
-    if (hashParamsApplied) return;
-
-    // Debug logging
-    console.log('Current URL:', window.location.href);
-    console.log('Current search params:', window.location.search);
-    
-    const hashParams = HashQueryUtils.decodeHashQuery();
-    if (!hashParams) {
-      console.log('No query params found or failed to decode');
-      setHashParamsApplied(true);
+    // Only run this effect once, and only during initialization
+    if (!isInitializing || paramsApplied) {
       return;
     }
 
-    console.log('Loading URL parameters:', hashParams);
+    const hashParams = HashQueryUtils.decodeHashQuery();
+    if (!hashParams) {
+      finishInitializing(); // No params, so we are done initializing.
+      setParamsApplied(true);
+      return;
+    }
 
     const {
       query,
@@ -46,7 +38,7 @@ export default function AppContent() {
     // Check if we need to wait for schema to load
     if (!schema) {
       console.warn("Schema not available yet, waiting...");
-      return; // Don't set hashParamsApplied yet, let it retry
+      return; // Let it retry on next render when schema is available
     }
 
     // Handle database selection
@@ -55,46 +47,28 @@ export default function AppContent() {
         toast.error(
           `Database '${dbFromHash}' from shared URL not found in available databases.`
         );
-        setHashParamsApplied(true);
-        return;
-      }
-      
-      // If the database is different from current, set it
-      if (dbFromHash !== selectedDb) {
+      } else if (dbFromHash !== selectedDb) {
         setSelectedDb(dbFromHash);
-        // Don't return here, continue processing other parameters
       }
     }
 
     // Apply all other parameters
     if (query) {
-      console.log('Setting query from URL:', query);
-      isLoadingFromUrl = true;
-      
-      // Use setTimeout to ensure this happens after the QueryEditor is ready
-      setTimeout(() => {
-        setQuery(query);
-        // Reset the flag after a delay to allow normal auto-generation later
-        setTimeout(() => {
-          isLoadingFromUrl = false;
-        }, 1000);
-      }, 100);
+      setQuery(query);
 
       if (table) {
-        console.log('Setting table from URL:', table);
         setSelectedTable(table);
       }
 
       if (timeField) {
-        console.log('Setting time field from URL:', timeField);
         setSelectedTimeField(timeField);
       }
 
       if (timeFrom || timeTo) {
         const timeRange: TimeRange = {
-          from: timeFrom || 'now-15m',
-          to: timeTo || 'now',
-          display: `${timeFrom || 'now-15m'} to ${timeTo || 'now'}`,
+          from: timeFrom || "now-15m",
+          to: timeTo || "now",
+          display: `${timeFrom || "now-15m"} to ${timeTo || "now"}`,
           enabled: true,
         };
         setTimeRange(timeRange);
@@ -105,16 +79,19 @@ export default function AppContent() {
       toast.info(`Switched to database '${dbFromHash}' from shared URL.`);
     }
 
-    setHashParamsApplied(true); // Mark as applied after successful processing
+    setParamsApplied(true); // Mark as applied
+    finishInitializing(); // Signal that URL processing is complete
   }, [
-    selectedDb,
+    isInitializing,
+    paramsApplied,
     schema,
-    hashParamsApplied,
+    selectedDb,
     setQuery,
     setSelectedDb,
     setSelectedTable,
     setSelectedTimeField,
     setTimeRange,
+    finishInitializing,
   ]);
 
   return null; // AppContent is a side-effect component, does not render UI itself

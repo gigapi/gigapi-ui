@@ -40,6 +40,7 @@ interface QueryState {
   responseSize: number | null;
   performanceMetrics: any;
   actualExecutedQuery: string | null;
+  isInitializing: boolean;
 }
 
 // Action types for reducer
@@ -53,6 +54,7 @@ type QueryAction =
   | { type: "SET_ERROR"; payload: { error: string; detail?: string } }
   | { type: "SET_EXECUTION_TIME"; payload: number }
   | { type: "SET_ACTUAL_QUERY"; payload: string }
+  | { type: "FINISH_INITIALIZING" }
   | { type: "CLEAR_QUERY" }
   | { type: "RESET_STATE" };
 
@@ -68,6 +70,7 @@ const initialQueryState: QueryState = {
   responseSize: null,
   performanceMetrics: null,
   actualExecutedQuery: null,
+  isInitializing: true,
 };
 
 function queryReducer(state: QueryState, action: QueryAction): QueryState {
@@ -121,6 +124,9 @@ function queryReducer(state: QueryState, action: QueryAction): QueryState {
         responseSize: null,
       };
 
+    case "FINISH_INITIALIZING":
+      return { ...state, isInitializing: false };
+
     case "RESET_STATE":
       return { ...initialQueryState };
 
@@ -135,6 +141,10 @@ export interface QueryContextType {
   setQuery: (query: string) => void;
   executeQuery: () => Promise<void>;
   clearQuery: () => void;
+
+  // App initialization state
+  isInitializing: boolean;
+  finishInitializing: () => void;
 
   // Results
   results: QueryResult[] | null;
@@ -182,6 +192,11 @@ export function QueryProvider({ children }: { children: ReactNode }) {
 
   // Refs
   const abortControllerRef = useRef<AbortController | null>(null);
+
+  // Finishes initialization
+  const finishInitializing = useCallback(() => {
+    dispatch({ type: "FINISH_INITIALIZING" });
+  }, []);
 
   // Reset state when API URL changes
   useEffect(() => {
@@ -467,6 +482,10 @@ export function QueryProvider({ children }: { children: ReactNode }) {
     setQuery,
     executeQuery,
     clearQuery,
+
+    // App initialization state
+    isInitializing: state.isInitializing,
+    finishInitializing,
 
     // Results
     results: state.results,

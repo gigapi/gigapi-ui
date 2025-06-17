@@ -21,8 +21,6 @@ export function useUrlQuery() {
       const params = HashQueryUtils.decodeHashQuery();
       if (!params) return;
 
-      console.log('Loading URL parameters:', params);
-
       // Apply database selection
       if (params.db) {
         setSelectedDb(params.db);

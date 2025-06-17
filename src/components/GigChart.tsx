@@ -408,10 +408,6 @@ const GigChart: React.FC<GigChartProps> = ({
       // Apply configuration
       echartsInstanceRef.current.setOption(configuration.echartsConfig, true);
 
-      console.log(
-        "Chart initialized successfully with config:",
-        configuration.echartsConfig
-      );
     } catch (error) {
       console.error("Error initializing or updating chart:", error);
     }
