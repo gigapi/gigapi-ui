@@ -264,17 +264,22 @@ export function DatabaseProvider({ children }: { children: ReactNode }) {
       // Allow setting any database name if no databases are available yet
       if (!availableDatabases.length && dbName) {
         dispatch({ type: "SET_SELECTED_DB", payload: dbName });
+        // Immediately persist the selected database
+        safeLocalStorage.setItem(STORAGE_KEYS.SELECTED_DB, dbName);
         return;
       }
 
       if (dbName && availableDatabases.includes(dbName)) {
         if (state.selectedDb !== dbName) {
           dispatch({ type: "SET_SELECTED_DB", payload: dbName });
+          // Immediately persist the selected database
+          safeLocalStorage.setItem(STORAGE_KEYS.SELECTED_DB, dbName);
         }
       } else if (dbName) {
         toast.warning(`Database "${dbName}" not available.`);
         if (state.selectedDb !== "") {
           dispatch({ type: "SET_SELECTED_DB", payload: "" });
+          safeLocalStorage.removeItem(STORAGE_KEYS.SELECTED_DB);
         }
       }
     },

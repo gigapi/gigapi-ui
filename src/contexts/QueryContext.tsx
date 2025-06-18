@@ -216,12 +216,7 @@ export function QueryProvider({ children }: { children: ReactNode }) {
     } else {
       updateSelectedTimeFieldDetails(null);
     }
-  }, [
-    selectedTimeField,
-    selectedTable,
-    getColumnsForTable,
-    updateSelectedTimeFieldDetails,
-  ]);
+  }, [selectedTimeField, selectedTable, getColumnsForTable, updateSelectedTimeFieldDetails]);
 
   // Query setter with time variable detection and persistence
   const setQuery = useCallback(
