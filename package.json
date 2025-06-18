@@ -1,6 +1,6 @@
 {
   "name": "gigapi-ui",
-  "version": "1.0.10",
+  "version": "1.0.11",
   "type": "module",
   "description": "UI interface for GigAPI: The Infinite Timeseries Lakehouse. GigAPI UI provides a slick web interface to query time-series using GigAPI Catalog Metadata + DuckDB",
   "scripts": {
