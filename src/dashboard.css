@@ -1,0 +1,634 @@
+/* Dashboard Layout Styles - Grafana-like experience */
+
+/* Dashboard Container */
+.dashboard-container {
+  min-height: 100vh;
+  background: var(--background);
+  display: flex;
+  flex-direction: column;
+}
+
+/* Dashboard Header */
+.dashboard-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 16px 20px 12px;
+  background: var(--background);
+  border-bottom: 1px solid var(--border);
+  gap: 16px;
+}
+
+.dashboard-title-section {
+  flex: 1;
+  min-width: 0;
+}
+
+.dashboard-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.dashboard-back-btn {
+  color: var(--muted-foreground);
+  padding: 4px 8px;
+  height: auto;
+  font-size: 13px;
+  border-radius: 6px;
+}
+
+.dashboard-back-btn:hover {
+  color: var(--foreground);
+  background: var(--muted);
+}
+
+.dashboard-title {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--foreground);
+  margin: 0;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dashboard-description {
+  color: var(--muted-foreground);
+  font-size: 14px;
+  margin: 4px 0 8px;
+  line-height: 1.4;
+}
+
+.dashboard-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  flex-wrap: wrap;
+}
+
+.dashboard-meta svg {
+  flex-shrink: 0;
+}
+
+.dashboard-meta-separator {
+  margin: 0 2px;
+}
+
+.dashboard-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.dashboard-actions .btn {
+  font-size: 13px;
+  height: 32px;
+  padding: 0 12px;
+}
+
+.dashboard-save-btn {
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+
+.dashboard-save-btn:hover {
+  background: var(--primary/90);
+}
+
+.dashboard-cancel-btn {
+  color: var(--muted-foreground);
+}
+
+.dashboard-edit-btn,
+.dashboard-export-btn,
+.dashboard-delete-btn {
+  color: var(--foreground);
+  border-color: var(--border);
+}
+
+.dashboard-delete-btn:hover {
+  background: var(--destructive);
+  color: var(--destructive-foreground);
+  border-color: var(--destructive);
+}
+
+/* Dashboard Controls */
+.dashboard-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 20px;
+  background: var(--background);
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.dashboard-add-panel-btn {
+  font-size: 13px;
+  height: 32px;
+  padding: 0 12px;
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+
+.dashboard-add-panel-btn:hover {
+  background: var(--primary/90);
+}
+
+.dashboard-separator {
+  margin: 0;
+  border-color: var(--border);
+}
+
+/* Dashboard Content */
+.dashboard-content {
+  flex: 1;
+  padding: 16px 20px 20px;
+  overflow: hidden;
+}
+
+/* Empty State */
+.dashboard-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 400px;
+  text-align: center;
+  background: var(--card);
+  border: 2px dashed var(--border);
+  border-radius: 12px;
+  margin: 40px auto;
+  max-width: 500px;
+  padding: 40px 20px;
+}
+
+.empty-state-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--foreground);
+  margin: 0 0 8px;
+}
+
+.empty-state-description {
+  color: var(--muted-foreground);
+  font-size: 14px;
+  margin: 0 0 20px;
+  line-height: 1.5;
+}
+
+.empty-state-action {
+  background: var(--primary);
+  color: var(--primary-foreground);
+  padding: 8px 16px;
+  height: auto;
+  font-size: 14px;
+}
+
+.empty-state-action:hover {
+  background: var(--primary/90);
+}
+
+/* Panel Styles */
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: var(--muted/5);
+  border-bottom: 1px solid var(--border);
+  min-height: 40px;
+}
+
+.panel-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--foreground);
+  margin: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.dashboard-panel:hover .panel-actions {
+  opacity: 1;
+}
+
+.panel-action-btn {
+  color: var(--muted-foreground);
+  padding: 4px;
+  height: auto;
+  width: auto;
+  min-width: 24px;
+  border-radius: 4px;
+}
+
+.panel-action-btn:hover {
+  color: var(--foreground);
+  background: var(--muted);
+}
+
+.panel-content {
+  position: relative;
+  height: calc(100% - 40px);
+  padding: 12px;
+  overflow: hidden;
+}
+
+.panel-content.no-padding {
+  padding: 0;
+}
+
+/* Dashboard Grid Layout */
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(24, 1fr);
+  grid-template-rows: repeat(auto-fit, 30px);
+  gap: 8px;
+  padding: 16px;
+  min-height: calc(100vh - 120px);
+  background: var(--background);
+}
+
+/* Panel Container */
+.dashboard-panel {
+  position: relative;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  transition: all 0.2s ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.dashboard-panel:hover {
+  border-color: var(--primary);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+/* Panel Header */
+.dashboard-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: var(--muted/5);
+  border-bottom: 1px solid var(--border);
+  min-height: 40px;
+}
+
+.dashboard-panel-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--foreground);
+  margin: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dashboard-panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.dashboard-panel:hover .dashboard-panel-actions {
+  opacity: 1;
+}
+
+/* Panel Content */
+.dashboard-panel-content {
+  position: relative;
+  height: calc(100% - 40px);
+  padding: 12px;
+  overflow: hidden;
+}
+
+.dashboard-panel-content.no-padding {
+  padding: 0;
+}
+
+/* Resize Handles */
+.dashboard-panel-resize-handle {
+  position: absolute;
+  background: transparent;
+  z-index: 10;
+}
+
+.dashboard-panel-resize-handle::after {
+  content: "";
+  position: absolute;
+  background: var(--primary);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.dashboard-panel-resize-handle:hover::after,
+.dashboard-panel.resizing .dashboard-panel-resize-handle::after {
+  opacity: 0.5;
+}
+
+/* Right resize handle */
+.dashboard-panel-resize-handle.right {
+  top: 0;
+  right: -4px;
+  width: 8px;
+  height: 100%;
+  cursor: col-resize;
+}
+
+.dashboard-panel-resize-handle.right::after {
+  top: 0;
+  right: 3px;
+  width: 2px;
+  height: 100%;
+}
+
+/* Bottom resize handle */
+.dashboard-panel-resize-handle.bottom {
+  bottom: -4px;
+  left: 0;
+  width: 100%;
+  height: 8px;
+  cursor: row-resize;
+}
+
+.dashboard-panel-resize-handle.bottom::after {
+  bottom: 3px;
+  left: 0;
+  width: 100%;
+  height: 2px;
+}
+
+/* Corner resize handle */
+.dashboard-panel-resize-handle.corner {
+  bottom: -4px;
+  right: -4px;
+  width: 12px;
+  height: 12px;
+  cursor: nw-resize;
+}
+
+.dashboard-panel-resize-handle.corner::after {
+  bottom: 3px;
+  right: 3px;
+  width: 6px;
+  height: 6px;
+  border-radius: 2px;
+}
+
+/* Panel Size Classes */
+.dashboard-panel.small {
+  grid-column: span 6;
+  grid-row: span 8;
+}
+
+.dashboard-panel.medium {
+  grid-column: span 12;
+  grid-row: span 10;
+}
+
+.dashboard-panel.large {
+  grid-column: span 18;
+  grid-row: span 12;
+}
+
+.dashboard-panel.full-width {
+  grid-column: span 24;
+  grid-row: span 10;
+}
+
+/* Chart Container */
+.dashboard-chart-container {
+  width: 100%;
+  height: 100%;
+  min-height: 200px;
+  position: relative;
+}
+
+.dashboard-chart-container .echarts-container {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* Panel Editor */
+.dashboard-panel-editor {
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.dashboard-panel-editor-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: var(--muted/10);
+  border-bottom: 1px solid var(--border);
+}
+
+.dashboard-panel-editor-content {
+  display: flex;
+  height: calc(100vh - 200px);
+}
+
+.dashboard-panel-editor-sidebar {
+  width: 300px;
+  background: var(--muted/5);
+  border-right: 1px solid var(--border);
+  padding: 16px;
+  overflow-y: auto;
+}
+
+.dashboard-panel-editor-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.dashboard-panel-editor-query {
+  height: 300px;
+  border-bottom: 1px solid var(--border);
+}
+
+.dashboard-panel-editor-preview {
+  flex: 1;
+  padding: 16px;
+  background: var(--card);
+}
+
+/* Monaco Editor Styles */
+.dashboard-monaco-editor {
+  height: 100%;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+/* Time Range Selector in Dashboard */
+.dashboard-time-range {
+  position: fixed;
+  top: 60px;
+  right: 16px;
+  z-index: 50;
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+/* Chart Configuration Panel */
+.chart-config-panel {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.chart-config-section {
+  margin-bottom: 16px;
+}
+
+.chart-config-section:last-child {
+  margin-bottom: 0;
+}
+
+.chart-config-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--foreground);
+  margin-bottom: 8px;
+}
+
+.chart-config-group {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+/* Loading States */
+.dashboard-panel-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--muted-foreground);
+  font-size: 14px;
+}
+
+.dashboard-panel-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--destructive);
+  font-size: 14px;
+  text-align: center;
+  padding: 16px;
+}
+
+/* Responsive Design */
+@media (max-width: 1200px) {
+  .dashboard-grid {
+    grid-template-columns: repeat(12, 1fr);
+  }
+
+  .dashboard-panel.large {
+    grid-column: span 12;
+  }
+
+  .dashboard-panel.medium {
+    grid-column: span 12;
+  }
+}
+
+@media (max-width: 768px) {
+  .dashboard-grid {
+    grid-template-columns: repeat(6, 1fr);
+    gap: 4px;
+    padding: 8px;
+  }
+
+  .dashboard-panel {
+    grid-column: span 6 !important;
+  }
+
+  .dashboard-panel-editor-content {
+    flex-direction: column;
+    height: auto;
+  }
+
+  .dashboard-panel-editor-sidebar {
+    width: 100%;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .dashboard-panel-editor-query {
+    height: 200px;
+  }
+}
+
+/* Dark mode specific adjustments */
+.dark .dashboard-panel {
+  box-shadow: 0 1px 3px rgba(255, 255, 255, 0.1);
+}
+
+.dark .dashboard-panel:hover {
+  box-shadow: 0 4px 12px rgba(255, 255, 255, 0.15);
+}
+
+.dark .dashboard-time-range {
+  box-shadow: 0 4px 12px rgba(255, 255, 255, 0.15);
+}
+
+/* Panel animations */
+@keyframes panel-appear {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.dashboard-panel.new {
+  animation: panel-appear 0.3s ease-out;
+}
+
+/* Chart tooltip improvements */
+.dashboard-chart-container .echarts-tooltip {
+  background: var(--popover) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 6px !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15) !important;
+  color: var(--popover-foreground) !important;
+  font-size: 12px !important;
+}

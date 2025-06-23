@@ -9,13 +9,11 @@ import {
 } from "react";
 import { toast } from "sonner";
 import type {
-  AIProvider,
-  AIModel,
   MCPConnection,
   ChatMessage,
   ChatSession,
   MCPServerCapabilities,
-  MCPContextType, // Added MCPContextType
+  MCPContextType,
 } from "@/types";
 import { useDatabase } from "@/contexts/DatabaseContext";
 import { useTime } from "@/contexts/TimeContext";
@@ -95,9 +93,6 @@ export function MCPProvider({ children }: { children: ReactNode }) {
     sqlOptimization: true,
   };
 
-  // Available models - managed by ConnectionDialog
-  const availableModels: AIModel[] = [];
-
   // Computed properties
   const isConnected = activeConnection?.isConnected || false;
 
@@ -137,39 +132,18 @@ export function MCPProvider({ children }: { children: ReactNode }) {
     const newConnection: MCPConnection = {
       ...connectionData,
       id: `mcp_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
-      isConnected: false,
+      isConnected: true, // Assume it's connected since it was tested in the UI
     };
 
-    // Test the connection before adding
-    setIsLoading(true);
-    setError(null);
-
-    try {
-      const isValid = await testConnectionInternal(newConnection);
-      newConnection.isConnected = isValid;
-      
-      if (isValid) {
-        newConnection.lastUsed = new Date().toISOString();
-        const updatedConnections = [...connections, newConnection];
-        setConnections(updatedConnections);
-        saveConnections(updatedConnections);
-        
-        // Set as active if it's the first connection
-        if (connections.length === 0) {
-          setActiveConnectionState(newConnection);
-          saveActiveConnection(newConnection.id);
-        }
-        
-        toast.success(`Connected to ${newConnection.name}`);
-      } else {
-        toast.error(`Failed to connect to ${newConnection.name}`);
-      }
-    } catch (err: any) {
-      setError(err.message || "Failed to test connection");
-      toast.error(`Connection failed: ${err.message}`);
-    } finally {
-      setIsLoading(false);
-    }
+    const updatedConnections = [...connections, newConnection];
+    setConnections(updatedConnections);
+    saveConnections(updatedConnections);
+    
+    // Set as active connection
+    setActiveConnectionState(newConnection);
+    saveActiveConnection(newConnection.id);
+    
+    toast.success(`Connected to ${newConnection.name}`);
   }, [connections, saveConnections, saveActiveConnection]);
 
   // Remove a connection
@@ -187,38 +161,6 @@ export function MCPProvider({ children }: { children: ReactNode }) {
     toast.success("Connection removed");
   }, [connections, activeConnection, saveConnections, saveActiveConnection]);
 
-  // Fetch available models from Ollama
-  const fetchModels = useCallback(async (baseUrl: string): Promise<AIModel[]> => {
-    try {
-      const controller = new AbortController();
-      const response = await fetch(`${baseUrl}/api/tags`, {
-        method: 'GET',
-        headers: { 'Content-Type': 'application/json' },
-        signal: controller.signal,
-      });
-
-      if (!response.ok) {
-        throw new Error(`Failed to fetch models: ${response.statusText}`);
-      }
-
-      const data = await response.json();
-      const models: AIModel[] = data.models?.map((model: any) => ({
-        id: model.name,
-        name: model.name,
-        provider: 'ollama' as AIProvider,
-        maxTokens: 128000, // Default for Ollama models
-        supportsStreaming: true,
-        size: model.size,
-        modifiedAt: model.modified_at,
-      })) || [];
-
-      return models;
-    } catch (err: any) {
-      console.error("Failed to fetch models:", err);
-      throw err;
-    }
-  }, []);
-
   // Test a connection
   const testConnectionInternal = async (connection: MCPConnection): Promise<boolean> => {
     try {
@@ -232,9 +174,16 @@ export function MCPProvider({ children }: { children: ReactNode }) {
 
       const baseUrl = getBaseUrl(connection);
       const headers = getHeaders(connection);
+      const url = new URL(`${baseUrl}/api/tags`);
+      
+      // Add query parameters if provided
+      if (connection.params) {
+        Object.entries(connection.params).forEach(([key, value]) => {
+          url.searchParams.append(key, value);
+        });
+      }
 
-      // Test connection using Ollama's API
-      const response = await fetch(`${baseUrl}/api/tags`, {
+      const response = await fetch(url.toString(), {
         method: 'GET',
         headers,
         signal: controller.signal,
@@ -350,12 +299,7 @@ export function MCPProvider({ children }: { children: ReactNode }) {
 
   // Helper functions
   const getBaseUrl = (connection: MCPConnection): string => {
-    switch (connection.provider) {
-      case 'ollama':
-        return connection.baseUrl || 'http://localhost:11434';
-      default:
-        throw new Error(`Unsupported provider: ${connection.provider}`);
-    }
+    return connection.baseUrl;
   };
 
   const getHeaders = (connection: MCPConnection): Record<string, string> => {
@@ -363,10 +307,9 @@ export function MCPProvider({ children }: { children: ReactNode }) {
       'Content-Type': 'application/json',
     };
 
-    switch (connection.provider) {
-      case 'ollama':
-        // Ollama typically doesn't require API keys for local instances
-        break;
+    // Add custom headers
+    if (connection.headers) {
+      Object.assign(headers, connection.headers);
     }
 
     return headers;
@@ -567,21 +510,39 @@ USER ERRORS RESPONSES:
         })),
       ];
 
-      let requestBody: any;
-      let endpoint: string;
-
-      switch (activeConnection.provider) {
-        case 'ollama':
-          endpoint = `${baseUrl}/api/chat`;
-          requestBody = {
-            model: activeConnection.model,
-            messages,
-            stream: false,
-          };
-          break;
-        default:
-          throw new Error(`Unsupported provider: ${activeConnection.provider}`);
+      // Build endpoint - detect the correct endpoint based on base URL
+      let endpoint = baseUrl;
+      
+      // If baseUrl doesn't already include the endpoint, add the appropriate one
+      if (!endpoint.includes('/chat') && !endpoint.includes('/api/chat') && !endpoint.includes('/v1/chat')) {
+        // For OpenAI-compatible APIs
+        if (endpoint.includes('openai.com') || endpoint.includes('api.openai.com')) {
+          endpoint = endpoint.endsWith('/') ? endpoint + 'chat/completions' : endpoint + '/chat/completions';
+        }
+        // For Ollama
+        else if (endpoint.includes('localhost') || endpoint.includes('127.0.0.1') || endpoint.includes('ollama')) {
+          endpoint = endpoint.endsWith('/') ? endpoint + 'api/chat' : endpoint + '/api/chat';
+        }
+        // Default to OpenAI-compatible format for other providers
+        else {
+          endpoint = endpoint.endsWith('/') ? endpoint + 'chat/completions' : endpoint + '/chat/completions';
+        }
       }
+      
+      // Add query parameters if provided
+      if (activeConnection.params) {
+        const url = new URL(endpoint);
+        Object.entries(activeConnection.params).forEach(([key, value]) => {
+          url.searchParams.append(key, value);
+        });
+        endpoint = url.toString();
+      }
+
+      const requestBody = {
+        model: activeConnection.model,
+        messages,
+        stream: false,
+      };
 
       const response = await fetch(endpoint, {
         method: 'POST',
@@ -596,17 +557,31 @@ USER ERRORS RESPONSES:
 
       const data = await response.json();
       
-      // Extract response content based on provider
+      // Parse response content from different AI providers
       let assistantContent: string;
-      let generatedQuery: string | undefined;
-
-      switch (activeConnection.provider) {
-        case 'ollama':
-          assistantContent = data.message?.content || "No response received";
-          break;
-        default:
-          assistantContent = "Unsupported response format";
+      
+      // Try OpenAI format first (choices[0].message.content)
+      if (data.choices?.[0]?.message?.content) {
+        assistantContent = data.choices[0].message.content;
       }
+      // Try Ollama format (message.content)
+      else if (data.message?.content) {
+        assistantContent = data.message.content;
+      }
+      // Try Anthropic format (content[0].text)
+      else if (data.content?.[0]?.text) {
+        assistantContent = data.content[0].text;
+      }
+      // Try generic content field
+      else if (data.content) {
+        assistantContent = data.content;
+      }
+      else {
+        console.error("Unexpected response format:", data);
+        assistantContent = "Error: AI provider returned unexpected response format";
+      }
+      
+      let generatedQuery: string | undefined;
 
       // Check if the response contains a SQL query
       const sqlMatches = assistantContent.match(/```sql\n([\s\S]*?)\n```/);
@@ -707,7 +682,6 @@ USER ERRORS RESPONSES:
         removeConnection,
         testConnection,
         setActiveConnection,
-        fetchModels,
         
         // Chat functionality
         chatSessions,
@@ -727,7 +701,6 @@ USER ERRORS RESPONSES:
         isConnected,
         isLoading,
         error,
-        availableModels,
         capabilities,
       }}
     >

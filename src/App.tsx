@@ -1,23 +1,47 @@
 import React, { useEffect } from "react";
+import { BrowserRouter as Router, Routes, Route, useNavigate, useParams } from "react-router-dom";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
-import QueryEditor from "@/components/QueryEditor";
-import QueryResults from "@/components/QueryResults";
-import QueryNav from "@/components/QueryNav";
-import {
-  ResizableHandle,
-  ResizablePanel,
-  ResizablePanelGroup,
-} from "@/components/ui/resizable";
-import Logo from "@/assets/logo.svg";
-import AppContent from "@/components/AppContent";
 import { useConnection, ConnectionProvider } from "@/contexts/ConnectionContext";
 import { DatabaseProvider } from "@/contexts/DatabaseContext";
 import { TimeProvider } from "@/contexts/TimeContext";
 import { QueryProvider } from "@/contexts/QueryContext";
 import { MCPProvider } from "@/contexts/MCPContext";
-import { CheckCircle } from "lucide-react";
 import ConnectionError from "@/components/ConnectionError";
+import Home from "@/pages/Home";
+import DashboardList from "@/pages/DashboardList";
+import DashboardView from "@/pages/DashboardView";
+import PanelEdit from "@/pages/PanelEdit";
+
+// Route wrapper for PanelEdit
+function PanelEditRoute() {
+  const navigate = useNavigate();
+  const { dashboardId, panelId } = useParams();
+  
+  const handleSaveSuccess = () => {
+    navigate(`/dashboard/${dashboardId}`);
+  };
+  
+  const handleCancel = () => {
+    navigate(`/dashboard/${dashboardId}`);
+  };
+  
+  return (
+    <PanelEdit
+      dashboardId={dashboardId || ""}
+      panelId={panelId}
+      onSaveSuccess={handleSaveSuccess}
+      onCancel={handleCancel}
+    />
+  );
+}
+import { AppSidebar } from "@/components/navigation/app-sidebar";
+import {
+  SidebarInset,
+  SidebarProvider,
+} from "@/components/ui/sidebar";
+import AppContent from "@/components/AppContent"; // Import AppContent for side-effects
+import { DashboardProvider } from "@/contexts/DashboardContext"; // Import DashboardProvider
 
 const VERSION = import.meta.env.PACKAGE_VERSION;
 
@@ -137,54 +161,34 @@ function AppInternal() {
   return (
     <ErrorBoundary>
       <ThemeProvider defaultTheme="dark" storageKey="gigapi-theme">
-        <div className="h-screen flex flex-col overflow-hidden bg-background text-foreground">
-          <AppContent />
-          <QueryNav />
-          <main className="flex-1 p-2 md:p-3 overflow-hidden">
-            <ResizablePanelGroup
-              direction="vertical"
-              className="min-h-0 rounded-lg border bg-card/50"
-            >
-              <ResizablePanel defaultSize={40} minSize={0}>
-                <div className="h-full p-2">
-                  <QueryEditor />
-                </div>
-              </ResizablePanel>
-              <ResizableHandle withHandle />
-              <ResizablePanel defaultSize={60} minSize={0}>
-                <div className="h-full p-2">
-                  <QueryResults />
-                </div>
-              </ResizablePanel>
-            </ResizablePanelGroup>
-          </main>
-          <footer className="border-t py-1.5 px-4 text-xs text-muted-foreground flex items-center justify-between flex-shrink-0">
-            <div className="flex items-center gap-2">
-              <img src={Logo} alt="GigAPI Logo" className="h-4 w-4" />
-              <span className="hidden sm:inline">
-                GigAPI Querier | SQL Interface for Observability Data
-              </span>
-              <span className="sm:hidden">GigAPI Querier</span>
-            </div>
-            <div className="flex items-center">
-              {connectionState === "connected" && (
-                <span className="flex items-center text-green-500 mr-4">
-                  <CheckCircle className="h-3 w-3 mr-1" />
-                  Connected
-                </span>
-              )}
-              <a
-                href="https://gigapipe.com?utm_source=gigapi-ui&utm_medium=footer"
-                className="text-primary hover:underline"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                Powered by Gigapipe
-              </a>
-            </div>
-          </footer>
-          <Toaster position="bottom-right" richColors expand />
-        </div>
+        <Router>
+          <SidebarProvider
+            style={{
+              "--sidebar-width": "17rem",
+            } as React.CSSProperties}
+          >
+            <AppSidebar />
+            <SidebarInset>
+              <AppContent /> {/* AppContent for side-effects only */}
+              <DashboardProvider> {/* Wrap Routes with DashboardProvider */}
+                <Routes>
+                  <Route path="/" element={<Home />} />
+                  <Route path="/dashboards" element={<DashboardList />} />
+                  <Route path="/dashboard/:dashboardId" element={<DashboardView />} />
+                  <Route
+                    path="/dashboard/:dashboardId/panel/:panelId/edit"
+                    element={<PanelEditRoute />}
+                  />
+                   <Route
+                    path="/dashboard/:dashboardId/panel/new"
+                    element={<PanelEditRoute />}
+                  />
+                </Routes>
+              </DashboardProvider>
+            </SidebarInset>
+          </SidebarProvider>
+        </Router>
+        <Toaster position="bottom-right" richColors expand />
       </ThemeProvider>
     </ErrorBoundary>
   );

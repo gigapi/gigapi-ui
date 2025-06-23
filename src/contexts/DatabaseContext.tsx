@@ -4,6 +4,7 @@ import {
   useCallback,
   useEffect,
   useReducer,
+  useRef,
   type ReactNode,
 } from "react";
 import axios from "axios";
@@ -84,6 +85,12 @@ const DatabaseContext = createContext<DatabaseContextType | undefined>(
 export function DatabaseProvider({ children }: { children: ReactNode }) {
   const { databases, apiUrl, isConnected } = useConnection();
   const [state, dispatch] = useReducer(databaseReducer, initialDatabaseState);
+  const schemaRef = useRef(state.schema);
+
+  // Update ref when schema changes
+  useEffect(() => {
+    schemaRef.current = state.schema;
+  }, [state.schema]);
 
   // Reset state when API URL changes
   useEffect(() => {
@@ -182,8 +189,10 @@ export function DatabaseProvider({ children }: { children: ReactNode }) {
       if (!dbName || !isConnected) return;
 
       // Return early if schema already exists
-      if (state.schema[dbName]?.length > 0) {
-        const tables = state.schema[dbName].map((table) => table.tableName);
+      if (schemaRef.current[dbName]?.length > 0) {
+        const tables = schemaRef.current[dbName].map(
+          (table) => table.tableName
+        );
         dispatch({ type: "SET_AVAILABLE_TABLES", payload: tables });
         return;
       }
@@ -255,7 +264,7 @@ export function DatabaseProvider({ children }: { children: ReactNode }) {
         dispatch({ type: "SET_LOADING_SCHEMA", payload: false });
       }
     },
-    [apiUrl, isConnected, parseColumnSchema, state.schema]
+    [apiUrl, isConnected, parseColumnSchema]
   );
 
   // Database selection with validation
@@ -264,18 +273,17 @@ export function DatabaseProvider({ children }: { children: ReactNode }) {
       // Allow setting any database name if no databases are available yet
       if (!availableDatabases.length && dbName) {
         dispatch({ type: "SET_SELECTED_DB", payload: dbName });
+        safeLocalStorage.setItem(STORAGE_KEYS.SELECTED_DB, dbName);
         return;
       }
 
       if (dbName && availableDatabases.includes(dbName)) {
         if (state.selectedDb !== dbName) {
           dispatch({ type: "SET_SELECTED_DB", payload: dbName });
+          safeLocalStorage.setItem(STORAGE_KEYS.SELECTED_DB, dbName);
         }
       } else if (dbName) {
         toast.warning(`Database "${dbName}" not available.`);
-        if (state.selectedDb !== "") {
-          dispatch({ type: "SET_SELECTED_DB", payload: "" });
-        }
       }
     },
     [availableDatabases, state.selectedDb]
@@ -328,23 +336,23 @@ export function DatabaseProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const savedDb = safeLocalStorage.getItem(STORAGE_KEYS.SELECTED_DB);
 
-    if (
-      savedDb &&
-      availableDatabases.includes(savedDb) &&
-      state.selectedDb !== savedDb
-    ) {
-      setSelectedDb(savedDb);
-    } else if (availableDatabases.length > 0 && !state.selectedDb) {
-      // Auto-select first available database
-      setSelectedDb(availableDatabases[0]);
+    if (availableDatabases.length > 0) {
+      if (
+        savedDb &&
+        availableDatabases.includes(savedDb) &&
+        state.selectedDb !== savedDb
+      ) {
+        dispatch({ type: "SET_SELECTED_DB", payload: savedDb });
+      } else if (!state.selectedDb) {
+        dispatch({ type: "SET_SELECTED_DB", payload: availableDatabases[0] });
+      }
     }
-  }, [availableDatabases, state.selectedDb, setSelectedDb]);
+  }, [availableDatabases, state.selectedDb]);
 
   // Load schema when database is selected
   useEffect(() => {
     if (state.selectedDb) {
-      safeLocalStorage.setItem(STORAGE_KEYS.SELECTED_DB, state.selectedDb);
-      loadSchemaForDb(state.selectedDb).catch(console.error);
+      loadSchemaForDb(state.selectedDb);
     }
   }, [state.selectedDb, loadSchemaForDb]);
 

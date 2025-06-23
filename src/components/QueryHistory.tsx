@@ -36,6 +36,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import { formatDate } from "@/lib/";
+import { SidebarMenuButton } from "@/components/ui/sidebar";
 
 // Use the same type as in QueryContext
 type HistoryItem = {
@@ -131,9 +132,15 @@ export default function QueryHistory() {
     <>
       <Sheet open={isOpen} onOpenChange={setIsOpen}>
         <SheetTrigger asChild>
-          <Button variant="outline">
-            <History className="h-5 w-5" /> History
-          </Button>
+          <SidebarMenuButton
+            asChild
+            onClick={() => setIsOpen(true)}
+          >
+            <div className="flex items-center gap-2 cursor-pointer">
+              <History className="h-4 w-4" />
+              <span className="text-sm">Query History</span>
+            </div>
+          </SidebarMenuButton>
         </SheetTrigger>
         <SheetContent
           className="w-full sm:max-w-md md:max-w-lg bg-background"

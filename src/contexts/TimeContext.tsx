@@ -155,13 +155,13 @@ export function TimeProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(timeReducer, initialTimeState);
 
   // Time range management with persistence
-  const setTimeRange = useCallback((range: TimeRange) => {
+  const setTimeRange = (range: TimeRange) => {
     dispatch({ type: "SET_TIME_RANGE", payload: range });
     safeLocalStorage.setJSON(STORAGE_KEYS.TIME_RANGE, range);
-  }, []);
+  };
 
   // Time field selection with persistence
-  const setSelectedTimeField = useCallback((field: string | undefined) => {
+  const setSelectedTimeField = (field: string | undefined) => {
     dispatch({ type: "SET_SELECTED_TIME_FIELD", payload: field });
 
     if (field) {
@@ -169,7 +169,7 @@ export function TimeProvider({ children }: { children: ReactNode }) {
     } else {
       safeLocalStorage.removeItem(STORAGE_KEYS.SELECTED_TIME_FIELD);
     }
-  }, []);
+  };
 
   // Get persisted time field for specific database/table combination
   const getPersistedTimeField = useCallback(

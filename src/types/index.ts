@@ -118,27 +118,14 @@ export interface SavedConnection {
 }
 
 // MCP Context Types
-export type AIProvider = "ollama" | "openai" | "anthropic" | "custom";
-
-export interface AIModel {
-  id: string;
-  name: string;
-  provider: AIProvider;
-  maxTokens?: number;
-  supportsStreaming?: boolean;
-  size?: number; // For local models like Ollama
-  modifiedAt?: string; // For local models
-}
-
 export interface MCPConnection {
   id: string;
   name: string;
-  provider: AIProvider;
-  baseUrl?: string; // For Ollama or custom
-  apiKey?: string; // For OpenAI, Anthropic, etc.
-  model?: string; // Default model for this connection
+  baseUrl: string;
+  model: string;
+  headers?: Record<string, string>;
+  params?: Record<string, string>;
   isConnected: boolean;
-  lastUsed?: string;
 }
 
 export interface ChatMessage {
@@ -190,7 +177,6 @@ export interface MCPContextType {
   removeConnection: (connectionId: string) => void;
   testConnection: (connectionId: string) => Promise<boolean>;
   setActiveConnection: (connectionId: string | null) => void;
-  fetchModels: (baseUrl: string) => Promise<AIModel[]>;
 
   // Chat functionality
   chatSessions: ChatSession[];
@@ -210,7 +196,6 @@ export interface MCPContextType {
   isConnected: boolean;
   isLoading: boolean;
   error: string | null;
-  availableModels: AIModel[];
   capabilities: MCPServerCapabilities;
 }
 
@@ -264,215 +249,6 @@ export interface PerformanceMetrics {
   };
   // Allow other keys for flexibility with different metric sources
   [key: string]: any;
-}
-
-// ============================================================================
-// Chart Configuration Types
-// ============================================================================
-
-export type ChartLibrary = "recharts" | "echarts" | "custom" | "none";
-
-export type ChartType =
-  | "line"
-  | "bar"
-  | "area"
-  | "scatter"
-  | "pie"
-  | "table"
-  | "histogram"
-  | "number" // For single number display / KPI
-  | "composed"; // For Recharts mixed charts
-
-export interface DataField {
-  name: string;
-  label?: string;
-  type: DataType;
-  role?: ColumnRole;
-  contentType?: ColumnContentType;
-}
-
-export interface ChartFieldMapping {
-  xAxis?: string | DataField | null;
-  yAxis?: (string | DataField)[] | string | DataField | null;
-  series?: string | DataField | null;
-  colorBy?: string | DataField | null;
-  sizeBy?: string | DataField | null;
-  groupBy?: string | DataField | null;
-  // Additional fields for specific chart needs
-  latitude?: string | DataField | null; // For geo charts
-  longitude?: string | DataField | null; // For geo charts
-  value?: string | DataField | null; // For pie charts or single value displays
-  errorBars?: {
-    plus: string | DataField;
-    minus: string | DataField;
-  } | null;
-  tooltipFields?: (string | DataField)[];
-}
-
-export interface ChartStyling {
-  width?: string | number;
-  height?: string | number;
-  showLegend?: boolean;
-  legendPosition?: "top" | "bottom" | "left" | "right" | "inside" | "center";
-  showGridLines?: boolean;
-  colors?: string[];
-  backgroundColor?: string;
-  fontSize?: number;
-  fontFamily?: string;
-  tooltipEnabled?: boolean;
-  xAxisName?: string;
-  yAxisName?: string;
-  timeFormatting?: string; // e.g., 'YYYY-MM-DD HH:mm'
-  customChartOptions?: Record<string, any>; // For library-specific options
-  // Styling for specific elements
-  axisLabelColor?: string;
-  axisLineColor?: string;
-  gridColor?: string;
-  legendTextColor?: string;
-  numberFormatting?: {
-    // For 'number' chart type or numeric tooltips/labels
-    prefix?: string;
-    suffix?: string;
-    decimals?: number;
-    useGrouping?: boolean;
-  };
-}
-
-export interface ChartConfig {
-  id: string;
-  name: string;
-  dataId: string;
-  chartType: ChartType;
-  library: ChartLibrary;
-  fieldMapping: ChartFieldMapping;
-  description?: string;
-  styling?: ChartStyling;
-  filters?: any[];
-  sort?: { field: string; direction: "asc" | "desc" }[];
-  version?: string;
-  lastUpdated?: string;
-  timeRange?: TimeRange;
-  queryOverride?: string;
-  maxDataPoints?: number;
-  nullHandling?: "zero" | "ignore" | "connect";
-}
-
-export type ChartData = Record<string, any>;
-
-export interface FieldDefinition {
-  name: string;
-  label: string;
-  type: DataType;
-  role?: ColumnRole;
-  contentType?: ColumnContentType;
-  isNumeric?: boolean;
-  isTemporal?: boolean;
-  isCategorical?: boolean;
-  stats?: Partial<ColumnStats>;
-  format?: string;
-}
-
-export interface SeriesOption {
-  name: string;
-  dataKey: string;
-  type?: ChartType;
-  color?: string;
-  yAxisId?: string | number;
-  stackId?: string;
-}
-
-export interface ChartConfiguration {
-  id: string;
-  title: string;
-  type: "line" | "bar" | "area";
-  fieldMapping: {
-    xAxis: string | null;
-    yAxis: string | null;
-    groupBy: string | null;
-  };
-  timeFormatting?: {
-    enabled: boolean;
-    sourceTimeUnit?: TimeUnit;
-  };
-  styling?: {
-    width?: number;
-    height?: number;
-    showLegend?: boolean;
-    showGrid?: boolean;
-    smooth?: boolean;
-    stack?: boolean;
-  };
-  echartsConfig: any;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface ChartPanel {
-  id: string;
-  configuration: ChartConfiguration;
-  data?: QueryResult[];
-}
-
-export interface ColumnInfo {
-  name: string;
-  label?: string;
-  type: DataType;
-  isTimeField?: boolean;
-  timeUnit?: TimeUnit;
-  role?: ColumnRole;
-  contentType?: ColumnContentType;
-  stats?: ColumnStats;
-}
-
-export interface ThemeColors {
-  textColor?: string;
-  axisColor?: string;
-  tooltipBackgroundColor?: string;
-  tooltipTextColor?: string;
-  gridColor?: string;
-  chartBackgroundColor?: string;
-}
-
-
-export interface ResolvedTimeRange {
-  fromDate: Date;
-  toDate: Date;
-  fromEpochMs: number;
-  toEpochMs: number;
-  fromEpochNs: bigint;
-  toEpochNs: bigint;
-  display: string;
-  raw: TimeRange;
-}
-
-export interface QueryMetadata {
-  id: string;
-  query: string;
-  timestamp: string;
-  db?: string;
-  table?: string;
-  timeField?: string;
-  timeRange?: TimeRange;
-  executionTime?: number;
-  rowCount?: number;
-  success?: boolean;
-  bytesProcessed?: number;
-}
-
-export interface QueryAnalysis {
-  complexity: "low" | "medium" | "high";
-  hasJoins: boolean;
-  hasSubqueries: boolean;
-  hasAggregations: boolean;
-  estimatedCost: number;
-  tableCount: number;
-  suggestions: string[];
-}
-
-export interface QueryValidationResult {
-  isValid: boolean;
-  errors: string[];
-  warnings?: string[];
 }
 
 // Error handling types
@@ -563,16 +339,6 @@ export interface ApiResponse<T = unknown> {
   timestamp: string;
   metadata?: Record<string, unknown>;
 }
-
-// QueryResult is already defined, this one is more specific
-// export interface QueryResult<T = unknown> {
-//   data: T[];
-//   rowCount: number;
-//   executionTime: number;
-//   columns: ColumnSchema[];
-//   hasMore?: boolean;
-//   nextCursor?: string;
-// }
 
 // Configuration types
 export interface ConnectionConfig {

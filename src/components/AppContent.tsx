@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useLocation } from "react-router-dom";
 import { useQuery } from "@/contexts/QueryContext";
 import { useDatabase } from "@/contexts/DatabaseContext";
 import { useTime } from "@/contexts/TimeContext";
@@ -7,13 +8,25 @@ import type { TimeRange } from "@/types/index";
 import { toast } from "sonner";
 
 export default function AppContent() {
+  const location = useLocation();
   const { setQuery, isInitializing, finishInitializing } = useQuery();
   const { setSelectedDb, setSelectedTable, selectedDb, schema } = useDatabase();
   const { setSelectedTimeField, setTimeRange } = useTime();
 
   const [paramsApplied, setParamsApplied] = useState(false);
 
+  // Don't run AppContent logic on dashboard routes
+  const isDashboardRoute = location.pathname.startsWith('/dashboard');
+
   useEffect(() => {
+    // Skip AppContent logic on dashboard routes
+    if (isDashboardRoute) {
+      if (isInitializing) {
+        finishInitializing();
+      }
+      return;
+    }
+
     // Only run this effect once, and only during initialization
     if (!isInitializing || paramsApplied) {
       return;
@@ -84,6 +97,7 @@ export default function AppContent() {
   }, [
     isInitializing,
     paramsApplied,
+    isDashboardRoute,
     schema,
     selectedDb,
     setQuery,

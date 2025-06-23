@@ -212,6 +212,8 @@ export function QueryProvider({ children }: { children: ReactNode }) {
           (col) => col.columnName === selectedTimeField
         );
         updateSelectedTimeFieldDetails(fieldDetails || null);
+      } else {
+        updateSelectedTimeFieldDetails(null);
       }
     } else {
       updateSelectedTimeFieldDetails(null);

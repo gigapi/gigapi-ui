@@ -11,15 +11,14 @@ import {
 import { toast } from "sonner";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { formatBytes } from "@/lib/";
+import { formatBytes, formatExecutionTime } from "@/lib/utils/formatting";
 import { useQuery } from "@/contexts/QueryContext";
 import { useDatabase } from "@/contexts/DatabaseContext";
 import { useTime } from "@/contexts/TimeContext";
 import GigTable from "@/components/GigTable";
-import GigChart from "@/components/GigChart";
 import Loader from "@/components/Loader";
 import { Button } from "@/components/ui/button";
-import { HashQueryUtils, formatExecutionTime } from "@/lib/";
+import { HashQueryUtils } from "@/lib/";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Tooltip,
@@ -261,12 +260,7 @@ export default function QueryResults() {
             >
               Results
             </TabsTrigger>
-            <TabsTrigger
-              value="chart"
-              className="px-3 py-1 rounded-md text-sm data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=inactive]:text-muted-foreground"
-            >
-              Chart
-            </TabsTrigger>
+
             <TabsTrigger
               value="raw"
               className="px-3 py-1 rounded-md text-sm data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=inactive]:text-muted-foreground"
@@ -302,33 +296,6 @@ export default function QueryResults() {
 
         <TabsContent value="results" className="flex-1 overflow-auto min-h-0">
           {renderResultsContent()}
-        </TabsContent>
-
-        <TabsContent value="chart" className="flex-1 overflow-auto min-h-0">
-          {isLoading ? (
-            <div className="flex flex-col items-center justify-center h-64">
-              <Loader className="h-24 w-24" />
-              <p className="mt-4 text-muted-foreground">Executing query...</p>
-            </div>
-          ) : error ? (
-            <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-              <AlertCircle className="h-12 w-12 mb-4 text-red-500" />
-              <p className="text-lg">Cannot create chart due to query error</p>
-              <p className="text-sm mt-2">Check the Results tab for error details</p>
-            </div>
-          ) : !results || results.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-              <Database className="h-12 w-12 mb-4 opacity-50" />
-              <p className="text-lg">No data available for chart</p>
-              <p className="text-sm mt-2">Execute a query that returns data to create charts</p>
-            </div>
-          ) : (
-            <div className="p-4">
-              <GigChart 
-                data={results}
-              />
-            </div>
-          )}
         </TabsContent>
 
         <TabsContent value="raw" className="flex-1 overflow-auto min-h-0">

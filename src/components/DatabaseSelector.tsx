@@ -67,7 +67,7 @@ export default function DatabaseSelector() {
               aria-expanded={open}
               disabled={isDisabled}
               className={cn(
-                "w-full sm:w-[200px] md:w-[240px] justify-start",
+                "max-w-[240px] truncate justify-start",
                 { "text-destructive border-destructive": connectionError }
               )}
             >

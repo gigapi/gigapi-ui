@@ -1,3 +1,2 @@
-export * from "./chart-analysis";
-export * from "./chart-data-processing";
-export * from "./chart-configuration";
+export * from './echarts-configs';
+export { ChartUtils } from './echarts-configs';

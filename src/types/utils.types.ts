@@ -275,7 +275,7 @@ export const TIME_VARIABLE_PATTERNS = {
   TIME_FIELD: /\$__timeField/g,
   TIME_FROM: /\$__timeFrom/g,
   TIME_TO: /\$__timeTo/g,
-  ALL_TIME_VARS: /\$__(timeFilter|timeField|timeFrom|timeTo)/g,
+  ALL_TIME_VARS: /\$__(timeFilter|timeField|timeFrom|timeTo)/,
 } as const;
 
 export const TIME_PATTERNS = {
