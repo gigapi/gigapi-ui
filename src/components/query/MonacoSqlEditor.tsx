@@ -166,10 +166,7 @@ export default function MonacoSqlEditor({
     monacoRef.current = monacoInstance;
     setIsEditorReady(true);
 
-    // Apply theme
-    editor.updateOptions({
-      theme: theme === "dark" ? "vs-dark" : "vs",
-    });
+    editor.theme = theme === "light" ? "vs-light" : "vs-dark";
 
     // Layout editor
     setTimeout(() => editor.layout(), 0);
@@ -218,7 +215,7 @@ export default function MonacoSqlEditor({
   }, []);
 
   // Determine Monaco theme based on app theme
-  const editorTheme = theme === "dark" ? "vs-dark" : "light";
+  const editorTheme = theme === "light" ? "light" : "vs-dark";
 
   return (
     <div className="h-full w-full border rounded-md overflow-hidden bg-background">

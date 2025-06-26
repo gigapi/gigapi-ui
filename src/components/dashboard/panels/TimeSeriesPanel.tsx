@@ -1,41 +1,51 @@
-import { useMemo, useRef, useEffect } from "react";
+import { useMemo, useRef, useEffect, useCallback } from "react";
 import * as echarts from "echarts";
 import { type PanelProps } from "@/types/dashboard.types";
 import { transformDataForPanel } from "@/lib/dashboard/data-transformers";
 import { withPanelWrapper } from "./BasePanel";
 
-function TimeSeriesPanel({ config, data, isEditMode }: PanelProps) {
+function TimeSeriesPanel({ config, data, isEditMode, onTimeRangeUpdate }: PanelProps) {
   const chartRef = useRef<HTMLDivElement>(null);
   const chartInstance = useRef<echarts.ECharts | null>(null);
 
   const transformedData = useMemo(() => {
-    console.log('TimeSeriesPanel transforming data:', { 
-      dataLength: data?.length || 0, 
-      config: config,
-      sampleData: data?.slice(0, 2) 
-    });
-    
     if (!data || data.length === 0) {
-      console.log('TimeSeriesPanel: No data available');
       return null;
     }
     
-    const transformed = transformDataForPanel(data, config);
-    console.log('TimeSeriesPanel: Transformed data:', {
-      resultLength: transformed?.data?.length || 0,
-      series: transformed?.series || [],
-      sampleTransformed: transformed?.data?.slice(0, 2)
-    });
-    
-    return transformed;
+    return transformDataForPanel(data, config);
   }, [data, config]);
 
   const chartOption = useMemo(() => {
     if (!transformedData || transformedData.data.length === 0) return null;
 
     const { data: chartData, series } = transformedData;
-    const { visualization } = config;
-
+    
+    // Use Grafana-like field configuration
+    const fieldConfig = config.fieldConfig.defaults;
+    const customConfig = fieldConfig.custom;
+    const options = config.options;
+    
+    // Determine chart type from panel type and field config
+    let chartType = 'line';
+    let areaStyle: any = undefined;
+    
+    if (config.type === 'bar' || customConfig?.drawStyle === 'bars') {
+      chartType = 'bar';
+    } else if (config.type === 'scatter' || customConfig?.drawStyle === 'points') {
+      chartType = 'scatter';
+    } else if (config.type === 'area' || (customConfig?.fillOpacity && customConfig.fillOpacity > 0)) {
+      chartType = 'line';
+      areaStyle = { opacity: customConfig?.fillOpacity || 0.1 };
+    }
+    
+    // Colors from field config
+    const colors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
+    
+    // Legend from panel options
+    const showLegend = options?.legend?.showLegend !== false;
+    const legendPlacement = options?.legend?.placement || 'bottom';
+    
     // Group data by series
     const seriesData = new Map<string, Array<[string | number, number]>>();
     
@@ -59,37 +69,18 @@ function TimeSeriesPanel({ config, data, isEditMode }: PanelProps) {
     });
 
     const chartSeries = Array.from(seriesData.entries()).map(([name, data], index) => {
-      // Map panel types to ECharts series types
-      let seriesType: string;
-      switch (config.type) {
-        case 'bar':
-          seriesType = 'bar';
-          break;
-        case 'scatter':
-          seriesType = 'scatter';
-          break;
-        case 'area':
-          seriesType = 'line';
-          break;
-        case 'line':
-        case 'timeseries':
-        default:
-          seriesType = 'line';
-          break;
-      }
-
       return {
         name,
-        type: seriesType,
+        type: chartType,
         data,
-        smooth: config.type === 'line' || config.type === 'timeseries',
-        areaStyle: config.type === 'area' ? {} : undefined,
-        color: visualization.colors?.[index % (visualization.colors?.length || 1)],
+        smooth: customConfig?.lineInterpolation === 'smooth',
+        areaStyle,
+        color: colors[index % colors.length],
         lineStyle: {
-          width: 2,
+          width: customConfig?.lineWidth || 2,
         },
-        symbol: config.type === 'scatter' ? 'circle' : 'none',
-        symbolSize: config.type === 'scatter' ? 6 : 4,
+        symbol: chartType === 'scatter' ? 'circle' : 'none',
+        symbolSize: customConfig?.pointSize || 4,
         emphasis: {
           focus: 'series',
         },
@@ -119,17 +110,31 @@ function TimeSeriesPanel({ config, data, isEditMode }: PanelProps) {
           
           params.forEach((param: any) => {
             const value = param.value[1];
-            const unit = visualization.unit || '';
-            tooltip += `<div>${param.marker} ${param.seriesName}: <strong>${value.toFixed(2)}${unit}</strong></div>`;
+            const unit = fieldConfig.unit || '';
+            const decimals = fieldConfig.decimals ?? 2;
+            
+            // Get field mapping to show proper field names
+            const fieldMapping = config.fieldMapping;
+            const valueFieldName = fieldMapping?.yField || 'value';
+            
+            // Show series name if it's different from the field name (i.e., grouped by location)
+            const displayName = param.seriesName === valueFieldName 
+              ? valueFieldName 
+              : `${valueFieldName} (${param.seriesName})`;
+            
+            tooltip += `<div>${param.marker} ${displayName}: <strong>${value.toFixed(decimals)}${unit}</strong></div>`;
           });
           
           return tooltip;
         }
       },
       legend: {
-        show: visualization.showLegend !== false && series.length > 1,
+        show: showLegend && series.length > 1,
         type: 'scroll',
-        bottom: 0,
+        orient: legendPlacement === 'right' ? 'vertical' : 'horizontal',
+        bottom: legendPlacement === 'bottom' ? 0 : undefined,
+        right: legendPlacement === 'right' ? 0 : undefined,
+        top: legendPlacement === 'top' ? 0 : undefined,
         textStyle: {
           fontSize: 12,
         },
@@ -137,14 +142,14 @@ function TimeSeriesPanel({ config, data, isEditMode }: PanelProps) {
       grid: {
         left: '3%',
         right: '4%',
-        bottom: visualization.showLegend !== false && series.length > 1 ? '15%' : '3%',
+        bottom: showLegend && series.length > 1 ? '15%' : '3%',
         top: '10%',
         containLabel: true
       },
       xAxis: {
         type: isTimeData && config.type !== 'bar' ? 'time' : 'category',
         boundaryGap: config.type === 'bar',
-        name: visualization.xAxisLabel,
+        name: customConfig?.axisLabel || '',
         nameLocation: 'middle',
         nameGap: 25,
         axisLabel: {
@@ -156,25 +161,65 @@ function TimeSeriesPanel({ config, data, isEditMode }: PanelProps) {
       },
       yAxis: {
         type: 'value',
-        name: visualization.yAxisLabel,
+        name: customConfig?.axisLabel || '',
         nameLocation: 'middle',
         nameGap: 40,
+        min: fieldConfig.min,
+        max: fieldConfig.max,
         axisLabel: {
           fontSize: 11,
           formatter: (value: number) => {
-            const unit = visualization.unit || '';
+            const unit = fieldConfig.unit || '';
+            const decimals = fieldConfig.decimals ?? 1;
+            
             if (Math.abs(value) >= 1000000) {
-              return (value / 1000000).toFixed(1) + 'M' + unit;
+              return (value / 1000000).toFixed(decimals) + 'M' + unit;
             } else if (Math.abs(value) >= 1000) {
-              return (value / 1000).toFixed(1) + 'K' + unit;
+              return (value / 1000).toFixed(decimals) + 'K' + unit;
             }
-            return value.toFixed(1) + unit;
+            return value.toFixed(decimals) + unit;
           }
         },
       },
       series: chartSeries,
-      animation: !isEditMode, // Disable animation in edit mode for better performance
-      animationDuration: 300,
+      animation: false,
+      animationDuration: 0,
+      // Time range selection for time series
+      brush: isTimeData && !isEditMode ? {
+        brushMode: 'lineX',
+        xAxisIndex: 0,
+        brushStyle: {
+          borderWidth: 1,
+          color: 'rgba(59, 130, 246, 0.1)',
+          borderColor: 'rgba(59, 130, 246, 0.4)'
+        },
+        removeOnClick: true
+      } : undefined,
+      toolbox: isTimeData && !isEditMode ? {
+        show: true,
+        right: '10',
+        top: '10',
+        itemSize: 12,
+        feature: {
+          brush: {
+            type: ['lineX'],
+            title: {
+              lineX: 'Select time range'
+            }
+          }
+        },
+        iconStyle: {
+          borderColor: '#666'
+        }
+      } : undefined,
+      dataZoom: isTimeData ? [
+        {
+          type: 'inside',
+          xAxisIndex: 0,
+          filterMode: 'filter',
+          disabled: isEditMode
+        }
+      ] : undefined,
     };
   }, [transformedData, config, isEditMode]);
 
@@ -213,6 +258,46 @@ function TimeSeriesPanel({ config, data, isEditMode }: PanelProps) {
       resizeObserver.disconnect();
     };
   }, []);
+
+  // Brush selection handler for time range updates
+  const handleBrushEnd = useCallback((params: any) => {
+    if (!onTimeRangeUpdate || !params.areas || params.areas.length === 0) return;
+    
+    const brushArea = params.areas[0];
+    if (!brushArea || !brushArea.coordRange) return;
+    
+    const [startTime, endTime] = brushArea.coordRange;
+    
+    // Convert timestamps to TimeRange format
+    const timeRange = {
+      type: 'absolute' as const,
+      from: new Date(startTime),
+      to: new Date(endTime)
+    };
+    
+    onTimeRangeUpdate(timeRange);
+    
+    // Clear the brush area after selection
+    if (chartInstance.current) {
+      chartInstance.current.dispatchAction({
+        type: 'brush',
+        areas: []
+      });
+    }
+  }, [onTimeRangeUpdate]);
+
+  // Add event listeners
+  useEffect(() => {
+    if (!chartInstance.current || !onTimeRangeUpdate || isEditMode) return;
+    
+    chartInstance.current.on('brushEnd', handleBrushEnd);
+    
+    return () => {
+      if (chartInstance.current) {
+        chartInstance.current.off('brushEnd', handleBrushEnd);
+      }
+    };
+  }, [handleBrushEnd, onTimeRangeUpdate, isEditMode]);
 
   if (!transformedData || transformedData.data.length === 0) {
     return (

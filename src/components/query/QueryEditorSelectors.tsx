@@ -10,6 +10,35 @@ import { Badge } from "@/components/ui/badge";
 import TableSelector from "@/components/TableSelector";
 import TimeRangeSelector from "@/components/TimeRangeSelector";
 import type { TimeRange, ColumnSchema } from "@/types/utils.types";
+import type { TimeRange as DashboardTimeRange } from "@/types/dashboard.types";
+
+// Type guard to check if it's a query TimeRange
+function isQueryTimeRange(timeRange: any): timeRange is TimeRange {
+  return typeof timeRange.from === 'string' && typeof timeRange.to === 'string';
+}
+
+// Convert TimeRangeUnion to TimeRange for the callback
+function convertToQueryTimeRange(range: TimeRange | DashboardTimeRange): TimeRange {
+  if (isQueryTimeRange(range)) {
+    return range;
+  }
+  
+  // Convert DashboardTimeRange to TimeRange
+  if (range.type === 'relative') {
+    return {
+      from: range.from,
+      to: range.to,
+      enabled: true,
+    };
+  } else {
+    // AbsoluteTimeRange
+    return {
+      from: range.from.toISOString(),
+      to: range.to.toISOString(),
+      enabled: true,
+    };
+  }
+}
 
 interface QueryEditorSelectorsProps {
   selectedDb?: string;
@@ -43,6 +72,13 @@ export default function QueryEditorSelectors({
       onTimeFieldChange(value);
     },
     [onTimeFieldChange]
+  );
+  
+  const handleTimeRangeChange = useCallback(
+    (range: TimeRange | DashboardTimeRange) => {
+      onTimeRangeChange(convertToQueryTimeRange(range));
+    },
+    [onTimeRangeChange]
   );
 
   // Add a component to render the type badge
@@ -132,7 +168,7 @@ export default function QueryEditorSelectors({
           <div className="flex items-center gap-1.5 ml-2">
             <TimeRangeSelector
               timeRange={timeRange}
-              onTimeRangeChange={onTimeRangeChange}
+              onTimeRangeChange={handleTimeRangeChange}
               fieldName={selectedTimeField}
               tableName={selectedTable}
             />
@@ -212,7 +248,7 @@ export default function QueryEditorSelectors({
           <div className="flex items-center gap-1.5">
             <TimeRangeSelector
               timeRange={timeRange}
-              onTimeRangeChange={onTimeRangeChange}
+              onTimeRangeChange={handleTimeRangeChange}
               fieldName={selectedTimeField}
               tableName={selectedTable}
             />

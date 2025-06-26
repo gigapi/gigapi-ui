@@ -21,6 +21,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import Logo from "/logo.svg";
 
 const SIDEBAR_COOKIE_NAME = "sidebar_state";
 const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7;
@@ -273,7 +274,7 @@ function SidebarTrigger({
             }}
             {...props}
           >
-            <img src={"./logo.svg"} />
+            <img src={Logo} />
             <span className="sr-only">Toggle Sidebar</span>
           </Button>
         </TooltipTrigger>

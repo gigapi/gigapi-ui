@@ -102,9 +102,9 @@ export default function DashboardGrid({ className, onEditPanel }: DashboardGridP
         {currentDashboard.layout.panels.length === 0 ? (
           <div className="flex-1 flex items-center justify-center min-h-[400px] border-2 border-dashed border-muted-foreground/25 rounded-lg">
             <div className="text-center">
-              <h3 className="text-lg font-semibold mb-2">No Panels</h3>
+              <h3 className="text-lg font-semibold mb-2">Nothing to show...</h3>
               <p className="text-muted-foreground mb-4">
-                Add panels to start visualizing your data
+                Start by adding panels to your dashboard! <br /> Edit Mode - 'Add Panel'
               </p>
             </div>
           </div>

@@ -10,12 +10,28 @@ function GaugePanel({ config, data, isEditMode }: PanelProps) {
   const gaugeData = useMemo(() => {
     if (!data || data.length === 0) return null;
     
-    const { dataMapping, visualization } = config;
+    // Use field mapping if available
+    const fieldMapping = config.fieldMapping;
+    let valueField: string;
+    
+    if (fieldMapping?.yField) {
+      valueField = fieldMapping.yField;
+    } else {
+      // Auto-detect numeric field
+      const firstRecord = data[0];
+      const numericFields = Object.keys(firstRecord).filter(key => {
+        const value = firstRecord[key];
+        return typeof value === 'number' || (typeof value === 'string' && !isNaN(Number(value)));
+      });
+      
+      if (numericFields.length === 0) return null;
+      valueField = numericFields[0];
+    }
     
     // Get the latest value
     let currentValue: number | null = null;
     for (let i = data.length - 1; i >= 0; i--) {
-      const value = parseFloat(String(data[i][dataMapping.valueColumn]));
+      const value = parseFloat(String(data[i][valueField]));
       if (!isNaN(value)) {
         currentValue = value;
         break;
@@ -24,26 +40,22 @@ function GaugePanel({ config, data, isEditMode }: PanelProps) {
 
     if (currentValue === null) return null;
 
-    const min = visualization.min ?? 0;
-    const max = visualization.max ?? 100;
-    const unit = visualization.unit || '';
+    // Use Grafana-like field configuration
+    const fieldConfig = config.fieldConfig?.defaults || {};
+    const min = fieldConfig.min ?? 0;
+    const max = fieldConfig.max ?? 100;
+    const unit = fieldConfig.unit || '';
 
-    // Calculate threshold zones
+    // Calculate threshold zones from field config
     const zones = [];
-    if (visualization.threshold) {
-      const thresholdValue = visualization.threshold.value;
-      const thresholdColor = visualization.threshold.color || '#ff6b6b';
-      
-      if (visualization.threshold.operator === 'gt') {
-        zones.push(
-          { min, max: thresholdValue, color: '#52c41a' },
-          { min: thresholdValue, max, color: thresholdColor }
-        );
-      } else if (visualization.threshold.operator === 'lt') {
-        zones.push(
-          { min, max: thresholdValue, color: thresholdColor },
-          { min: thresholdValue, max, color: '#52c41a' }
-        );
+    if (fieldConfig.thresholds?.steps) {
+      const steps = fieldConfig.thresholds.steps;
+      for (let i = 0; i < steps.length - 1; i++) {
+        zones.push({
+          min: steps[i].value,
+          max: steps[i + 1].value,
+          color: steps[i].color || '#52c41a'
+        });
       }
     }
 
@@ -78,7 +90,7 @@ function GaugePanel({ config, data, isEditMode }: PanelProps) {
             lineStyle: {
               width: 6,
               color: zones.length > 0 
-                ? zones.map(zone => [zone.max / max, zone.color])
+                ? zones.map(zone => [(zone.max || max) / max, zone.color])
                 : [[1, '#52c41a']]
             }
           },

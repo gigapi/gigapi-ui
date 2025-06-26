@@ -11,10 +11,12 @@ import {
 } from "@/components/ui/breadcrumb";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Globe, Edit, Save, X, Database } from "lucide-react";
+import { Globe, Edit, Save, X, Database, Search } from "lucide-react";
 import { useConnection } from "@/contexts/ConnectionContext";
 import DatabaseSelector from "@/components/DatabaseSelector";
 import { toast } from "sonner";
+import { useCommandPalette } from "@/contexts/CommandPaletteContext";
+
 import {
   Popover,
   PopoverContent,
@@ -35,11 +37,12 @@ interface AppHeaderProps {
 export default function AppHeader({ 
   breadcrumbs, 
   actions, 
-  showDatabaseControls = true 
+  showDatabaseControls = true
 }: AppHeaderProps) {
   const { apiUrl, setApiUrl } = useConnection();
   const [isEndpointEditing, setIsEndpointEditing] = useState(false);
   const [tempApiUrl, setTempApiUrl] = useState(apiUrl);
+  const { setOpen } = useCommandPalette();
 
   // Update temp URL when apiUrl changes
   useEffect(() => {
@@ -103,6 +106,30 @@ export default function AppHeader({
 
       {/* Right side controls */}
       <div className="ml-auto flex items-center gap-3">
+        {/* Search Command Palette */}
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setOpen(true)}
+          className="hidden sm:flex items-center gap-2 text-muted-foreground"
+        >
+          <Search className="h-4 w-4" />
+          <span className="hidden md:inline">Search commands...</span>
+          <div className="hidden md:flex text-xs bg-muted px-1.5 py-0.5 rounded border">
+            ⌘K
+          </div>
+        </Button>
+
+        {/* Mobile Search Button */}
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setOpen(true)}
+          className="sm:hidden"
+        >
+          <Search className="h-4 w-4" />
+        </Button>
+
         {/* Page-specific actions */}
         {actions}
 

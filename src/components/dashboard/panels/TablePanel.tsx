@@ -26,29 +26,21 @@ import {
   ChevronLeft,
   ChevronRight,
 } from "lucide-react";
-// import { cn } from "@/lib/utils/class-utils"; // Reserved for future use
 
 type SortDirection = 'asc' | 'desc' | null;
 
-function TablePanel({ config, data }: PanelProps) {
-  const [sortColumn, setSortColumn] = useState<string | null>(
-    config.visualization.sortColumn || null
-  );
-  const [sortDirection, setSortDirection] = useState<SortDirection>(
-    (config.visualization.sortDirection as SortDirection) || null
-  );
+function TablePanel({ data }: PanelProps) {
+  const [sortColumn, setSortColumn] = useState<string | null>(null);
+  const [sortDirection, setSortDirection] = useState<SortDirection>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(
-    config.visualization.pageSize || 10
-  );
+  const [pageSize, setPageSize] = useState(10);
 
   const processedData = useMemo(() => {
     if (!data || data.length === 0) return { rows: [], columns: [], totalCount: 0 };
 
-    // Determine columns to display
-    const displayColumns = config.dataMapping.displayColumns || 
-      Object.keys(data[0] || {}).filter(key => !key.startsWith('_'));
+    // Determine columns to display - show all columns except internal ones
+    const displayColumns = Object.keys(data[0] || {}).filter(key => !key.startsWith('_'));
 
     let rows = [...data];
 
@@ -101,7 +93,7 @@ function TablePanel({ config, data }: PanelProps) {
       columns: displayColumns,
       totalCount,
     };
-  }, [data, config.dataMapping.displayColumns, searchTerm, sortColumn, sortDirection, currentPage, pageSize]);
+  }, [data, searchTerm, sortColumn, sortDirection, currentPage, pageSize]);
 
   const totalPages = Math.ceil(processedData.totalCount / pageSize);
 

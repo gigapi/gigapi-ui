@@ -27,16 +27,8 @@ import {
 } from "@tanstack/react-table";
 
 import { useDashboardStorage } from "@/lib/dashboard/storage";
-import type { Dashboard, DashboardListItem } from "@/types/dashboard.types";
+import type { DashboardListItem } from "@/types/dashboard.types";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -50,6 +42,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import ConfirmAction from "@/components/ConfirmAction";
 import Loader from "@/components/Loader";
+import CreateDashboardSheet from "@/components/CreateDashboardSheet";
 import {
   Table,
   TableBody,
@@ -73,12 +66,7 @@ const formatDateTime = (date: Date | string) => {
 export default function DashboardList() {
   const [dashboards, setDashboards] = useState<DashboardListItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
-  const [newDashboard, setNewDashboard] = useState({
-    name: "",
-    description: "",
-    tags: "",
-  });
+  const [isCreateSheetOpen, setIsCreateSheetOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<{
     isOpen: boolean;
     dashboard: DashboardListItem | null;
@@ -110,57 +98,10 @@ export default function DashboardList() {
     loadDashboards();
   }, [loadDashboards]);
 
-  const handleCreateDashboard = useCallback(async () => {
-    if (!newDashboard.name.trim()) {
-      toast.error("Dashboard name is required");
-      return;
-    }
-    try {
-      const dashboardData: Omit<Dashboard, "id" | "metadata" | "layout"> & {
-        layout?: Partial<Dashboard["layout"]>;
-      } = {
-        name: newDashboard.name.trim(),
-        description: newDashboard.description.trim() || undefined,
-        timeRange: { type: "relative", from: "1h", to: "now" },
-        timeZone: "UTC",
-        refreshInterval: 30,
-      };
-
-      const newFullDashboard: Dashboard = {
-        id: crypto.randomUUID(),
-        ...dashboardData,
-        layout: {
-          panels: [],
-          gridSettings: {
-            columns: 12,
-            rowHeight: 30,
-            margin: [10, 10],
-          },
-          ...(dashboardData.layout || {}),
-        },
-        metadata: {
-          createdAt: new Date(),
-          updatedAt: new Date(),
-          tags: newDashboard.tags
-            ? newDashboard.tags
-                .split(",")
-                .map((tag) => tag.trim())
-                .filter(Boolean)
-            : [],
-        },
-      };
-
-      await storage.saveDashboard(newFullDashboard);
-      await loadDashboards();
-      setIsCreateDialogOpen(false);
-      setNewDashboard({ name: "", description: "", tags: "" });
-      toast.success("Dashboard created successfully");
-      navigate(`/dashboard/${newFullDashboard.id}`);
-    } catch (error) {
-      toast.error("Failed to create dashboard");
-      console.error("Error creating dashboard:", error);
-    }
-  }, [newDashboard, storage, loadDashboards, navigate]);
+  const handleDashboardCreated = useCallback((dashboardId: string) => {
+    loadDashboards(); // Refresh the list
+    navigate(`/dashboard/${dashboardId}`);
+  }, [loadDashboards, navigate]);
 
   const handleDeleteDashboard = useCallback(
     async (dashboard: DashboardListItem) => {
@@ -352,7 +293,7 @@ export default function DashboardList() {
   ];
 
   const headerActions = (
-    <Button onClick={() => setIsCreateDialogOpen(true)}>
+    <Button onClick={() => setIsCreateSheetOpen(true)}>
       <Plus className="mr-2 h-4 w-4" /> Create Dashboard
     </Button>
   );
@@ -464,7 +405,7 @@ export default function DashboardList() {
                             : "Get started by creating a new dashboard."}
                         </p>
                         {!globalFilter && (
-                           <Button onClick={() => setIsCreateDialogOpen(true)}>
+                           <Button onClick={() => setIsCreateSheetOpen(true)}>
                              <Plus className="mr-2 h-4 w-4" /> Create Dashboard
                            </Button>
                         )}
@@ -502,79 +443,12 @@ export default function DashboardList() {
         </div>
       </div>
 
-      {/* Create Dashboard Dialog */}
-      <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
-        <DialogContent className="sm:max-w-[480px]">
-          <DialogHeader>
-            <DialogTitle>Create New Dashboard</DialogTitle>
-            <DialogDescription>
-              Enter the details for your new dashboard. Click create when you're
-              done.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-4 py-4">
-            <div className="grid grid-cols-4 items-center gap-4">
-              <label htmlFor="name" className="text-right text-sm">
-                Name
-              </label>
-              <Input
-                id="name"
-                value={newDashboard.name}
-                onChange={(e) =>
-                  setNewDashboard({ ...newDashboard, name: e.target.value })
-                }
-                className="col-span-3"
-                placeholder="e.g., My Awesome Dashboard"
-                autoFocus
-              />
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <label htmlFor="description" className="text-right text-sm">
-                Description
-              </label>
-              <Input
-                id="description"
-                value={newDashboard.description}
-                onChange={(e) =>
-                  setNewDashboard({ ...newDashboard, description: e.target.value })
-                }
-                className="col-span-3"
-                placeholder="(Optional)"
-              />
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <label htmlFor="tags" className="text-right text-sm">
-                Tags
-              </label>
-              <Input
-                id="tags"
-                value={newDashboard.tags}
-                onChange={(e) =>
-                  setNewDashboard({ ...newDashboard, tags: e.target.value })
-                }
-                className="col-span-3"
-                placeholder="e.g., sales,marketing (comma-separated)"
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setIsCreateDialogOpen(false)}
-            >
-              Cancel
-            </Button>
-            <Button
-              type="submit"
-              onClick={handleCreateDashboard}
-              disabled={!newDashboard.name.trim()}
-            >
-              Create Dashboard
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* Create Dashboard Sheet */}
+      <CreateDashboardSheet
+        isOpen={isCreateSheetOpen}
+        onOpenChange={setIsCreateSheetOpen}
+        onDashboardCreated={handleDashboardCreated}
+      />
 
       {/* Delete Confirmation Dialog */}
       <ConfirmAction

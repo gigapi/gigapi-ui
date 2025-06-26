@@ -12,6 +12,8 @@ import Home from "@/pages/Home";
 import DashboardList from "@/pages/DashboardList";
 import DashboardView from "@/pages/DashboardView";
 import PanelEdit from "@/pages/PanelEdit";
+import { CommandPalette } from "@/components/CommandPalette";
+import { CommandPaletteProvider, useCommandPalette } from "@/contexts/CommandPaletteContext";
 
 // Route wrapper for PanelEdit
 function PanelEditRoute() {
@@ -129,6 +131,41 @@ const setupGlobalErrorHandlers = () => {
   });
 };
 
+function AppWithCommandPalette() {
+  const commandPalette = useCommandPalette();
+
+  return (
+    <Router>
+      <SidebarProvider
+        style={{
+          "--sidebar-width": "17rem",
+        } as React.CSSProperties}
+      >
+        <AppSidebar />
+        <SidebarInset>
+          <AppContent /> {/* AppContent for side-effects only */}
+          <DashboardProvider> {/* Wrap Routes with DashboardProvider */}
+            <Routes>
+              <Route path="/" element={<Home />} />
+              <Route path="/dashboards" element={<DashboardList />} />
+              <Route path="/dashboard/:dashboardId" element={<DashboardView />} />
+              <Route
+                path="/dashboard/:dashboardId/panel/:panelId/edit"
+                element={<PanelEditRoute />}
+              />
+               <Route
+                path="/dashboard/:dashboardId/panel/new"
+                element={<PanelEditRoute />}
+              />
+            </Routes>
+            <CommandPalette open={commandPalette.open} onOpenChange={commandPalette.onOpenChange} />
+          </DashboardProvider>
+        </SidebarInset>
+      </SidebarProvider>
+    </Router>
+  );
+}
+
 function AppInternal() {
   const { connectionState } = useConnection();
 
@@ -161,33 +198,9 @@ function AppInternal() {
   return (
     <ErrorBoundary>
       <ThemeProvider defaultTheme="dark" storageKey="gigapi-theme">
-        <Router>
-          <SidebarProvider
-            style={{
-              "--sidebar-width": "17rem",
-            } as React.CSSProperties}
-          >
-            <AppSidebar />
-            <SidebarInset>
-              <AppContent /> {/* AppContent for side-effects only */}
-              <DashboardProvider> {/* Wrap Routes with DashboardProvider */}
-                <Routes>
-                  <Route path="/" element={<Home />} />
-                  <Route path="/dashboards" element={<DashboardList />} />
-                  <Route path="/dashboard/:dashboardId" element={<DashboardView />} />
-                  <Route
-                    path="/dashboard/:dashboardId/panel/:panelId/edit"
-                    element={<PanelEditRoute />}
-                  />
-                   <Route
-                    path="/dashboard/:dashboardId/panel/new"
-                    element={<PanelEditRoute />}
-                  />
-                </Routes>
-              </DashboardProvider>
-            </SidebarInset>
-          </SidebarProvider>
-        </Router>
+        <CommandPaletteProvider>
+          <AppWithCommandPalette />
+        </CommandPaletteProvider>
         <Toaster position="bottom-right" richColors expand />
       </ThemeProvider>
     </ErrorBoundary>

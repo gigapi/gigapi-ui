@@ -71,6 +71,7 @@ export default function DashboardPanel({
     refreshPanelData,
     deletePanel,
     duplicatePanel,
+    updateDashboardTimeRange,
   } = useDashboard();
 
   const currentPanelId = panelId || config.id; 
@@ -232,41 +233,10 @@ export default function DashboardPanel({
             data={data}
             timeZone={timeZone}
             isEditMode={isEditMode} // Pass isEditMode to the panel component
+            onTimeRangeUpdate={updateDashboardTimeRange} // Pass time range update callback
           />
         )}
       </CardContent>
     </Card>
   );
 }
-
-// Need to get currentDashboard to pass timeZone to PanelDisplayComponent.
-// This requires either lifting state or passing currentDashboard down.
-// For now, I'll add a placeholder. This should be addressed.
-// A quick fix is to add timeZone to PanelConfig or fetch it within PanelDisplayComponent if possible.
-// Or, more robustly, DashboardContext could provide it if it's truly global.
-// For now, let's assume PanelProps expects timeZone and add it from a (mocked) source.
-// This will likely need further refinement.
-
-// Re-checking PanelProps definition from types/dashboard.types.ts
-// export interface PanelProps {
-//   panel: PanelConfig;
-//   data: NDJSONRecord[];
-//   timeZone: string;
-// }
-// So, timeZone is indeed required.
-// We need to get currentDashboard in DashboardPanel to pass the timeZone.
-// Let's modify useDashboard() call to get currentDashboard.
-
-// Corrected approach: Add currentDashboard from useDashboard
-// ...
-// const {
-//   currentDashboard, // Add this
-//   refreshPanelData,
-//   deletePanel,
-//   duplicatePanel,
-// } = useDashboard();
-// ...
-// Then use currentDashboard.timeZone
-// This was already done in the previous thought process but not explicitly added to the code block.
-// The code block above already includes this logic by adding `timeZone={currentDashboard?.timeZone || "UTC"}`
-// The main fix is the check for `!PanelDisplayComponent`.

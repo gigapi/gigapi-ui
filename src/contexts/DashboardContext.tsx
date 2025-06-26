@@ -4,6 +4,7 @@ import {
   useCallback,
   useEffect,
   useState,
+  useMemo,
 } from "react";
 import { v4 as uuidv4 } from "uuid";
 import {
@@ -12,11 +13,10 @@ import {
   type PanelData,
   type PanelLayout,
   type DashboardContextType,
-  type NDJSONRecord,
   type TimeRange,
 } from "@/types/dashboard.types";
 import { dashboardStorage } from "@/lib/dashboard/storage";
-import { processDashboardQueryWithTime } from "@/lib/dashboard/query-processing";
+import QueryProcessor, { DataTransformer } from "@/lib/query-processor";
 import { useDashboardQuery } from "@/hooks/useDashboardQuery";
 import { toast } from "sonner";
 
@@ -26,9 +26,16 @@ const DashboardContext = createContext<DashboardContextType | null>(null);
 export function useDashboard() {
   const context = useContext(DashboardContext);
   if (!context) {
+    console.error("useDashboard called outside of DashboardProvider");
     throw new Error("useDashboard must be used within a DashboardProvider");
   }
   return context;
+}
+
+// Add a hook to safely check if dashboard context is available
+export function useDashboardSafely() {
+  const context = useContext(DashboardContext);
+  return context; // Returns null if not in provider
 }
 
 interface DashboardProviderProps {
@@ -51,6 +58,7 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
   const [isConfigSidebarOpen, setIsConfigSidebarOpen] = useState(false);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [originalTimeRange, setOriginalTimeRange] = useState<TimeRange | null>(null);
 
   const { executeQuery: executeDashboardQuery } = useDashboardQuery();
 
@@ -80,6 +88,13 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
       const newDashboard: Dashboard = {
         ...dashboardData,
         id: uuidv4(),
+        // Ensure dashboard has a default time range if not provided
+        timeRange: dashboardData.timeRange || {
+          type: "relative" as const,
+          from: "1h",
+          to: "now" as const,
+        },
+        timeZone: dashboardData.timeZone || "UTC",
         metadata: {
           createdAt: new Date(),
           updatedAt: new Date(),
@@ -187,7 +202,25 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
         throw new Error(errMsg);
       }
 
-      setCurrentDashboard(dashboard);
+      // Ensure loaded dashboard has time range and timezone
+      const dashboardWithDefaults = {
+        ...dashboard,
+        timeRange: dashboard.timeRange || {
+          type: "relative" as const,
+          from: "1h",
+          to: "now" as const,
+        },
+        timeZone: dashboard.timeZone || "UTC",
+      };
+      
+      // Save with defaults if they were missing
+      if (!dashboard.timeRange || !dashboard.timeZone) {
+        await dashboardStorage.saveDashboard(dashboardWithDefaults);
+      }
+      
+      setCurrentDashboard(dashboardWithDefaults);
+      // Set original time range for reset functionality
+      setOriginalTimeRange(dashboardWithDefaults.timeRange);
       const panelsArray = await dashboardStorage.getPanelsForDashboard(id);
       const panelsMap = new Map<string, PanelConfig>();
       panelsArray.forEach((panel) => panelsMap.set(panel.id, panel));
@@ -350,9 +383,15 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
         type: existingPanel.type,
         title: `${existingPanel.title} (Copy)`,
         query: existingPanel.query,
-        dataMapping: existingPanel.dataMapping,
-        visualization: existingPanel.visualization,
-        timeOverride: existingPanel.timeOverride, // Added timeOverride
+        fieldConfig: existingPanel.fieldConfig,
+        options: existingPanel.options,
+        database: existingPanel.database,
+        gridPos: existingPanel.gridPos,
+        maxDataPoints: existingPanel.maxDataPoints,
+        intervalMs: existingPanel.intervalMs,
+        timeOverride: existingPanel.timeOverride,
+        useParentTimeFilter: existingPanel.useParentTimeFilter,
+        links: existingPanel.links,
       };
 
       return await addPanel(duplicatedPanel);
@@ -379,6 +418,98 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
   // --- Data Operations ---
 
   /**
+   * Fetches and updates the data for a single panel with a specific time range.
+   * @param panelId - The ID of the panel to refresh.
+   * @param overrideTimeRange - Time range to use instead of dashboard's current time range.
+   */
+  const refreshPanelDataWithTimeRange = useCallback(
+    async (panelId: string, overrideTimeRange: TimeRange) => {
+      const panel = panels.get(panelId);
+      if (!panel || !panel.query?.trim()) return;
+
+      // Use panel's database or fall back to a default
+      const panelDatabase = panel.database;
+      if (!panelDatabase) {
+        console.warn(`Panel ${panelId} has no database specified, skipping query execution`);
+        return;
+      }
+
+      try {
+        // Determine effective time range based on panel settings
+        const timeRange = panel.useParentTimeFilter 
+          ? overrideTimeRange 
+          : (panel.timeOverride || overrideTimeRange);
+        const timeZone = currentDashboard?.timeZone || "UTC";
+        
+        console.log(`Processing panel ${panelId} with OVERRIDE timeRange:`, {
+          query: panel.query,
+          timeRange,
+          timeZone,
+          database: panelDatabase
+        });
+        
+        // Use simplified query processor
+        const processedResult = QueryProcessor.process({
+          database: panelDatabase,
+          query: panel.query,
+          timeRange,
+          timeZone,
+          maxDataPoints: panel.maxDataPoints || 1000
+        });
+        
+        const processedQuery = processedResult.query;
+        
+        console.log(`Processed query for panel ${panelId}:`, processedQuery);
+        console.log(`Original query had $__timeFilter:`, panel.query.includes('$__timeFilter'));
+        console.log(`Processed query has $__timeFilter:`, processedQuery.includes('$__timeFilter'));
+        
+        // Execute the query with the panel's specific database
+        const result = await executeDashboardQuery(processedQuery, panelDatabase);
+        
+        if (result.error) {
+          console.error(`Query error for panel ${panelId}:`, result.error);
+          throw new Error(result.error);
+        }
+
+        console.log(`Query result for panel ${panelId}:`, result);
+
+        // Use unified NDJSON parsing utility
+        const { records, errors } = DataTransformer.parseNDJSON(result.data || '');
+        if (errors.length > 0) {
+          console.warn(`NDJSON parsing errors for panel ${panelId}:`, errors);
+        }
+
+        setPanelData(
+          (prev) =>
+            new Map(
+              prev.set(panelId, {
+                panelId,
+                data: records,
+                lastUpdated: new Date(),
+              })
+            )
+        );
+      } catch (error) {
+        const errorMessage =
+          error instanceof Error ? error.message : "Unknown error";
+        console.error(`Failed to refresh panel ${panelId}:`, error);
+        setPanelData(
+          (prev) =>
+            new Map(
+              prev.set(panelId, {
+                panelId,
+                data: [],
+                lastUpdated: new Date(),
+                error: errorMessage,
+              })
+            )
+        );
+      }
+    },
+    [panels, executeDashboardQuery, currentDashboard]
+  );
+
+  /**
    * Fetches and updates the data for a single panel.
    * @param panelId - The ID of the panel to refresh.
    */
@@ -395,28 +526,37 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
       }
 
       try {
-        // Process the query with dashboard time filter
-        const timeRange = panel.timeOverride || currentDashboard?.timeRange || {
-          type: "relative" as const,
-          from: "1h",
-          to: "now" as const
-        };
+        // Determine effective time range based on panel settings
+        const timeRange = panel.useParentTimeFilter 
+          ? (currentDashboard?.timeRange || {
+              type: "relative" as const,
+              from: "1h", 
+              to: "now" as const
+            })
+          : (panel.timeOverride || currentDashboard?.timeRange || {
+              type: "relative" as const,
+              from: "1h",
+              to: "now" as const
+            });
         const timeZone = currentDashboard?.timeZone || "UTC";
-        const timeColumn = panel.dataMapping?.timeColumn || "timestamp";
         
-        console.log(`Processing panel ${panelId} with timeColumn: ${timeColumn}`, {
+        console.log(`Processing panel ${panelId}:`, {
           query: panel.query,
           timeRange,
           timeZone,
           database: panelDatabase
         });
         
-        const processedQuery = processDashboardQueryWithTime(
-          panel.query,
+        // Use simplified query processor
+        const processedResult = QueryProcessor.process({
+          database: panelDatabase,
+          query: panel.query,
           timeRange,
           timeZone,
-          timeColumn
-        );
+          maxDataPoints: panel.maxDataPoints || 1000
+        });
+        
+        const processedQuery = processedResult.query;
         
         console.log(`Processed query for panel ${panelId}:`, processedQuery);
         
@@ -430,23 +570,10 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
 
         console.log(`Query result for panel ${panelId}:`, result);
 
-        const records: NDJSONRecord[] = [];
-        if (result.data && typeof result.data === "string") {
-          result.data
-            .trim()
-            .split("\n")
-            .forEach((line) => {
-              if (line.trim()) {
-                try {
-                  records.push(JSON.parse(line));
-                } catch (e) {
-                  console.warn(
-                    `Failed to parse NDJSON line for panel ${panelId}:`,
-                    line
-                  );
-                }
-              }
-            });
+        // Use unified NDJSON parsing utility
+        const { records, errors } = DataTransformer.parseNDJSON(result.data || '');
+        if (errors.length > 0) {
+          console.warn(`NDJSON parsing errors for panel ${panelId}:`, errors);
         }
 
         setPanelData(
@@ -483,11 +610,20 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
    * Refreshes the data for all panels on the current dashboard.
    */
   const refreshAllPanels = useCallback(async () => {
-    // Refresh panels sequentially to avoid race conditions with the shared QueryContext state.
-    for (const panelId of panels.keys()) {
-      await refreshPanelData(panelId);
+    try {
+      // Refresh panels in parallel for much better performance
+      const panelIds = Array.from(panels.keys());
+      if (panelIds.length === 0) return;
+      
+      console.log(`Refreshing ${panelIds.length} panels in parallel`);
+      await Promise.all(panelIds.map(panelId => refreshPanelData(panelId)));
+      
+      toast.success("All panels refreshed");
+    } catch (error) {
+      console.error("Failed to refresh all panels:", error);
+      toast.error("Failed to refresh panels");
+      throw error;
     }
-    toast.success("All panels refreshed");
   }, [panels, refreshPanelData]);
 
   // --- UI Operations ---
@@ -533,18 +669,19 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
     if (panels.size > 0) {
       const timer = setTimeout(async () => {
         const panelsToRefresh = Array.from(panels.values()).filter(
-          (p) => p.query && !panelData.has(p.id)
+          (p) => p.query && p.database && !panelData.has(p.id) // Only include panels with database configured
         );
 
-        // Refresh panels sequentially to avoid query conflicts.
-        for (const panel of panelsToRefresh) {
-          await refreshPanelData(panel.id);
+        if (panelsToRefresh.length > 0) {
+          console.log(`Auto-executing queries for ${panelsToRefresh.length} panels`);
+          // Refresh panels in parallel for better performance
+          await Promise.all(panelsToRefresh.map(panel => refreshPanelData(panel.id)));
         }
       }, 200);
 
       return () => clearTimeout(timer);
     }
-  }, [panels, panelData, refreshPanelData]);
+  }, [panels, refreshPanelData]); // Removed panelData dependency to prevent infinite loops
 
   // --- Time Filter Operations ---
 
@@ -552,16 +689,36 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
     if (!currentDashboard) return;
 
     const updatedDashboard = { ...currentDashboard, timeRange };
-    setCurrentDashboard(updatedDashboard);
     
-    // Save to storage
-    await dashboardStorage.saveDashboard(updatedDashboard);
+    try {
+      // Update state and storage in parallel
+      await Promise.all([
+        dashboardStorage.saveDashboard(updatedDashboard),
+        Promise.resolve(setCurrentDashboard(updatedDashboard)) // This is synchronous but wrapped for consistency
+      ]);
+
+      // Refresh all panels in parallel for much better performance
+      console.log("Refreshing panels with new time range:", timeRange);
+      const panelIds = Array.from(panels.keys());
+      await Promise.all(panelIds.map(panelId => 
+        refreshPanelDataWithTimeRange(panelId, timeRange)
+      ));
+      
+      toast.success("Time range updated");
+    } catch (error) {
+      console.error("Failed to update dashboard time range:", error);
+      toast.error("Failed to update time range");
+      throw error;
+    }
+  }, [currentDashboard, panels, refreshPanelDataWithTimeRange]);
+
+  // Reset time range to original value
+  const resetDashboardTimeRange = useCallback(async () => {
+    if (!currentDashboard || !originalTimeRange) return;
     
-    // Refresh all panels with new time range
-    await refreshAllPanels();
-    
-    toast.success("Time range updated");
-  }, [currentDashboard, refreshAllPanels]);
+    console.log('Resetting time range to original:', originalTimeRange);
+    await updateDashboardTimeRange(originalTimeRange);
+  }, [currentDashboard, originalTimeRange, updateDashboardTimeRange]);
 
   const updateDashboardTimeZone = useCallback(async (timeZone: string) => {
     if (!currentDashboard) return;
@@ -572,13 +729,21 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
     // Save to storage
     await dashboardStorage.saveDashboard(updatedDashboard);
     
-    // Refresh all panels with new timezone
-    await refreshAllPanels();
+    // Refresh all panels with current time range (timezone affects processing)
+    console.log("Refreshing panels with new timezone:", timeZone);
+    for (const panelId of panels.keys()) {
+      await refreshPanelDataWithTimeRange(panelId, currentDashboard.timeRange || {
+        type: "relative" as const,
+        from: "1h",
+        to: "now" as const,
+      });
+    }
     
     toast.success("Timezone updated");
-  }, [currentDashboard, refreshAllPanels]);
+  }, [currentDashboard, panels]);
 
-  const value = {
+  // Memoize the context value to prevent unnecessary re-renders
+  const value = useMemo(() => ({
     currentDashboard,
     panels,
     panelData,
@@ -597,7 +762,7 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
     updatePanel,
     deletePanel,
     duplicatePanel,
-    getPanelById, // Added getPanelById to provider value
+    getPanelById,
     updateLayout,
     refreshPanelData,
     refreshAllPanels,
@@ -605,8 +770,38 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
     setSelectedPanel,
     setConfigSidebarOpen,
     updateDashboardTimeRange,
+    resetDashboardTimeRange,
     updateDashboardTimeZone,
-  };
+  }), [
+    currentDashboard,
+    panels,
+    panelData,
+    isEditMode,
+    selectedPanelId,
+    isConfigSidebarOpen,
+    loading,
+    error,
+    createDashboard,
+    updateDashboard,
+    deleteDashboard,
+    loadDashboard,
+    saveDashboard,
+    clearCurrentDashboard,
+    addPanel,
+    updatePanel,
+    deletePanel,
+    duplicatePanel,
+    getPanelById,
+    updateLayout,
+    refreshPanelData,
+    refreshAllPanels,
+    setEditMode,
+    setSelectedPanel,
+    setConfigSidebarOpen,
+    updateDashboardTimeRange,
+    resetDashboardTimeRange,
+    updateDashboardTimeZone,
+  ]);
 
   return (
     <DashboardContext.Provider value={value}>

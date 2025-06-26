@@ -16,7 +16,6 @@ import type {
 } from "@/types";
 import {
   handleQueryError,
-  generateQueryId,
   checkForTimeVariables,
   processQueryWithTimeVariables,
   validateTimeVariableContext,
@@ -26,6 +25,7 @@ import {
 import { useConnection } from "@/contexts/ConnectionContext";
 import { useDatabase } from "@/contexts/DatabaseContext";
 import { useTime } from "@/contexts/TimeContext";
+import { v4 as uuid4 } from "uuid";
 
 // Define state shape for better organization
 interface QueryState {
@@ -240,7 +240,7 @@ export function QueryProvider({ children }: { children: ReactNode }) {
     (entry: Omit<QueryHistoryEntry, "id" | "timestamp">) => {
       const newEntry: QueryHistoryEntry = {
         ...entry,
-        id: generateQueryId(),
+        id: uuid4(),
         timestamp: new Date().toISOString(),
       };
 

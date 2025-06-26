@@ -9,12 +9,28 @@ function StatPanel({ config, data }: PanelProps) {
   const statData = useMemo(() => {
     if (!data || data.length === 0) return null;
 
-    const { visualization, dataMapping } = config;
+    // Use field mapping if available
+    const fieldMapping = config.fieldMapping;
+    let valueField: string;
+    
+    if (fieldMapping?.yField) {
+      valueField = fieldMapping.yField;
+    } else {
+      // Auto-detect numeric field
+      const firstRecord = data[0];
+      const numericFields = Object.keys(firstRecord).filter(key => {
+        const value = firstRecord[key];
+        return typeof value === 'number' || (typeof value === 'string' && !isNaN(Number(value)));
+      });
+      
+      if (numericFields.length === 0) return null;
+      valueField = numericFields[0];
+    }
 
     // Extract values for calculations
     const values: number[] = [];
     for (const record of data) {
-      const value = parseFloat(String(record[dataMapping.valueColumn]));
+      const value = parseFloat(String(record[valueField]));
       if (!isNaN(value)) {
         values.push(value);
       }
@@ -40,21 +56,17 @@ function StatPanel({ config, data }: PanelProps) {
       }
     }
 
-    // Check threshold if configured
+    // Check threshold if configured using Grafana-like field config
     let thresholdStatus: "normal" | "critical" = "normal";
-    if (visualization.threshold) {
-      const { value: thresholdValue, operator } = visualization.threshold;
-      switch (operator) {
-        case "gt":
-          thresholdStatus = current > thresholdValue ? "critical" : "normal";
+    const fieldConfig = config.fieldConfig?.defaults;
+    if (fieldConfig?.thresholds?.steps && fieldConfig.thresholds.steps.length > 1) {
+      const steps = fieldConfig.thresholds.steps;
+      // Find if current value exceeds any threshold
+      for (let i = 1; i < steps.length; i++) {
+        if (current >= (steps[i].value ?? 0)) {
+          thresholdStatus = "critical";
           break;
-        case "lt":
-          thresholdStatus = current < thresholdValue ? "critical" : "normal";
-          break;
-        case "eq":
-          thresholdStatus =
-            Math.abs(current - thresholdValue) < 0.001 ? "critical" : "normal";
-          break;
+        }
       }
     }
 
@@ -73,9 +85,9 @@ function StatPanel({ config, data }: PanelProps) {
   }, [data, config]);
 
   const formatValue = (value: number): string => {
-    const { visualization } = config;
-    const decimals = visualization.decimals ?? 2;
-    const unit = visualization.unit || "";
+    const fieldConfig = config.fieldConfig?.defaults || {};
+    const decimals = fieldConfig.decimals ?? 2;
+    const unit = fieldConfig.unit || "";
 
     let formattedValue: string;
 
@@ -177,12 +189,11 @@ function StatPanel({ config, data }: PanelProps) {
         </div>
 
         {/* Threshold indicator */}
-        {config.visualization.threshold &&
-          statData.thresholdStatus === "critical" && (
-            <div className="mt-2 text-xs text-destructive">
-              Threshold exceeded
-            </div>
-          )}
+        {statData.thresholdStatus === "critical" && (
+          <div className="mt-2 text-xs text-destructive">
+            Threshold exceeded
+          </div>
+        )}
       </div>
     </div>
   );

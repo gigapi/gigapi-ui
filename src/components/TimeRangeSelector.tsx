@@ -26,6 +26,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import type { TimeRange } from "@/types";
+import { type TimeRange as DashboardTimeRange } from "@/types/dashboard.types";
 import {
   parseRelativeTime,
   getDisplayTime,
@@ -38,15 +39,34 @@ import DateTimePicker from "@/components/DateTimePicker";
 import QuickRanges from "@/components/QuickRanges";
 import { toast } from "sonner";
 
-// TimeRange is now imported from the centralized types file
+// Union type for both query and dashboard time ranges
+type TimeRangeUnion = TimeRange | DashboardTimeRange;
+
+// Type guards
+function isQueryTimeRange(timeRange: TimeRangeUnion): timeRange is TimeRange {
+  return 'enabled' in timeRange || 'display' in timeRange;
+}
+
+// Helper function to get enabled status
+function getEnabledStatus(timeRange: TimeRangeUnion): boolean {
+  if (isQueryTimeRange(timeRange)) {
+    return timeRange.enabled !== false;
+  }
+  return true; // Dashboard time ranges are always enabled
+}
+
+// Helper function to get string value for dates
+function getStringValue(value: string | Date): string {
+  return typeof value === 'string' ? value : value.toISOString();
+}
 
 interface TimeRangeSelectorProps {
-  timeRange: TimeRange;
-  onTimeRangeChange: (range: TimeRange) => void;
+  timeRange: TimeRangeUnion;
+  onTimeRangeChange: (range: TimeRangeUnion) => void;
   className?: string;
-  disabled?: boolean; // Whether the selector should be disabled
-  fieldName?: string; // The name of the field being filtered
-  tableName?: string; // The name of the table being filtered
+  disabled?: boolean;
+  fieldName?: string;
+  tableName?: string;
 }
 
 // Component code uses imported utilities for time parsing and timezone handling
@@ -57,11 +77,11 @@ export default function TimeRangeSelector({
   disabled = false,
 }: TimeRangeSelectorProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const [fromInput, setFromInput] = useState(
-    timeRange?.from || DEFAULT_TIME_RANGE.from
+  const [fromInput, setFromInput] = useState<string>(
+    getStringValue(timeRange?.from || DEFAULT_TIME_RANGE.from)
   );
-  const [toInput, setToInput] = useState(
-    timeRange?.to || DEFAULT_TIME_RANGE.to
+  const [toInput, setToInput] = useState<string>(
+    getStringValue(timeRange?.to || DEFAULT_TIME_RANGE.to)
   );
   const [currentTime, setCurrentTime] = useState("");
 
@@ -105,8 +125,8 @@ export default function TimeRangeSelector({
   // Update the input fields when timeRange changes
   useEffect(() => {
     if (safeTimeRange) {
-      setFromInput(safeTimeRange.from);
-      setToInput(safeTimeRange.to);
+      setFromInput(getStringValue(safeTimeRange.from));
+      setToInput(getStringValue(safeTimeRange.to));
     }
   }, [safeTimeRange]);
 
@@ -116,21 +136,22 @@ export default function TimeRangeSelector({
     if (!safeTimeRange) return "Select time range";
 
     // Check if time filtering is disabled
-    if (safeTimeRange.enabled === false) {
+    if (!getEnabledStatus(safeTimeRange)) {
       return "No time filter";
     }
 
     const quickRange = QUICK_RANGES.find(
       (r: TimeRange) =>
-        r.from === safeTimeRange.from && r.to === safeTimeRange.to
+        getStringValue(r.from) === getStringValue(safeTimeRange.from) && 
+        getStringValue(r.to) === getStringValue(safeTimeRange.to)
     );
 
     if (quickRange) {
       return quickRange.display;
     }
 
-    const fromDisplay = getDisplayTime(safeTimeRange.from);
-    const toDisplay = getDisplayTime(safeTimeRange.to);
+    const fromDisplay = getDisplayTime(getStringValue(safeTimeRange.from));
+    const toDisplay = getDisplayTime(getStringValue(safeTimeRange.to));
 
     return `${fromDisplay} to ${toDisplay}`;
   }, [safeTimeRange]);
@@ -139,7 +160,7 @@ export default function TimeRangeSelector({
   const isTimeFilterActive = useMemo(() => {
     return (
       hasTimeVariables &&
-      safeTimeRange.enabled !== false &&
+      getEnabledStatus(safeTimeRange) &&
       selectedTimeFieldDetails !== null
     );
   }, [hasTimeVariables, safeTimeRange, selectedTimeFieldDetails]);
@@ -148,7 +169,7 @@ export default function TimeRangeSelector({
   const isTimeFilterUnused = useMemo(() => {
     return (
       !hasTimeVariables &&
-      safeTimeRange.enabled !== false &&
+      getEnabledStatus(safeTimeRange) &&
       selectedTimeField !== null &&
       selectedTimeField !== "_none_" &&
       query.trim() !== ""
@@ -301,7 +322,7 @@ export default function TimeRangeSelector({
                   <CalendarIcon className="h-3.5 w-3.5 shrink-0" />
                 )}
                 <span className="truncate font-normal">
-                  {timeRange?.enabled === false
+                  {!getEnabledStatus(timeRange)
                     ? "No time filter"
                     : currentRangeDisplay}
                 </span>
@@ -321,7 +342,7 @@ export default function TimeRangeSelector({
                     unused
                   </Badge>
                 )}
-                {timeRange?.enabled === false && (
+                {!getEnabledStatus(timeRange) && (
                   <Badge
                     variant="outline"
                     className="ml-1 h-4 px-1 py-0 border-primary/20 text-[10px] bg-red-400/20"

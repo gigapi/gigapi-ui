@@ -1,10 +1,10 @@
 export interface Dashboard {
-  id: string; // UUID
+  id: string;
   name: string;
   description?: string;
   timeRange: TimeRange;
-  timeZone?: string; // Added: IANA time zone string, e.g., 'UTC', 'America/New_York'
-  refreshInterval?: number; // seconds, 0 = no auto-refresh
+  timeZone?: string;
+  refreshInterval?: number;
   layout: {
     panels: PanelLayout[];
     gridSettings?: {
@@ -17,20 +17,33 @@ export interface Dashboard {
     createdAt: Date;
     updatedAt: Date;
     tags?: string[];
-    // timeZone?: string; // Removed from here, moved to root of Dashboard interface
   };
 }
 
 export interface PanelConfig {
   id: string;
-  type: 'timeseries' | 'stat' | 'gauge' | 'table' | 'bar' | 'line' | 'area' | 'scatter';
+  type: PanelType;
   title: string;
-  query: string; // SQL with $__timeFilter
-  database?: string; // Database to execute the query against
-  dataMapping: DataMapping;
-  visualization: VisualizationConfig;
-  timeOverride?: TimeRange; // Added: Optional time override for individual panels
-  // No PanelProps here, it's a separate interface now
+  description?: string;
+
+  query: string;
+  database?: string;
+
+  fieldMapping?: FieldMapping;
+
+  fieldConfig: FieldConfig;
+
+  options: PanelOptions;
+
+  gridPos?: GridPosition;
+
+  maxDataPoints?: number;
+  intervalMs?: number;
+
+  timeOverride?: TimeRange;
+  useParentTimeFilter?: boolean;
+
+  links?: PanelLink[];
 }
 
 export interface PanelLayout {
@@ -46,49 +59,151 @@ export interface PanelLayout {
 export type TimeRange = RelativeTimeRange | AbsoluteTimeRange;
 
 export interface RelativeTimeRange {
-  type: 'relative';
-  from: string; // '1h', '24h', '7d', '30d'
-  to: 'now';
+  type: "relative";
+  from: string;
+  to: "now";
 }
 
 export interface AbsoluteTimeRange {
-  type: 'absolute';
+  type: "absolute";
   from: Date;
   to: Date;
 }
 
-export interface DataMapping {
-  valueColumn: string;
-  timeColumn?: string;
-  seriesColumn?: string;
-  labelColumns?: string[];
-  minColumn?: string;
-  maxColumn?: string;
-  displayColumns?: string[];
+export interface FieldMapping {
+  xField?: string;
+  yField?: string;
+  seriesField?: string;
+  labelField?: string;
 }
 
-export interface VisualizationConfig {
-  colors?: string[];
-  showLegend?: boolean;
-  yAxisLabel?: string;
-  xAxisLabel?: string;
-  // Panel type specific configs
-  threshold?: {
-    value: number;
-    color: string;
-    operator: 'gt' | 'lt' | 'eq';
-  };
-  // For gauge panels
-  min?: number;
-  max?: number;
-  // For stat panels
+export interface FieldConfig {
+  defaults: FieldDefaults;
+  overrides?: FieldOverride[];
+}
+
+export interface FieldDefaults {
+  color?: ColorConfig;
+  custom?: CustomFieldConfig;
+  mappings?: ValueMapping[];
+  thresholds?: ThresholdsConfig;
   unit?: string;
   decimals?: number;
-  // For table panels
-  sortColumn?: string;
-  sortDirection?: 'asc' | 'desc';
-  pageSize?: number;
+  min?: number;
+  max?: number;
+  displayName?: string;
 }
+
+export interface ColorConfig {
+  mode: "palette-classic" | "palette-modern" | "auto" | "continuous-GrYlRd";
+  fixedColor?: string;
+  seriesBy?: "last" | "min" | "max";
+}
+
+export interface CustomFieldConfig {
+  drawStyle?: "line" | "bars" | "points";
+  lineInterpolation?: "linear" | "smooth" | "stepBefore" | "stepAfter";
+  lineWidth?: number;
+  fillOpacity?: number;
+  gradientMode?: "none" | "opacity" | "hue" | "scheme";
+  showPoints?: "auto" | "always" | "never";
+  pointSize?: number;
+
+  axisPlacement?: "auto" | "left" | "right" | "hidden";
+  axisLabel?: string;
+  axisColorMode?: "text" | "series";
+  axisBorderShow?: boolean;
+  axisCenteredZero?: boolean;
+
+  stacking?: {
+    mode: "none" | "normal" | "percent";
+    group: string;
+  };
+
+  thresholdsStyle?: {
+    mode: "off" | "line" | "area";
+  };
+
+  hideFrom?: {
+    legend: boolean;
+    tooltip: boolean;
+    viz: boolean;
+  };
+}
+
+export interface ThresholdsConfig {
+  mode: "absolute" | "percentage";
+  steps: ThresholdStep[];
+}
+
+export interface ThresholdStep {
+  color: string;
+  value: number | null;
+}
+
+export interface ValueMapping {
+  type: "value" | "range" | "regex" | "special";
+  options: any;
+}
+
+export interface FieldOverride {
+  matcher: FieldMatcher;
+  properties: FieldProperty[];
+}
+
+export interface FieldMatcher {
+  id: string;
+  options?: any;
+}
+
+export interface FieldProperty {
+  id: string;
+  value: any;
+}
+
+export interface PanelOptions {
+  legend?: LegendOptions;
+  tooltip?: TooltipOptions;
+  [key: string]: any;
+}
+
+export interface LegendOptions {
+  showLegend: boolean;
+  displayMode: "list" | "table" | "hidden";
+  placement: "bottom" | "right" | "top";
+  calcs?: string[];
+  values?: string[];
+}
+
+export interface TooltipOptions {
+  mode: "single" | "multi" | "none";
+  sort: "none" | "asc" | "desc";
+  hideZeros?: boolean;
+}
+
+export interface GridPosition {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+export interface PanelLink {
+  title: string;
+  url: string;
+  targetBlank?: boolean;
+  icon?: string;
+}
+
+export type PanelType =
+  | "timeseries"
+  | "stat"
+  | "gauge"
+  | "table"
+  | "bar"
+  | "line"
+  | "area"
+  | "scatter";
 
 export interface PanelData {
   panelId: string;
@@ -100,10 +215,9 @@ export interface PanelData {
 export interface NDJSONRecord {
   __timestamp?: string;
   date?: string;
-  [key: string]: any; // Allow other properties
+  [key: string]: any;
 }
 
-// Chart data point for visualization libraries
 export interface ChartDataPoint {
   x: string | number | Date;
   y: number;
@@ -115,57 +229,52 @@ export interface ChartDataPoint {
 export interface PanelProps {
   config: PanelConfig;
   data: NDJSONRecord[];
-  timeZone: string;
-  isEditMode?: boolean; // Added: to indicate if the dashboard is in edit mode
-  isSelected?: boolean; // Added: optional, if panels can be selected
-  onConfigChange?: (panelId: string, newConfig: Partial<PanelConfig>) => void; // Added: optional, for panel-specific config changes
-  onSelect?: (panelId: string) => void; // Added: optional, for panel selection actions
-  onDelete?: (panelId: string) => void; // Added
-  onDuplicate?: (panelId: string) => void; // Added
+  timeZone?: string;
+  isEditMode?: boolean;
+  isSelected?: boolean;
+  onConfigChange?: (panelId: string, newConfig: Partial<PanelConfig>) => void;
+  onSelect?: (panelId: string) => void;
+  onDelete?: (panelId: string) => void;
+  onDuplicate?: (panelId: string) => void;
+  onTimeRangeUpdate?: (timeRange: TimeRange) => void;
 }
 
 export interface DashboardContextType {
-  // Current dashboard state
   currentDashboard: Dashboard | null;
   panels: Map<string, PanelConfig>;
   panelData: Map<string, PanelData>;
-  
-  // UI state
+
   isEditMode: boolean;
   selectedPanelId: string | null;
   isConfigSidebarOpen: boolean;
 
-  // Loading and error states
   loading: boolean;
   error: string | null;
-  
-  // Dashboard operations
-  createDashboard: (dashboard: Omit<Dashboard, 'id' | 'metadata'>) => Promise<Dashboard>;
+
+  createDashboard: (
+    dashboard: Omit<Dashboard, "id" | "metadata">
+  ) => Promise<Dashboard>;
   updateDashboard: (id: string, updates: Partial<Dashboard>) => Promise<void>;
   deleteDashboard: (id: string) => Promise<void>;
   loadDashboard: (id: string) => Promise<void>;
   saveDashboard: () => Promise<void>;
   clearCurrentDashboard: () => void;
-  
-  // Panel operations
-  addPanel: (panel: Omit<PanelConfig, 'id'>) => Promise<string>;
+
+  addPanel: (panel: Omit<PanelConfig, "id">) => Promise<string>;
   updatePanel: (id: string, updates: Partial<PanelConfig>) => Promise<void>;
   deletePanel: (id: string) => Promise<void>;
   duplicatePanel: (id: string) => Promise<string>;
-  getPanelById: (panelId: string) => PanelConfig | undefined; // Added getPanelById
-  
-  // Layout operations
+  getPanelById: (panelId: string) => PanelConfig | undefined;
+
   updateLayout: (layouts: PanelLayout[]) => void;
-  
-  // Data operations
+
   refreshPanelData: (panelId: string) => Promise<void>;
   refreshAllPanels: () => Promise<void>;
-  
-  // Time filter operations
+
   updateDashboardTimeRange: (timeRange: TimeRange) => Promise<void>;
+  resetDashboardTimeRange: () => Promise<void>;
   updateDashboardTimeZone: (timeZone: string) => Promise<void>;
-  
-  // UI operations
+
   setEditMode: (enabled: boolean) => void;
   setSelectedPanel: (panelId: string | null) => void;
   setConfigSidebarOpen: (open: boolean) => void;
@@ -181,9 +290,8 @@ export interface DashboardListItem {
   panelCount: number;
 }
 
-// Grid layout types (extends react-grid-layout)
 export interface GridLayoutItem {
-  i: string; // panel ID
+  i: string;
   x: number;
   y: number;
   w: number;
@@ -197,12 +305,9 @@ export interface GridLayoutItem {
   isResizable?: boolean;
 }
 
-export type PanelType = PanelConfig['type'];
-
 export interface PanelTypeDefinition {
   type: PanelType;
   name: string;
   description: string;
-  defaultConfig: Partial<PanelConfig>;
   component: React.ComponentType<PanelProps>;
 }
