@@ -1,7 +1,7 @@
 import React from "react";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
+
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import Loader from "@/components/Loader";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -16,50 +16,34 @@ import {
   Copy,
   Trash2,
   AlertCircle,
-  TrendingUp,
-  BarChart3,
-  Gauge,
-  Table,
-  LineChart,
-  AreaChart,
-  ChartScatter,
-  Edit3, 
-  HelpCircle
+  Edit3,
+  HelpCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils/class-utils";
-import type { PanelConfig, NDJSONRecord, PanelType } from "@/types/dashboard.types";
-import { useDashboard } from "@/contexts/DashboardContext";
+import type { PanelConfig, NDJSONRecord } from "@/types/dashboard.types";
 import { getPanelComponent } from "./panels";
-
-const PANEL_TYPE_ICONS: Record<PanelType, React.ComponentType<{ className?: string }>> = {
-  timeseries: TrendingUp,
-  stat: BarChart3,
-  gauge: Gauge,
-  table: Table,
-  bar: BarChart3,
-  line: LineChart,
-  area: AreaChart,
-  scatter: ChartScatter,
-};
+import { useDashboard } from "@/atoms";
 
 interface DashboardPanelProps {
-  panelId?: string; 
+  panelId?: string;
   config: PanelConfig;
   data: NDJSONRecord[];
   error?: string;
+  isLoading?: boolean;
   isEditMode: boolean;
   isSelected?: boolean;
   onSelect?: () => void;
   onConfigChange?: (updates: Partial<PanelConfig>) => void;
-  onEditPanel: (panelId: string) => void; 
+  onEditPanel: (panelId: string) => void;
   className?: string;
 }
 
 export default function DashboardPanel({
-  panelId, 
+  panelId,
   config,
   data,
   error,
+  isLoading = false,
   isEditMode,
   isSelected,
   onSelect,
@@ -74,14 +58,14 @@ export default function DashboardPanel({
     updateDashboardTimeRange,
   } = useDashboard();
 
-  const currentPanelId = panelId || config.id; 
+  const currentPanelId = panelId || config.id;
 
   const handleRefresh = async (e: React.MouseEvent) => {
-    e.stopPropagation(); 
+    e.stopPropagation();
     try {
       await refreshPanelData(currentPanelId);
     } catch (error) {
-      console.error('Failed to refresh panel:', error);
+      console.error("Failed to refresh panel:", error);
     }
   };
 
@@ -90,7 +74,7 @@ export default function DashboardPanel({
     try {
       await duplicatePanel(currentPanelId);
     } catch (error) {
-      console.error('Failed to duplicate panel:', error);
+      console.error("Failed to duplicate panel:", error);
     }
   };
 
@@ -99,59 +83,52 @@ export default function DashboardPanel({
     try {
       await deletePanel(currentPanelId);
     } catch (error) {
-      console.error('Failed to delete panel:', error);
+      console.error("Failed to delete panel:", error);
     }
   };
-  
+
   const handleEdit = (e: React.MouseEvent) => {
     e.stopPropagation();
     onEditPanel(currentPanelId);
   };
 
-  const IconComponent = PANEL_TYPE_ICONS[config.type] || HelpCircle; 
   const PanelDisplayComponent = getPanelComponent(config.type);
 
-  // Determine timeZone - Dashboard specific, or global default
-  const timeZone = currentDashboard?.timeZone || "UTC"; // Use new top-level timeZone
+  const timeZone = currentDashboard?.timeZone || "UTC";
 
   return (
-    <Card
+    <div
       className={cn(
-        "h-full flex flex-col transition-all duration-200 group", 
-        isEditMode && "cursor-pointer hover:shadow-lg hover:ring-2 hover:ring-primary/50",
+        "h-full flex flex-col transition-all duration-200 group bg-muted/40 border border-border rounded-sm",
+        isEditMode &&
+          "cursor-pointer hover:shadow-lg hover:ring-2 hover:ring-primary/50",
         error && "border-destructive",
         className,
-        isSelected && "ring-2 ring-primary" // Example: apply a ring when selected
+        isSelected && "ring-2 ring-primary"
       )}
       onClick={() => {
         if (isEditMode && onSelect) {
           onSelect();
         }
-        // In normal mode, clicking a panel should do nothing
-        // Only the explicit "Edit Panel" button should navigate to edit
       }}
     >
-      <CardHeader className="pb-2 px-3 pt-3">
+      <div className="pb-1 px-2 pt-2">
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0 flex-1">
             {isEditMode && (
-              <div 
-                className="panel-drag-handle cursor-grab active:cursor-grabbing p-0.5 hover:bg-muted rounded"
-                onClick={(e) => e.stopPropagation()} 
+              <div
+                className="panel-drag-handle cursor-grab active:cursor-grabbing p-1 hover:bg-muted"
+                onClick={(e) => e.stopPropagation()}
               >
                 <GripVertical className="w-4 h-4 text-muted-foreground" />
               </div>
             )}
-            
-            <IconComponent className="w-4 h-4 text-muted-foreground flex-shrink-0" />
-            
-            <h3 className="font-medium text-sm truncate flex-1" title={config.title}>
+            <h3
+              className="font-medium text-sm truncate flex-1"
+              title={config.title}
+            >
               {config.title}
             </h3>
-            
-            <Badge variant="outline" className="text-xs font-mono">
-              {config.type}
-            </Badge>
           </div>
 
           <div className="flex items-center gap-0.5">
@@ -172,7 +149,7 @@ export default function DashboardPanel({
                     variant="ghost"
                     size="icon"
                     className="h-6 w-6"
-                    onClick={(e) => e.stopPropagation()} 
+                    onClick={(e) => e.stopPropagation()}
                   >
                     <MoreVertical className="w-3 h-3" />
                   </Button>
@@ -199,31 +176,50 @@ export default function DashboardPanel({
             )}
           </div>
         </div>
-      </CardHeader>
+      </div>
 
-      <CardContent className="flex-1 p-3 pt-1 overflow-hidden"> 
+      <div className="flex-1 overflow-hidden">
         {error ? (
           <div className="flex items-center justify-center h-full">
             <div className="text-center p-2">
               <AlertCircle className="w-8 h-8 text-destructive mx-auto mb-2" />
-              <p className="text-sm text-destructive font-medium">Error loading data</p>
-              <p className="text-xs text-muted-foreground mt-1 truncate" title={error}>{error}</p>
+              <p className="text-sm text-destructive font-medium">
+                Error loading data
+              </p>
+              <p
+                className="text-xs text-muted-foreground mt-1 truncate"
+                title={error}
+              >
+                {error}
+              </p>
             </div>
           </div>
         ) : !PanelDisplayComponent ? (
           <div className="flex items-center justify-center h-full">
             <div className="text-center p-2">
               <HelpCircle className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
-              <p className="text-sm text-muted-foreground">Panel type not supported or component missing.</p>
+              <p className="text-sm text-muted-foreground">
+                Panel type not supported or component missing.
+              </p>
             </div>
+          </div>
+        ) : isLoading ? (
+          <div className="flex items-center justify-center h-full">
+            <Loader className="w-12 h-12" />
           </div>
         ) : !data || data.length === 0 ? (
           <div className="flex items-center justify-center h-full">
             <div className="text-center p-2">
-              <IconComponent className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
               <p className="text-sm text-muted-foreground">No data available</p>
               {isEditMode && (
-                 <Button variant="link" size="sm" className="mt-1" onClick={handleEdit}>Edit panel to add query</Button>
+                <Button
+                  variant="link"
+                  size="sm"
+                  className="mt-1"
+                  onClick={handleEdit}
+                >
+                  Edit panel to add query
+                </Button>
               )}
             </div>
           </div>
@@ -236,7 +232,7 @@ export default function DashboardPanel({
             onTimeRangeUpdate={updateDashboardTimeRange} // Pass time range update callback
           />
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }

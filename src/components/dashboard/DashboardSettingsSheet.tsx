@@ -15,9 +15,9 @@ import {
   SheetFooter,
   SheetClose,
 } from '@/components/ui/sheet';
-import { useDashboard } from '@/contexts/DashboardContext';
-import { useDashboardStorage } from '@/lib/dashboard/storage';
-import ConfirmAction from '@/components/ConfirmAction';
+
+import { useDashboard } from '@/atoms';
+import ConfirmAction from '@/components/shared/ConfirmAction';
 import { toast } from 'sonner';
 import { X, Plus, Trash2, Settings, AlertTriangle } from 'lucide-react';
 import type { Dashboard } from '@/types/dashboard.types';
@@ -36,8 +36,7 @@ export function DashboardSettingsSheet({
   onDashboardDeleted,
 }: DashboardSettingsSheetProps) {
   const navigate = useNavigate();
-  const { updateDashboard } = useDashboard();
-  const storage = useDashboardStorage();
+  const { updateDashboard, deleteDashboard } = useDashboard();
   
   // Form state
   const [name, setName] = useState('');
@@ -109,7 +108,7 @@ export function DashboardSettingsSheet({
     
     setIsDeleting(true);
     try {
-      await storage.deleteDashboard(dashboard.id);
+      await deleteDashboard(dashboard.id);
       toast.success(`Dashboard "${dashboard.name}" deleted successfully`);
       setShowDeleteConfirm(false);
       onOpenChange(false);

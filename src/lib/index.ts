@@ -1,14 +1,32 @@
 // Core modules
 export * from "./url";
-export * from "./query";
+
+// Storage utilities
+export * from "./storage";
+
+// Time processing utilities
+export * from "./time/index";
+
+
+// Query processing functions
+export {
+  checkForTimeVariables,
+  validateTimeVariableContext,
+  detectTimeFieldsFromSchema,
+  processQueryWithTimeVariables,
+  previewProcessedQuery,
+  QueryProcessor,
+  UnifiedQueryProcessor
+} from "./query-processor";
+
+// Dashboard utilities
+export * from "./dashboard/panel-factory";
+export * from "./dashboard/panel-field-utils";
+export * from "./dashboard/data-transformers";
 
 // Utility modules
 export * from "./utils/error-handler";
-export * from "./utils/formatting";
-export * from "./utils/storage";
 export * from "./utils/class-utils";
-export * from "./utils/timezone";
-export * from "./utils/time-parsing";
 
 // Constants and types
 export {

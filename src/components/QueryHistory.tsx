@@ -1,8 +1,11 @@
 import { useState, useEffect } from "react";
-import { useQuery } from "@/contexts/QueryContext";
-import { useTime } from "@/contexts/TimeContext";
-import { useDatabase } from "@/contexts/DatabaseContext";
-import { checkForTimeVariables } from "@/lib/";
+import { useAtom, useSetAtom } from "jotai"; 
+import { setQueryAtom, queryHistoryAtom, clearQueryHistoryAtom } from "@/atoms";
+import { selectedTimeFieldAtom, setTimeRangeAtom } from "@/atoms";
+import { setSelectedDbAtom, selectedTableAtom } from "@/atoms";
+
+
+import { checkForTimeVariables } from "@/lib/query-processor";
 import {
   Sheet,
   SheetContent,
@@ -54,9 +57,13 @@ type HistoryItem = {
 };
 
 export default function QueryHistory() {
-  const { setQuery, queryHistory, clearQueryHistory } = useQuery();
-  const { setSelectedTimeField, setTimeRange } = useTime();
-  const { setSelectedDb, setSelectedTable } = useDatabase();
+  const setQuery = useSetAtom(setQueryAtom);
+  const [queryHistory] = useAtom(queryHistoryAtom);
+  const clearQueryHistory = useSetAtom(clearQueryHistoryAtom);
+  const setSelectedTimeField = useSetAtom(selectedTimeFieldAtom);
+  const setTimeRange = useSetAtom(setTimeRangeAtom);
+  const setSelectedDb = useSetAtom(setSelectedDbAtom);
+  const setSelectedTable = useSetAtom(selectedTableAtom);
   const [localHistory, setLocalHistory] = useState<HistoryItem[]>([]);
   const [isOpen, setIsOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");

@@ -1,4 +1,5 @@
-import { useConnection } from "@/contexts/ConnectionContext";
+import { useAtom } from "jotai";
+import { apiUrlAtom, isConnectedAtom } from "@/atoms";
 import axios from "axios";
 
 interface QueryExecutionResult {
@@ -6,14 +7,14 @@ interface QueryExecutionResult {
   error?: string;
 }
 
-/**
- * Hook for executing queries independently in dashboard panels
- * This is separate from the main QueryContext to avoid conflicts
- */
 export function useDashboardQuery() {
-  const { apiUrl, isConnected } = useConnection();
+  const [apiUrl] = useAtom(apiUrlAtom);
+  const [isConnected] = useAtom(isConnectedAtom);
 
-  const executeQuery = async (query: string, database?: string): Promise<QueryExecutionResult> => {
+  const executeQuery = async (
+    query: string,
+    database?: string
+  ): Promise<QueryExecutionResult> => {
     if (!isConnected || !apiUrl) {
       throw new Error("No database connection available");
     }
@@ -30,15 +31,21 @@ export function useDashboardQuery() {
       const response = await axios.post(
         `${apiUrl}?db=${encodeURIComponent(database)}&format=ndjson`,
         { query: query.trim() },
+
         {
           responseType: "text",
+          headers: {
+            "Content-Type": "application/x-ndjson",
+            Accept: "application/x-ndjson",
+          },
         }
       );
 
       console.log("Dashboard query response status:", response.status);
 
       if (response.status >= 400) {
-        const errorText = response.data || `Request failed with status ${response.status}`;
+        const errorText =
+          response.data || `Request failed with status ${response.status}`;
         console.error("Dashboard query error response:", errorText);
         throw new Error(errorText);
       }
@@ -47,7 +54,8 @@ export function useDashboardQuery() {
       console.log("Dashboard query successful, data length:", data.length);
       return { data };
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      const errorMessage =
+        error instanceof Error ? error.message : "Unknown error";
       console.error("Dashboard query execution failed:", error);
       return { data: "", error: errorMessage };
     }

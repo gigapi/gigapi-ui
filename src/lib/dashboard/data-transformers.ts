@@ -3,7 +3,8 @@ import {
   type ChartDataPoint,
   type PanelConfig,
 } from "@/types/dashboard.types";
-import { DataTransformer } from "../query-processor";
+import { SchemaAnalyzer } from "./schema-analyzer";
+import { parseTimeValue } from "@/lib/time";
 
 export interface TransformedData {
   data: ChartDataPoint[];
@@ -22,7 +23,7 @@ export interface TransformedData {
 }
 
 /**
- * Transform raw NDJSON data for panel rendering using Grafana-like approach
+ * Transform raw NDJSON data for panel rendering using approach
  * Simplified version without legacy support
  */
 export function transformDataForPanel(
@@ -33,31 +34,34 @@ export function transformDataForPanel(
     return {
       data: [],
       series: [],
-      metadata: { totalRecords: 0 }
+      metadata: { totalRecords: 0 },
     };
   }
 
   const { type } = config;
-  
+
   switch (type) {
-    case 'timeseries':
-    case 'line':
-    case 'area':
+    case "timeseries":
+    case "line":
+    case "area":
       return transformForTimeSeries(records, config);
-    
-    case 'bar':
-    case 'scatter':
-      return transformForBarScatter(records, config);
-    
-    case 'stat':
+
+    case "bar":
+    case "scatter":
+
+    case "pie":
+    case "donut":
+      return transformForPie(records, config);
+
+    case "stat":
       return transformForStat(records, config);
-    
-    case 'gauge':
+
+    case "gauge":
       return transformForGauge(records, config);
-    
-    case 'table':
+
+    case "table":
       return transformForTable(records);
-    
+
     default:
       return transformForTimeSeries(records, config);
   }
@@ -72,7 +76,7 @@ function transformForTimeSeries(
 ): TransformedData {
   const data: ChartDataPoint[] = [];
   const seriesSet = new Set<string>();
-  
+
   let minTime: Date | null = null;
   let maxTime: Date | null = null;
   let minValue = Infinity;
@@ -82,11 +86,11 @@ function transformForTimeSeries(
   const fieldMapping = config.fieldMapping;
   const firstRecord = records[0];
   const fields = Object.keys(firstRecord);
-  
+
   let timeField: string | null;
   let valueFields: string[];
   let seriesField: string | undefined;
-  
+
   if (fieldMapping?.xField && fieldMapping?.yField) {
     // Use explicit field mapping
     timeField = fieldMapping.xField;
@@ -94,14 +98,14 @@ function transformForTimeSeries(
     seriesField = fieldMapping.seriesField;
   } else {
     // Auto-detect fields (fallback)
-    timeField = findTimeField(fields);
-    valueFields = findNumericFields(firstRecord, fields);
+    timeField = SchemaAnalyzer.findTimeField(fields);
+    valueFields = SchemaAnalyzer.findNumericFields(firstRecord, fields);
     seriesField = undefined;
   }
-  
+
   // If no value fields found, skip
   if (valueFields.length === 0) {
-    console.warn('No value fields found for time series');
+    console.warn("No value fields found for time series");
     return { data: [], series: [], metadata: { totalRecords: 0 } };
   }
 
@@ -111,7 +115,7 @@ function transformForTimeSeries(
     if (timeField && record[timeField] !== undefined) {
       timeValue = parseTimeValue(record[timeField]);
     }
-    
+
     if (!timeValue) continue;
 
     // Process each value field as a series
@@ -124,13 +128,13 @@ function transformForTimeSeries(
         // Use series field to group data (e.g., "us-texas", "us-northwest")
         seriesName = String(record[seriesField]);
       } else if (valueFields.length > 1) {
-        // Multiple value fields become series (e.g., "temperature", "humidity") 
+        // Multiple value fields become series (e.g., "temperature", "humidity")
         seriesName = field;
       } else {
         // Single series - use the actual field name (e.g., "temperature")
         seriesName = field;
       }
-      
+
       seriesSet.add(seriesName);
 
       const dataPoint = {
@@ -138,7 +142,7 @@ function transformForTimeSeries(
         y: value,
         series: seriesName,
       };
-      
+
       data.push(dataPoint);
 
       // Update ranges
@@ -161,22 +165,24 @@ function transformForTimeSeries(
     series: Array.from(seriesSet),
     metadata: {
       totalRecords: records.length,
-      timeRange: minTime && maxTime ? { min: minTime, max: maxTime } : undefined,
-      valueRange: minValue !== Infinity ? { min: minValue, max: maxValue } : undefined,
+      timeRange:
+        minTime && maxTime ? { min: minTime, max: maxTime } : undefined,
+      valueRange:
+        minValue !== Infinity ? { min: minValue, max: maxValue } : undefined,
     },
   };
 }
 
 /**
- * Transform data for bar and scatter charts
+ * Transform data for pie and donut charts
  */
-function transformForBarScatter(
+function transformForPie(
   records: NDJSONRecord[],
   config: PanelConfig
 ): TransformedData {
   const data: ChartDataPoint[] = [];
   const seriesSet = new Set<string>();
-  
+
   let minValue = Infinity;
   let maxValue = -Infinity;
 
@@ -184,61 +190,68 @@ function transformForBarScatter(
   const fieldMapping = config.fieldMapping;
   const firstRecord = records[0];
   const fields = Object.keys(firstRecord);
-  
-  let xField: string;
-  let yField: string;
-  let seriesField: string | undefined;
-  
+
+  let categoryField: string;
+  let valueField: string;
+
   if (fieldMapping?.xField && fieldMapping?.yField) {
     // Use explicit field mapping
-    xField = fieldMapping.xField;
-    yField = fieldMapping.yField;
-    seriesField = fieldMapping.seriesField;
+    categoryField = fieldMapping.xField;
+    valueField = fieldMapping.yField;
   } else {
     // Auto-detect fields (fallback)
-    const numericFields = findNumericFields(firstRecord, fields);
-    const stringFields = findStringFields(firstRecord, fields);
-    
-    xField = stringFields[0] || 'index';
-    yField = numericFields[0];
-    seriesField = undefined;
+    const numericFields = SchemaAnalyzer.findNumericFields(firstRecord, fields);
+    const stringFields = SchemaAnalyzer.findStringFields(firstRecord, fields);
+
+    categoryField = stringFields[0] || "index";
+    valueField = numericFields[0];
   }
 
-  if (!yField) {
+  if (!valueField) {
     return { data: [], series: [], metadata: { totalRecords: 0 } };
   }
 
+  // Group by category and sum values
+  const categoryMap = new Map<string, number>();
+
   for (let i = 0; i < records.length; i++) {
     const record = records[i];
-    const value = parseNumericValue(record[yField]);
+    const value = parseNumericValue(record[valueField]);
     if (value === null) continue;
 
-    const xValue = xField === 'index' ? i : String(record[xField] || i);
-    
-    let seriesName: string;
-    if (seriesField && record[seriesField]) {
-      seriesName = String(record[seriesField]);
-    } else {
-      seriesName = 'default';
-    }
-    seriesSet.add(seriesName);
+    const category =
+      categoryField === "index"
+        ? `Item ${i + 1}`
+        : String(record[categoryField] || `Item ${i + 1}`);
 
+    if (categoryMap.has(category)) {
+      categoryMap.set(category, categoryMap.get(category)! + value);
+    } else {
+      categoryMap.set(category, value);
+    }
+  }
+
+  // Convert to chart data points
+  for (const [category, value] of categoryMap.entries()) {
     data.push({
-      x: xValue,
+      x: category,
       y: value,
-      series: seriesName,
+      series: "pie",
     });
 
     if (value < minValue) minValue = value;
     if (value > maxValue) maxValue = value;
   }
 
+  seriesSet.add("pie");
+
   return {
     data,
     series: Array.from(seriesSet),
     metadata: {
       totalRecords: records.length,
-      valueRange: minValue !== Infinity ? { min: minValue, max: maxValue } : undefined,
+      valueRange:
+        minValue !== Infinity ? { min: minValue, max: maxValue } : undefined,
     },
   };
 }
@@ -253,19 +266,19 @@ function transformForStat(
   const fieldMapping = config.fieldMapping;
   const firstRecord = records[0];
   const fields = Object.keys(firstRecord);
-  
+
   let field: string;
   if (fieldMapping?.yField) {
     field = fieldMapping.yField;
   } else {
-    const numericFields = findNumericFields(firstRecord, fields);
+    const numericFields = SchemaAnalyzer.findNumericFields(firstRecord, fields);
     if (numericFields.length === 0) {
       return { data: [], series: [], metadata: { totalRecords: 0 } };
     }
     field = numericFields[0];
   }
   const values: number[] = [];
-  
+
   for (const record of records) {
     const value = parseNumericValue(record[field]);
     if (value !== null) {
@@ -283,15 +296,15 @@ function transformForStat(
   const max = Math.max(...values);
 
   const data: ChartDataPoint[] = [
-    { x: 'current', y: latest },
-    { x: 'average', y: avg },
-    { x: 'min', y: min },
-    { x: 'max', y: max },
+    { x: "current", y: latest },
+    { x: "average", y: avg },
+    { x: "min", y: min },
+    { x: "max", y: max },
   ];
 
   return {
     data,
-    series: ['stats'],
+    series: ["stats"],
     metadata: {
       totalRecords: records.length,
       valueRange: { min, max },
@@ -309,19 +322,19 @@ function transformForGauge(
   const fieldMapping = config.fieldMapping;
   const firstRecord = records[0];
   const fields = Object.keys(firstRecord);
-  
+
   let field: string;
   if (fieldMapping?.yField) {
     field = fieldMapping.yField;
   } else {
-    const numericFields = findNumericFields(firstRecord, fields);
+    const numericFields = SchemaAnalyzer.findNumericFields(firstRecord, fields);
     if (numericFields.length === 0) {
       return { data: [], series: [], metadata: { totalRecords: 0 } };
     }
     field = numericFields[0];
   }
   let latestValue: number | null = null;
-  
+
   // Get latest non-null value
   for (let i = records.length - 1; i >= 0; i--) {
     const value = parseNumericValue(records[i][field]);
@@ -336,8 +349,8 @@ function transformForGauge(
   }
 
   return {
-    data: [{ x: 'gauge', y: latestValue }],
-    series: ['gauge'],
+    data: [{ x: "gauge", y: latestValue }],
+    series: ["gauge"],
     metadata: {
       totalRecords: records.length,
       valueRange: { min: latestValue, max: latestValue },
@@ -348,9 +361,7 @@ function transformForGauge(
 /**
  * Transform data for table panels (preserve all data)
  */
-function transformForTable(
-  records: NDJSONRecord[]
-): TransformedData {
+function transformForTable(records: NDJSONRecord[]): TransformedData {
   const data: ChartDataPoint[] = [];
 
   for (let i = 0; i < records.length; i++) {
@@ -365,90 +376,16 @@ function transformForTable(
 
   return {
     data,
-    series: ['table'],
+    series: ["table"],
     metadata: {
       totalRecords: records.length,
     },
   };
 }
 
-// Utility functions
-
-function findTimeField(fields: string[]): string | null {
-  const timePatterns = ['__timestamp', 'timestamp', 'time', 'date', 'created_at', 'updated_at'];
-  
-  for (const pattern of timePatterns) {
-    const field = fields.find(f => f.toLowerCase() === pattern.toLowerCase());
-    if (field) return field;
-  }
-  
-  // Look for fields containing time-related words
-  for (const field of fields) {
-    const lower = field.toLowerCase();
-    if (lower.includes('time') || lower.includes('date') || lower.includes('timestamp')) {
-      return field;
-    }
-  }
-  
-  return null;
-}
-
-function findNumericFields(record: NDJSONRecord, fields: string[]): string[] {
-  return fields.filter(field => {
-    const value = record[field];
-    return typeof value === 'number' || (typeof value === 'string' && !isNaN(Number(value)));
-  });
-}
-
-function findStringFields(record: NDJSONRecord, fields: string[]): string[] {
-  return fields.filter(field => {
-    const value = record[field];
-    return typeof value === 'string' && isNaN(Number(value));
-  });
-}
-
 function parseNumericValue(value: any): number | null {
   if (value === null || value === undefined) return null;
-  
+
   const num = Number(value);
   return isNaN(num) ? null : num;
-}
-
-function parseTimeValue(value: any): Date | null {
-  if (!value) return null;
-  
-  if (value instanceof Date) return value;
-  
-  // Try to parse as timestamp (various units)
-  if (typeof value === 'number' || (typeof value === 'string' && !isNaN(Number(value)))) {
-    const numValue = Number(value);
-    
-    // Auto-detect timestamp format based on value size
-    if (numValue > 1e15) {
-      // Nanoseconds (like your data: 1750839465670078000)
-      return DataTransformer.convertTimestamp(numValue, 'ns');
-    } else if (numValue > 1e12) {
-      // Microseconds  
-      return DataTransformer.convertTimestamp(numValue, 'us');
-    } else if (numValue > 1e10) {
-      // Milliseconds
-      return DataTransformer.convertTimestamp(numValue, 'ms');
-    } else {
-      // Seconds
-      return DataTransformer.convertTimestamp(numValue, 's');
-    }
-  }
-  
-  // Try to parse as ISO string
-  try {
-    return new Date(value);
-  } catch {
-    return null;
-  }
-}
-
-export function parseNDJSON(ndjsonString: string): NDJSONRecord[] {
-  // Use the utility from DataTransformer
-  const { records } = DataTransformer.parseNDJSON(ndjsonString);
-  return records;
 }

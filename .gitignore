@@ -37,3 +37,7 @@ coverage
 .claude
 
 /checks
+DASHBOARD.md
+RESUME.md
+
+/app_context

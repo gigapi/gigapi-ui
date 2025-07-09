@@ -28,7 +28,7 @@ export function withPanelWrapper<T extends PanelProps>(
     };
 
     return (
-      <div className="h-full w-full" onClick={handleClick}>
+      <div className="h-full w-full overflow-hidden" onClick={handleClick}>
         <WrappedComponent {...props} />
       </div>
     );

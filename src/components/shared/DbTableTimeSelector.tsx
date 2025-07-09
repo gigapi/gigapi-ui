@@ -1,0 +1,444 @@
+import { useState, useEffect, useMemo } from "react";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { Database, Table, Clock, Search, ChevronDown } from "lucide-react";
+import { cn } from "@/lib/utils/class-utils";
+import { useAtom } from "jotai";
+import {
+  availableDatabasesAtom,
+  availableTablesAtom,
+  schemaAtom,
+  tableSchemaAtom,
+} from "@/atoms";
+import { SchemaAnalyzer } from "@/lib/dashboard/schema-analyzer";
+import type { TableSchema, ColumnSchema } from "@/types";
+
+// Types for the unified selector
+export type SelectorType = "database" | "table" | "timeField";
+export type SelectorContext = "query" | "dashboard" | "artifact";
+export type SelectorStyle = "select" | "popover";
+
+interface UnifiedSelectorProps {
+  type: SelectorType;
+  context: SelectorContext;
+  style?: SelectorStyle;
+  value?: string;
+  onChange: (value: string) => void;
+  className?: string;
+  disabled?: boolean;
+  placeholder?: string;
+  // For table selector
+  database?: string;
+  // For time field selector
+  table?: string;
+  // Optional schema override (for artifact context)
+  schemaOverride?: Record<string, TableSchema[]>;
+  // Optional label (null = no label, undefined = default label, string = custom label)
+  label?: string | null;
+  // Show icon in trigger
+  showIcon?: boolean;
+}
+
+export function UnifiedSelector({
+  type,
+  style = "select",
+  value,
+  onChange,
+  className,
+  disabled = false,
+  placeholder,
+  database,
+  table,
+  schemaOverride,
+  label,
+  showIcon = true,
+}: UnifiedSelectorProps) {
+  const [availableDatabases] = useAtom(availableDatabasesAtom);
+  const [availableTables] = useAtom(availableTablesAtom);
+  const [schema] = useAtom(schemaAtom);
+  const [tableSchema] = useAtom(tableSchemaAtom);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [isOpen, setIsOpen] = useState(false);
+
+  // Get the appropriate data based on selector type
+  const options = useMemo(() => {
+    switch (type) {
+      case "database":
+        return availableDatabases || [];
+
+      case "table":
+        if (!database) return [];
+        
+        // For artifact context, use schema override
+        if (schemaOverride?.[database]) {
+          const dbTables = schemaOverride[database];
+          return Array.isArray(dbTables)
+            ? dbTables
+                .map((t) => (typeof t === "string" ? t : t.tableName))
+                .filter(Boolean)
+            : [];
+        }
+        
+        // For query context, use availableTables directly (it's already loaded for the selected database)
+        return availableTables || [];
+
+      case "timeField":
+        if (!database || !table) return [];
+        
+        // For artifact context with schema override
+        if (schemaOverride?.[database]) {
+          const dbSchema = schemaOverride[database];
+          const tableSchemaOverride = dbSchema.find((t) => t.tableName === table);
+          if (!tableSchemaOverride?.columns) return [];
+
+          const timeFields: string[] = [];
+          tableSchemaOverride.columns.forEach((column: ColumnSchema) => {
+            if (!column.columnName) return;
+
+            const fieldType = SchemaAnalyzer.analyzeFieldType(
+              column.columnName,
+              null,
+              column.dataType
+            );
+
+            if (
+              fieldType.semantic === "timestamp" ||
+              fieldType.format?.includes("Time") ||
+              column.columnName.toLowerCase().includes("time") ||
+              column.columnName.toLowerCase().includes("date") ||
+              column.columnName.toLowerCase().includes("timestamp") ||
+              column.columnName === "__timestamp"
+            ) {
+              timeFields.push(column.columnName);
+            }
+          });
+          
+          return timeFields.sort((a, b) =>
+            a === "__timestamp" ? -1 : b === "__timestamp" ? 1 : 0
+          );
+        }
+        
+        // For query context, use tableSchema atom (from DESCRIBE query)
+        if (!tableSchema || !Array.isArray(tableSchema)) return [];
+        
+        const timeFields: string[] = [];
+        tableSchema.forEach((column: any) => {
+          // Handle the API response format: {"column_name":"method","column_type":"VARCHAR",...}
+          const columnName = column.column_name || column.columnName;
+          const columnType = column.column_type || column.dataType;
+          
+          if (!columnName || typeof columnName !== 'string') return;
+
+          // Simple time field detection based on your API response
+          if (
+            columnName.toLowerCase().includes("time") ||
+            columnName.toLowerCase().includes("date") ||
+            columnName.toLowerCase().includes("timestamp") ||
+            columnName === "__timestamp" ||
+            columnType?.toLowerCase().includes("timestamp") ||
+            columnType?.toLowerCase().includes("datetime")
+          ) {
+            timeFields.push(columnName);
+          }
+        });
+
+        // Prioritize __timestamp if it exists
+        return timeFields.sort((a, b) =>
+          a === "__timestamp" ? -1 : b === "__timestamp" ? 1 : 0
+        );
+
+      default:
+        return [];
+    }
+  }, [
+    type,
+    availableDatabases,
+    availableTables,
+    schema,
+    database,
+    table,
+    schemaOverride,
+    tableSchema,
+  ]);
+
+  // Filter options based on search term
+  const filteredOptions = useMemo(() => {
+    if (!searchTerm) return options;
+    return options.filter((option) =>
+      option.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+  }, [options, searchTerm]);
+
+  // Get icon based on selector type
+  const getIcon = () => {
+    switch (type) {
+      case "database":
+        return <Database className="w-4 h-4" />;
+      case "table":
+        return <Table className="w-4 h-4" />;
+      case "timeField":
+        return <Clock className="w-4 h-4" />;
+    }
+  };
+
+  // Get placeholder based on type and context
+  const getPlaceholder = () => {
+    if (placeholder) return placeholder;
+
+    switch (type) {
+      case "database":
+        return "Select database";
+      case "table":
+        return database ? "Select table" : "Select database first";
+      case "timeField":
+        return table ? "Select time field" : "Select table first";
+    }
+  };
+
+  // Get label based on type
+  const getLabel = () => {
+    if (label) return label;
+
+    switch (type) {
+      case "database":
+        return "Database";
+      case "table":
+        return "Table";
+      case "timeField":
+        return "Time Field";
+    }
+  };
+
+  // Handle selection
+  const handleSelect = (selectedValue: string) => {
+    onChange(selectedValue);
+    setIsOpen(false);
+    setSearchTerm("");
+  };
+
+  // Render select style
+  if (style === "select") {
+    return (
+      <div className={cn("space-y-1.5", className)}>
+        {label !== null && (
+          <label className="text-sm font-medium text-muted-foreground">
+            {getLabel()}
+          </label>
+        )}
+        <Select
+          value={value}
+          onValueChange={onChange}
+          disabled={
+            disabled ||
+            (type === "table" && !database) ||
+            (type === "timeField" && !table)
+          }
+        >
+          <SelectTrigger
+            className={cn("w-full", !value && "text-muted-foreground")}
+          >
+            <div className="flex items-center gap-2">
+              {showIcon && getIcon()}
+              <SelectValue placeholder={getPlaceholder()} />
+            </div>
+          </SelectTrigger>
+          <SelectContent>
+            {filteredOptions.length === 0 ? (
+              <div className="py-2 px-3 text-sm text-muted-foreground text-center">
+                {type === "table" && !database
+                  ? "Select a database first"
+                  : type === "timeField" && !table
+                  ? "Select a table first"
+                  : "No options available"}
+              </div>
+            ) : (
+              filteredOptions.map((option) => (
+                <SelectItem key={option} value={option}>
+                  {option}
+                </SelectItem>
+              ))
+            )}
+          </SelectContent>
+        </Select>
+      </div>
+    );
+  }
+
+  // Render popover style (with search)
+  return (
+    <div className={cn("space-y-1.5", className)}>
+      {label !== null && (
+        <label className="text-sm font-medium text-muted-foreground">
+          {getLabel()}
+        </label>
+      )}
+      <Popover open={isOpen} onOpenChange={setIsOpen}>
+        <PopoverTrigger asChild>
+          <Button
+            variant="outline"
+            role="combobox"
+            aria-expanded={isOpen}
+            className={cn(
+              "w-full justify-between",
+              !value && "text-muted-foreground"
+            )}
+            disabled={
+              disabled ||
+              (type === "table" && !database) ||
+              (type === "timeField" && !table)
+            }
+          >
+            <div className="flex items-center gap-2 truncate">
+              {showIcon && getIcon()}
+              <span className="truncate">{value || getPlaceholder()}</span>
+            </div>
+            <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-[300px] p-0" align="start">
+          <div className="border-b px-3 py-2">
+            <div className="relative">
+              <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder={`Search ${type}s...`}
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-8 h-9"
+              />
+            </div>
+          </div>
+          <div className="max-h-[300px] overflow-y-auto">
+            {filteredOptions.length === 0 ? (
+              <div className="py-6 text-center text-sm text-muted-foreground">
+                {searchTerm ? "No results found" : "No options available"}
+              </div>
+            ) : (
+              <div className="p-1">
+                {filteredOptions.map((option) => (
+                  <button
+                    key={option}
+                    onClick={() => handleSelect(option)}
+                    className={cn(
+                      "w-full px-3 py-2 text-sm rounded-sm hover:bg-accent hover:text-accent-foreground text-left transition-colors",
+                      value === option && "bg-accent text-accent-foreground"
+                    )}
+                  >
+                    <div className="flex items-center gap-2">
+                      {option}
+                      {type === "timeField" && option === "__timestamp" && (
+                        <Badge variant="secondary" className="text-xs">
+                          Default
+                        </Badge>
+                      )}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </PopoverContent>
+      </Popover>
+    </div>
+  );
+}
+
+// Compound component for database + table + time field selection
+interface UnifiedDataSelectorsProps {
+  context: SelectorContext;
+  style?: SelectorStyle;
+  database?: string;
+  table?: string;
+  timeField?: string;
+  onDatabaseChange: (database: string) => void;
+  onTableChange: (table: string) => void;
+  onTimeFieldChange?: (timeField: string) => void;
+  showTimeField?: boolean;
+  className?: string;
+  schemaOverride?: Record<string, TableSchema[]>;
+  layout?: "horizontal" | "vertical";
+}
+
+export function UnifiedDataSelectors({
+  context,
+  style = "select",
+  database,
+  table,
+  timeField,
+  onDatabaseChange,
+  onTableChange,
+  onTimeFieldChange,
+  showTimeField = false,
+  className,
+  schemaOverride,
+  layout = "horizontal",
+}: UnifiedDataSelectorsProps) {
+  // Clear table when database changes
+  useEffect(() => {
+    if (!database) {
+      onTableChange("");
+      onTimeFieldChange?.("");
+    }
+  }, [database, onTableChange, onTimeFieldChange]);
+
+  // Clear time field when table changes
+  useEffect(() => {
+    if (!table) {
+      onTimeFieldChange?.("");
+    }
+  }, [table, onTimeFieldChange]);
+
+  const containerClass =
+    layout === "horizontal" ? "flex items-end gap-3 flex-wrap" : "space-y-3";
+
+  return (
+    <div className={cn(containerClass, className)}>
+      <UnifiedSelector
+        type="database"
+        context={context}
+        style={style}
+        value={database}
+        onChange={onDatabaseChange}
+        className={layout === "horizontal" ? "flex-1 min-w-[200px]" : ""}
+        schemaOverride={schemaOverride}
+      />
+
+      <UnifiedSelector
+        type="table"
+        context={context}
+        style={style}
+        value={table}
+        onChange={onTableChange}
+        database={database}
+        className={layout === "horizontal" ? "flex-1 min-w-[200px]" : ""}
+        schemaOverride={schemaOverride}
+      />
+
+      {showTimeField && (
+        <UnifiedSelector
+          type="timeField"
+          context={context}
+          style={style}
+          value={timeField}
+          onChange={onTimeFieldChange!}
+          database={database}
+          table={table}
+          className={layout === "horizontal" ? "flex-1 min-w-[200px]" : ""}
+          schemaOverride={schemaOverride}
+        />
+      )}
+    </div>
+  );
+}

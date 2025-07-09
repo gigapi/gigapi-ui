@@ -1,3 +1,5 @@
+import { useEffect, useRef, useMemo } from "react";
+import { useSetAtom, useAtomValue } from "jotai";
 import QueryEditor from "@/components/query/QueryEditor";
 import QueryResults from "@/components/QueryResults";
 import {
@@ -6,11 +8,31 @@ import {
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
 import AppLayout from "@/components/navigation/AppLayout";
+import { initializeDatabaseAtom, isConnectedAtom } from "@/atoms";
 
 export function Home() {
-  const breadcrumbs = [
+  const initializeDatabase = useSetAtom(initializeDatabaseAtom);
+  const isConnected = useAtomValue(isConnectedAtom);
+  const initializedRef = useRef(false);
+  
+  console.log("🔥 HOME RENDER:", { isConnected, initializedRef: initializedRef.current, timestamp: new Date().toISOString() });
+
+  // Initialize database and tables when connected (only once)
+  useEffect(() => {
+    if (isConnected && !initializedRef.current) {
+      console.log("[Home] Initializing database for the first time");
+      initializedRef.current = true;
+      initializeDatabase();
+    } else if (!isConnected) {
+      // Reset initialization flag when disconnected
+      initializedRef.current = false;
+    }
+  }, [isConnected, initializeDatabase]);
+
+  // Memoize breadcrumbs to prevent unnecessary re-renders
+  const breadcrumbs = useMemo(() => [
     { label: "Query Interface" }
-  ];
+  ], []);
 
   return (
     <AppLayout breadcrumbs={breadcrumbs} showDatabaseControls={true}>

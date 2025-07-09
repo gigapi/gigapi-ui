@@ -128,6 +128,15 @@ export interface MCPConnection {
   isConnected: boolean;
 }
 
+export interface CustomInstruction {
+  id: string;
+  name: string;
+  content: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface ChatMessage {
   id: string;
   role: "user" | "assistant" | "system";
@@ -135,12 +144,12 @@ export interface ChatMessage {
   timestamp: string;
   metadata?: {
     queryGenerated?: string;
+    chartArtifact?: any;
     dataContext?: {
       database?: string;
       table?: string;
       timeRange?: TimeRange;
     };
-    // Add other relevant metadata
   };
 }
 
@@ -164,39 +173,49 @@ export interface MCPServerCapabilities {
   chartSuggestions: boolean;
   naturalLanguageToSQL: boolean;
   sqlOptimization: boolean;
-  // Add other capabilities as needed
 }
 
 export interface MCPContextType {
-  // Connection management
   connections: MCPConnection[];
   activeConnection: MCPConnection | null;
   addConnection: (
     connection: Omit<MCPConnection, "id" | "isConnected">
   ) => Promise<void>;
-  removeConnection: (connectionId: string) => void;
+  removeConnection: (connectionId: string) => Promise<void>;
   testConnection: (connectionId: string) => Promise<boolean>;
-  setActiveConnection: (connectionId: string | null) => void;
+  setActiveConnection: (connectionId: string | null) => Promise<void>;
 
   // Chat functionality
   chatSessions: ChatSession[];
   activeSession: ChatSession | null;
-  createChatSession: (title?: string) => ChatSession;
-  switchChatSession: (sessionId: string) => void;
-  deleteChatSession: (sessionId: string) => void;
-  renameChatSession: (sessionId: string, newTitle: string) => void;
+  createChatSession: (title?: string) => Promise<ChatSession>;
+  switchChatSession: (sessionId: string) => Promise<void>;
+  deleteChatSession: (sessionId: string) => Promise<void>;
+  renameChatSession: (sessionId: string, newTitle: string) => Promise<void>;
   sendMessage: (content: string) => Promise<void>;
+
+  // Custom Instructions
+  customInstructions: CustomInstruction[];
+  addCustomInstruction: (instruction: Omit<CustomInstruction, "id" | "createdAt" | "updatedAt">) => Promise<void>;
+  updateCustomInstruction: (id: string, updates: Partial<Omit<CustomInstruction, "id" | "createdAt">>) => Promise<void>;
+  deleteCustomInstruction: (id: string) => Promise<void>;
+  toggleCustomInstruction: (id: string) => Promise<void>;
 
   // AI capabilities
   generateQuery: (prompt: string) => Promise<string>;
   analyzeData: (data: any[], prompt: string) => Promise<string>;
   optimizeQuery: (query: string) => Promise<string>;
+  addChartToDashboard: (
+    chartArtifact: any,
+    dashboardId?: string
+  ) => Promise<string>;
 
   // State
   isConnected: boolean;
   isLoading: boolean;
   error: string | null;
   capabilities: MCPServerCapabilities;
+  isInitialized: boolean;
 }
 
 // Query Context Types
@@ -218,7 +237,7 @@ export interface QueryContextType {
   startTime: number | null;
   executionTime: number | null;
   responseSize: number | null;
-  performanceMetrics: PerformanceMetrics | null; // Changed from any
+  performanceMetrics: PerformanceMetrics | null;
   actualExecutedQuery: string | null;
 
   // Query history
@@ -247,7 +266,6 @@ export interface PerformanceMetrics {
     rowCount: number;
     apiResponseTime: number;
   };
-  // Allow other keys for flexibility with different metric sources
   [key: string]: any;
 }
 
@@ -302,7 +320,7 @@ export interface TimeVariableReplacements {
   timeFilter?: string;
   timeFrom?: string;
   timeTo?: string;
-  [key: string]: string | undefined; // Allow dynamic keys for pattern matching
+  [key: string]: string | undefined;
 }
 
 // URL hash query types
@@ -359,20 +377,37 @@ export interface QueryConfig {
 // Types for Column Analysis and Data Processing
 // ============================================================================
 
+
+// DUCK-DB ONES 
 export type DataType =
-  | "string"
-  | "integer"
-  | "float"
-  | "boolean"
-  | "datetime"
-  | "timestamp"
+  | "tinyint" // 8-bit signed
+  | "smallint" // 16-bit signed
+  | "integer" // 32-bit signed
+  | "bigint" // 64-bit signed
+  | "hugeint" // 128-bit signed
+  | "utinyint" // 8-bit unsigned
+  | "usmallint" // 16-bit unsigned
+  | "uinteger" // 32-bit unsigned
+  | "ubigint" // 64-bit unsigned
+  | "uhugeint" // 128-bit unsigned
+  | "float" // real
+  | "double" // double precision
+  | "decimal" // fixed precision
+  | "boolean" // true/false
+  | "varchar" // variable-length text
+  | "blob" // binary large object
   | "date"
   | "time"
-  | "array"
-  | "object"
-  | "unknown"
-  | "datetime-string"
-  | "bigint";
+  | "timestamp" // no TZ
+  | "timestamptz" // with TZ
+  | "interval" // time span
+  | "array" // fixed-length list
+  | "list" // variable-length list
+  | "struct" // named fields
+  | "map" // key→value
+  | "enum" // dictionary encoding
+  | "union" // tagged union
+  | "unknown";
 
 /**
  * Detailed information about a column, including its type, role, and statistics.

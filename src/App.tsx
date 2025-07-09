@@ -1,56 +1,100 @@
-import React, { useEffect } from "react";
-import { BrowserRouter as Router, Routes, Route, useNavigate, useParams } from "react-router-dom";
+import React, { useEffect, useRef } from "react";
+import {
+  BrowserRouter as Router,
+  Routes,
+  Route,
+  useParams,
+} from "react-router-dom";
+import { RefreshCw } from "lucide-react";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
-import { useConnection, ConnectionProvider } from "@/contexts/ConnectionContext";
-import { DatabaseProvider } from "@/contexts/DatabaseContext";
-import { TimeProvider } from "@/contexts/TimeContext";
-import { QueryProvider } from "@/contexts/QueryContext";
-import { MCPProvider } from "@/contexts/MCPContext";
-import ConnectionError from "@/components/ConnectionError";
+import { useAtom, useSetAtom } from "jotai";
+
+// New clean atoms
+import { connectionStateAtom, isConnectedAtom, connectAtom, apiUrlAtom } from "@/atoms";
+
+// Pages
+import ConnectionStatus from "@/pages/ConnectionStatus";
 import Home from "@/pages/Home";
 import DashboardList from "@/pages/DashboardList";
 import DashboardView from "@/pages/DashboardView";
 import PanelEdit from "@/pages/PanelEdit";
-import { CommandPalette } from "@/components/CommandPalette";
-import { CommandPaletteProvider, useCommandPalette } from "@/contexts/CommandPaletteContext";
+import ChatPage from "@/pages/ChatPage";
 
-// Route wrapper for PanelEdit
-function PanelEditRoute() {
-  const navigate = useNavigate();
-  const { dashboardId, panelId } = useParams();
-  
-  const handleSaveSuccess = () => {
-    navigate(`/dashboard/${dashboardId}`);
-  };
-  
-  const handleCancel = () => {
-    navigate(`/dashboard/${dashboardId}`);
-  };
-  
+// Components
+import { AppSidebar } from "@/components/navigation/app-sidebar";
+import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
+import { CommandPalette } from "@/components/shared/CommandPalette";
+
+// const VERSION = import.meta.env.PACKAGE_VERSION;
+
+// Route component for specific chat sessions
+function ChatRoute() {
+  const { chatId } = useParams();
+  return <ChatPage chatId={chatId} />;
+}
+
+// Simple app initialization
+function AppInitializer() {
+  const connect = useSetAtom(connectAtom);
+  const [apiUrl] = useAtom(apiUrlAtom);
+  const initRef = useRef(false);
+
+  useEffect(() => {
+    // Prevent double initialization in React.StrictMode
+    if (initRef.current) return;
+    initRef.current = true;
+
+    // Wait for apiUrl to be loaded from storage
+    if (!apiUrl || apiUrl === "") {
+      console.log("🔥 [AppInitializer] Waiting for API URL to load from storage");
+      return;
+    }
+
+    // Try to connect on app start
+    console.log("🔥 [AppInitializer] Starting initial connection");
+    connect().catch(() => {
+      // Connection failure is handled by the atom
+    });
+  }, [connect, apiUrl]);
+
+  return null;
+}
+
+// Main app with router - only shown when connected
+function AppWithRouter() {
   return (
-    <PanelEdit
-      dashboardId={dashboardId || ""}
-      panelId={panelId}
-      onSaveSuccess={handleSaveSuccess}
-      onCancel={handleCancel}
-    />
+    <Router>
+      <SidebarProvider
+        style={
+          {
+            "--sidebar-width": "17rem",
+          } as React.CSSProperties
+        }
+      >
+        <AppSidebar />
+        <SidebarInset>
+          <Routes>
+            <Route path="/" element={<Home />} />
+            <Route path="/connect" element={<ConnectionStatus />} />
+            <Route path="/dashboards" element={<DashboardList />} />
+            <Route path="/dashboard/:dashboardId" element={<DashboardView />} />
+            <Route path="/dashboard/:dashboardId/panel/new" element={<PanelEdit />} />
+            <Route path="/dashboard/:dashboardId/panel/:panelId" element={<PanelEdit />} />
+            <Route path="/chat" element={<ChatPage />} />
+            <Route path="/chat/:chatId" element={<ChatRoute />} />
+          </Routes>
+          <CommandPalette />
+        </SidebarInset>
+      </SidebarProvider>
+    </Router>
   );
 }
-import { AppSidebar } from "@/components/navigation/app-sidebar";
-import {
-  SidebarInset,
-  SidebarProvider,
-} from "@/components/ui/sidebar";
-import AppContent from "@/components/AppContent"; // Import AppContent for side-effects
-import { DashboardProvider } from "@/contexts/DashboardContext"; // Import DashboardProvider
 
-const VERSION = import.meta.env.PACKAGE_VERSION;
-
-// Add ErrorBoundary component to catch React errors
+// Error boundary
 class ErrorBoundary extends React.Component<
   { children: React.ReactNode },
-  { hasError: boolean | null; error: any | null }
+  { hasError: boolean; error: any }
 > {
   constructor(props: { children: React.ReactNode }) {
     super(props);
@@ -58,41 +102,26 @@ class ErrorBoundary extends React.Component<
   }
 
   static getDerivedStateFromError(error: any) {
-    console.error("Error caught in ErrorBoundary:", error);
     return { hasError: true, error };
   }
 
   componentDidCatch(error: any, errorInfo: any) {
-    console.error("Error caught by ErrorBoundary:", error, errorInfo);
+    console.error("App Error:", error, errorInfo);
   }
 
   render() {
     if (this.state.hasError) {
       return (
         <div className="flex items-center justify-center h-screen flex-col p-12">
-          <h2 className="text-xl font-bold mb-4">
-            Oh no, something went really wrong...
-          </h2>
-          <div className="text-sm text-muted-foreground mb-4">
-            <p className="mb-2 text-red-500">
-              ERROR: {this.state.error?.message || "An unknown error occurred."}
-            </p>
-
-            <a
-              href={`https://github.com/gigapi/gigapi-ui/issues/new?title=Critical%20Error%20in%20GigAPI%20UI&body=Version%3A%20${VERSION}%0A%0AError%3A%20${this.state.error?.message}%0A%0AStack%3A%20${this.state.error?.stack}%0A%0APlease%20provide%20any%20additional%20context.`}
-              className="text-blue-500 hover:underline"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              {" "}
-              Plase click here to report the issue, we'll fix it ASAP!
-            </a>
-          </div>
+          <h2 className="text-xl font-bold mb-4">Something went wrong</h2>
+          <p className="text-sm text-muted-foreground mb-4">
+            {this.state.error?.message || "An unknown error occurred"}
+          </p>
           <button
-            className="px-4 py-2 text-white rounded bg-blue-500 hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-opacity-75"
-            onClick={() => this.setState({ hasError: false })}
+            className="px-4 py-2 bg-primary text-primary-foreground rounded hover:bg-primary/90"
+            onClick={() => this.setState({ hasError: false, error: null })}
           >
-            Reload to try again.
+            Try Again
           </button>
         </div>
       );
@@ -102,123 +131,66 @@ class ErrorBoundary extends React.Component<
   }
 }
 
-// Add global error handler for unhandled promise rejections
-const setupGlobalErrorHandlers = () => {
-  window.addEventListener("unhandledrejection", (event) => {
-    // Prevent the default browser behavior that would log the error
-    event.preventDefault();
+// Main App component
+export default function App() {
+  const [connectionState] = useAtom(connectionStateAtom);
+  const [isConnected] = useAtom(isConnectedAtom);
+  
 
-    // Only log important errors, ignore cancellation errors
-    if (
-      // Check error message
-      (event.reason?.message &&
-        (event.reason.message.includes("canceled") ||
-          event.reason.message.includes("cancelled") ||
-          event.reason.message.includes("manually") ||
-          event.reason.message.includes("aborted") ||
-          event.reason.message.includes("user aborted"))) ||
-      // Check error name
-      (event.reason?.name &&
-        (event.reason.name.includes("Cancel") ||
-          event.reason.name.includes("Abort"))) ||
-      // Check if it's an axios cancel error
-      (typeof event.reason?.constructor?.name === "string" &&
-        event.reason.constructor.name === "CanceledError")
-    ) {
-      // Silently ignore cancellation errors
-      return;
-    }
-  });
-};
-
-function AppWithCommandPalette() {
-  const commandPalette = useCommandPalette();
-
-  return (
-    <Router>
-      <SidebarProvider
-        style={{
-          "--sidebar-width": "17rem",
-        } as React.CSSProperties}
-      >
-        <AppSidebar />
-        <SidebarInset>
-          <AppContent /> {/* AppContent for side-effects only */}
-          <DashboardProvider> {/* Wrap Routes with DashboardProvider */}
-            <Routes>
-              <Route path="/" element={<Home />} />
-              <Route path="/dashboards" element={<DashboardList />} />
-              <Route path="/dashboard/:dashboardId" element={<DashboardView />} />
-              <Route
-                path="/dashboard/:dashboardId/panel/:panelId/edit"
-                element={<PanelEditRoute />}
-              />
-               <Route
-                path="/dashboard/:dashboardId/panel/new"
-                element={<PanelEditRoute />}
-              />
-            </Routes>
-            <CommandPalette open={commandPalette.open} onOpenChange={commandPalette.onOpenChange} />
-          </DashboardProvider>
-        </SidebarInset>
-      </SidebarProvider>
-    </Router>
-  );
-}
-
-function AppInternal() {
-  const { connectionState } = useConnection();
-
-  // Set up global error handlers
   useEffect(() => {
-    setupGlobalErrorHandlers();
-
-    // Clean up event listener when the app unmounts
-    return () => {
-      window.removeEventListener("unhandledrejection", () => {});
+    // Global error handler
+    const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
+      // Ignore cancellation errors and Monaco disposal errors
+      const error = event.reason;
+      if (
+        error?.message?.includes("cancel") ||
+        error?.message?.includes("abort") ||
+        error?.name?.includes("Cancel") ||
+        error?.name?.includes("Abort") ||
+        error?.type === "cancelation" ||
+        error?.msg?.includes("manually canceled") ||
+        error?.message?.includes("Request was canceled")
+      ) {
+        event.preventDefault();
+        return;
+      }
     };
-  }, []);
 
-  // Show ConnectionError component for connecting, error, or empty states
-  if (
-    connectionState === "connecting" ||
-    connectionState === "error" ||
-    connectionState === "empty"
-  ) {
-    return (
-      <ThemeProvider defaultTheme="dark" storageKey="gigapi-theme">
-        <div className="h-screen flex flex-col relative bg-background">
-          <ConnectionError />
-        </div>
-        <Toaster />
-      </ThemeProvider>
-    );
-  }
+    window.addEventListener("unhandledrejection", handleUnhandledRejection);
+    return () =>
+      window.removeEventListener(
+        "unhandledrejection",
+        handleUnhandledRejection
+      );
+  }, []);
 
   return (
     <ErrorBoundary>
       <ThemeProvider defaultTheme="dark" storageKey="gigapi-theme">
-        <CommandPaletteProvider>
-          <AppWithCommandPalette />
-        </CommandPaletteProvider>
-        <Toaster position="bottom-right" richColors expand />
+        <AppInitializer />
+
+        {/* Show connection page for non-connected states */}
+        {!isConnected ? (
+          <>
+            {connectionState === "connecting" ? (
+              <div className="h-screen flex items-center justify-center">
+                <div className="flex flex-col items-center gap-4">
+                  <RefreshCw className="h-8 w-8 animate-spin text-primary" />
+                  <p className="text-muted-foreground">Connecting to API...</p>
+                </div>
+              </div>
+            ) : (
+              <ConnectionStatus />
+            )}
+            <Toaster />
+          </>
+        ) : (
+          <>
+            <AppWithRouter />
+            <Toaster position="bottom-right" richColors expand />
+          </>
+        )}
       </ThemeProvider>
     </ErrorBoundary>
-  );
-}
-
-export default function App() {
-  return (
-    <ConnectionProvider>
-      <DatabaseProvider>
-        <TimeProvider>
-          <QueryProvider>
-            <MCPProvider>
-              <AppInternal />
-            </MCPProvider>
-          </QueryProvider>
-        </TimeProvider>
-      </DatabaseProvider>
-    </ConnectionProvider>
   );
 }

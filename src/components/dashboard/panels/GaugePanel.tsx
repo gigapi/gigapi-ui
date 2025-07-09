@@ -2,32 +2,37 @@ import { useMemo, useRef, useEffect } from "react";
 import * as echarts from "echarts";
 import { type PanelProps } from "@/types/dashboard.types";
 import { withPanelWrapper } from "./BasePanel";
+import { useTheme } from "@/components/theme-provider";
 
 function GaugePanel({ config, data, isEditMode }: PanelProps) {
+  const { theme } = useTheme();
   const chartRef = useRef<HTMLDivElement>(null);
   const chartInstance = useRef<echarts.ECharts | null>(null);
 
   const gaugeData = useMemo(() => {
     if (!data || data.length === 0) return null;
-    
+
     // Use field mapping if available
     const fieldMapping = config.fieldMapping;
     let valueField: string;
-    
+
     if (fieldMapping?.yField) {
       valueField = fieldMapping.yField;
     } else {
       // Auto-detect numeric field
       const firstRecord = data[0];
-      const numericFields = Object.keys(firstRecord).filter(key => {
+      const numericFields = Object.keys(firstRecord).filter((key) => {
         const value = firstRecord[key];
-        return typeof value === 'number' || (typeof value === 'string' && !isNaN(Number(value)));
+        return (
+          typeof value === "number" ||
+          (typeof value === "string" && !isNaN(Number(value)))
+        );
       });
-      
+
       if (numericFields.length === 0) return null;
       valueField = numericFields[0];
     }
-    
+
     // Get the latest value
     let currentValue: number | null = null;
     for (let i = data.length - 1; i >= 0; i--) {
@@ -40,23 +45,41 @@ function GaugePanel({ config, data, isEditMode }: PanelProps) {
 
     if (currentValue === null) return null;
 
-    // Use Grafana-like field configuration
+    // Use field configuration
     const fieldConfig = config.fieldConfig?.defaults || {};
     const min = fieldConfig.min ?? 0;
-    const max = fieldConfig.max ?? 100;
-    const unit = fieldConfig.unit || '';
+    const max = fieldConfig.max ?? Math.max(100, currentValue * 1.2); // Auto-scale if needed
+    const unit = fieldConfig.unit || "";
 
-    // Calculate threshold zones from field config
+    // Calculate threshold zones with better defaults
     const zones = [];
-    if (fieldConfig.thresholds?.steps) {
+    const defaultZones = [
+      { min: 0, max: 0.6, color: "#52c41a" }, // Green
+      { min: 0.6, max: 0.8, color: "#faad14" }, // Yellow
+      { min: 0.8, max: 1, color: "#ff4d4f" }, // Red
+    ];
+
+    if (
+      fieldConfig.thresholds?.steps &&
+      fieldConfig.thresholds.steps.length > 1
+    ) {
       const steps = fieldConfig.thresholds.steps;
       for (let i = 0; i < steps.length - 1; i++) {
         zones.push({
           min: steps[i].value,
           max: steps[i + 1].value,
-          color: steps[i].color || '#52c41a'
+          color: steps[i].color || defaultZones[i % defaultZones.length].color,
         });
       }
+    } else {
+      // Use default zones based on min/max
+      defaultZones.forEach((zone) => {
+        zones.push({
+          min: min + (max - min) * zone.min,
+          max: min + (max - min) * zone.max,
+          color: zone.color,
+        });
+      });
     }
 
     return {
@@ -74,96 +97,95 @@ function GaugePanel({ config, data, isEditMode }: PanelProps) {
 
     const { value, min, max, unit, zones } = gaugeData;
 
+    // Theme-aware colors
+    const isDark = theme === "dark";
+    const textColor = isDark ? "#e2e8f0" : "#475569";
+
     return {
+      backgroundColor: "transparent",
       series: [
         {
           name: config.title,
-          type: 'gauge',
+          type: "gauge",
           startAngle: 180,
           endAngle: 0,
-          center: ['50%', '75%'],
-          radius: '90%',
+          center: ["50%", "75%"],
+          radius: "90%",
           min,
           max,
-          splitNumber: 5,
+          splitNumber: 10,
           axisLine: {
             lineStyle: {
-              width: 6,
-              color: zones.length > 0 
-                ? zones.map(zone => [(zone.max || max) / max, zone.color])
-                : [[1, '#52c41a']]
-            }
-          },
-          pointer: {
-            icon: 'path://M12.8,0.7l12,40.1H0.7L12.8,0.7z',
-            length: '12%',
-            width: 20,
-            offsetCenter: [0, '-60%'],
-            itemStyle: {
-              color: 'auto'
-            }
+              width: 8,
+              color:
+                zones.length > 0
+                  ? zones.map((zone) => [
+                      (zone?.max ? zone.max - min : 0) / (max - min),
+                      zone.color,
+                    ])
+                  : [[1, "#52c41a"]],
+            },
           },
           axisTick: {
-            length: 12,
+            length: 8,
+            distance: 0,
             lineStyle: {
-              color: 'auto',
-              width: 2
-            }
+              color: "auto",
+              width: 1,
+            },
           },
           splitLine: {
-            length: 20,
+            length: 12,
+            distance: -14,
             lineStyle: {
-              color: 'auto',
-              width: 5
-            }
+              color: "auto",
+              width: 2,
+            },
           },
           axisLabel: {
-            color: '#464646',
-            fontSize: 12,
-            distance: -60,
-            rotate: 'tangential',
+            color: textColor,
+            fontSize: 10,
+            distance: -25,
             formatter: function (value: number) {
-              if (Math.abs(value) >= 1000) {
-                return (value / 1000).toFixed(1) + 'K';
+              if (Math.abs(value) >= 1000000) {
+                return (value / 1000000).toFixed(1) + "M";
+              } else if (Math.abs(value) >= 1000) {
+                return (value / 1000).toFixed(1) + "K";
               }
               return value.toFixed(0);
-            }
+            },
           },
           title: {
-            offsetCenter: [0, '-10%'],
-            fontSize: 14,
-            color: '#464646'
+            show: false,
           },
           detail: {
-            fontSize: 18,
-            offsetCenter: [0, '-35%'],
-            valueAnimation: true,
+            fontSize: 16,
+            fontWeight: "bold",
+            offsetCenter: [0],
             formatter: function (value: number) {
               let formattedValue: string;
               if (Math.abs(value) >= 1e6) {
-                formattedValue = (value / 1e6).toFixed(1) + 'M';
+                formattedValue = (value / 1e6).toFixed(1) + "M";
               } else if (Math.abs(value) >= 1e3) {
-                formattedValue = (value / 1e3).toFixed(1) + 'K';
+                formattedValue = (value / 1e3).toFixed(1) + "K";
               } else {
-                formattedValue = value.toFixed(1);
+                const decimals = config.fieldConfig?.defaults?.decimals ?? 1;
+                formattedValue = value.toFixed(decimals);
               }
-              return formattedValue + unit;
+              return formattedValue + (unit ? " " + unit : "");
             },
-            color: 'inherit'
+            color: textColor,
           },
           data: [
             {
               value,
-              name: config.title,
-            }
-          ]
-        }
+              name: config.title || "Value",
+            },
+          ],
+        },
       ],
-      animation: !isEditMode,
-      animationDuration: 1000,
-      animationEasing: 'elasticOut' as const,
     };
-  }, [gaugeData, config, isEditMode]);
+  }, [gaugeData, config, isEditMode, theme]);
 
   // Initialize chart
   useEffect(() => {
@@ -211,17 +233,31 @@ function GaugePanel({ config, data, isEditMode }: PanelProps) {
   }
 
   return (
-    <div className="w-full h-full">
-      <div 
-        ref={chartRef} 
-        className="w-full h-full"
-        style={{ minHeight: '200px' }}
-      />
-      
-      {/* Additional info below gauge */}
-      <div className="absolute bottom-2 left-0 right-0 text-center">
-        <div className="text-xs text-muted-foreground">
-          Range: {gaugeData.min} - {gaugeData.max} {gaugeData.unit}
+    <div className="w-full h-full flex flex-col">
+      {/* Title */}
+      {config.title && (
+        <div className="text-center text-sm font-medium text-muted-foreground mb-2 px-2">
+          {config.title}
+        </div>
+      )}
+
+      {/* Gauge Chart */}
+      <div className="flex-1 relative min-h-0">
+        <div ref={chartRef} className="w-full h-full" />
+      </div>
+
+      {/* Stats below gauge */}
+      <div className="px-4 pb-2">
+        <div className="flex justify-between items-center text-xs text-muted-foreground">
+          <span>
+            Min: {gaugeData.min}
+            {gaugeData.unit}
+          </span>
+          <span>{gaugeData.percentage.toFixed(1)}%</span>
+          <span>
+            Max: {gaugeData.max}
+            {gaugeData.unit}
+          </span>
         </div>
       </div>
     </div>

@@ -1,17 +1,20 @@
 import { useCallback } from 'react';
+import { useSetAtom } from 'jotai';
 import { HashQueryUtils } from '@/lib/url/hash-query-utils';
-import { useQuery } from '@/contexts/QueryContext';
-import { useDatabase } from '@/contexts/DatabaseContext';
-import { useTime } from '@/contexts/TimeContext';
+import { setQueryAtom } from '@/atoms';
+import { setSelectedDbAtom, selectedTableAtom } from '@/atoms';
+import { setTimeRangeAtom, selectedTimeFieldAtom } from '@/atoms';
 import type { HashQueryParams } from '@/types/utils.types';
 
 /**
  * Hook to handle URL-based query parameter loading and management
  */
 export function useUrlQuery() {
-  const { setQuery } = useQuery();
-  const { setSelectedDb, setSelectedTable } = useDatabase();
-  const { setTimeRange, setSelectedTimeField } = useTime();
+  const setQuery = useSetAtom(setQueryAtom);
+  const setSelectedDb = useSetAtom(setSelectedDbAtom);
+  const setSelectedTable = useSetAtom(selectedTableAtom);
+  const setTimeRange = useSetAtom(setTimeRangeAtom);
+  const setSelectedTimeField = useSetAtom(selectedTimeFieldAtom);
 
   /**
    * Load query parameters from URL hash and apply them to contexts
@@ -39,10 +42,9 @@ export function useUrlQuery() {
       // Apply time range
       if (params.timeFrom || params.timeTo) {
         setTimeRange({
-          from: params.timeFrom || 'now-15m',
+          type: 'relative',
+          from: params.timeFrom || '15m',
           to: params.timeTo || 'now',
-          display: `${params.timeFrom || 'now-15m'} to ${params.timeTo || 'now'}`,
-          enabled: true,
         });
       }
 

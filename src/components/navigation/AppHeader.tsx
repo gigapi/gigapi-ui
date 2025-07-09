@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { Link } from "react-router-dom";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -12,10 +13,12 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Globe, Edit, Save, X, Database, Search } from "lucide-react";
-import { useConnection } from "@/contexts/ConnectionContext";
-import DatabaseSelector from "@/components/DatabaseSelector";
+import { useAtom, useSetAtom } from "jotai";
+import { apiUrlAtom, connectAtom } from "@/atoms";
+import { selectedDbAtom, setSelectedDbAtom } from "@/atoms";
+import { UnifiedSelector } from "@/components/shared/DbTableTimeSelector";
 import { toast } from "sonner";
-import { useCommandPalette } from "@/contexts/CommandPaletteContext";
+import { commandPaletteOpenAtom } from "@/atoms";
 
 import {
   Popover,
@@ -39,10 +42,14 @@ export default function AppHeader({
   actions, 
   showDatabaseControls = true
 }: AppHeaderProps) {
-  const { apiUrl, setApiUrl } = useConnection();
+  const [apiUrl] = useAtom(apiUrlAtom);
+  const [selectedDb] = useAtom(selectedDbAtom);
+  const setApiUrl = useSetAtom(apiUrlAtom);
+  const connect = useSetAtom(connectAtom);
+  const setSelectedDb = useSetAtom(setSelectedDbAtom);
   const [isEndpointEditing, setIsEndpointEditing] = useState(false);
   const [tempApiUrl, setTempApiUrl] = useState(apiUrl);
-  const { setOpen } = useCommandPalette();
+  const setCommandPaletteOpen = useSetAtom(commandPaletteOpenAtom);
 
   // Update temp URL when apiUrl changes
   useEffect(() => {
@@ -50,20 +57,28 @@ export default function AppHeader({
   }, [apiUrl]);
 
   // Handle saving the endpoint
-  const handleSaveEndpoint = () => {
-    if (tempApiUrl.trim() === apiUrl) {
+  const handleSaveEndpoint = async () => {
+    const newUrl = tempApiUrl.trim();
+    
+    if (newUrl === apiUrl) {
       setIsEndpointEditing(false);
       return;
     }
 
-    if (!tempApiUrl.trim()) {
+    if (!newUrl) {
       toast.error("API endpoint cannot be empty");
       return;
     }
 
-    toast.info("Changing API endpoint and refreshing connections...");
-    setApiUrl(tempApiUrl.trim());
+    // Update the URL and trigger connection
+    setApiUrl(newUrl);
     setIsEndpointEditing(false);
+    
+    try {
+      await connect(newUrl);
+    } catch (error) {
+      // Error is handled by the connection atom
+    }
   };
 
   // Handle API URL input key press
@@ -91,8 +106,10 @@ export default function AppHeader({
             <React.Fragment key={crumb.label}>
               <BreadcrumbItem>
                 {crumb.href ? (
-                  <BreadcrumbLink href={crumb.href}>
-                    {crumb.label}
+                  <BreadcrumbLink asChild>
+                    <Link to={crumb.href}>
+                      {crumb.label}
+                    </Link>
                   </BreadcrumbLink>
                 ) : (
                   <BreadcrumbPage>{crumb.label}</BreadcrumbPage>
@@ -110,11 +127,11 @@ export default function AppHeader({
         <Button
           variant="outline"
           size="sm"
-          onClick={() => setOpen(true)}
+          onClick={() => setCommandPaletteOpen(true)}
           className="hidden sm:flex items-center gap-2 text-muted-foreground"
         >
           <Search className="h-4 w-4" />
-          <span className="hidden md:inline">Search commands...</span>
+          <span className="hidden md:inline">Spotlight...</span>
           <div className="hidden md:flex text-xs bg-muted px-1.5 py-0.5 rounded border">
             ⌘K
           </div>
@@ -124,7 +141,7 @@ export default function AppHeader({
         <Button
           variant="outline"
           size="sm"
-          onClick={() => setOpen(true)}
+          onClick={() => setCommandPaletteOpen(true)}
           className="sm:hidden"
         >
           <Search className="h-4 w-4" />
@@ -138,7 +155,16 @@ export default function AppHeader({
           <>
             {/* Desktop Database Controls */}
             <div className="hidden md:flex items-center gap-3">
-              <DatabaseSelector />
+              <UnifiedSelector
+                type="database"
+                context="query"
+                style="select"
+                value={selectedDb || ""}
+                onChange={setSelectedDb}
+                className="w-auto"
+                showIcon={false}
+                label={null}
+              />
 
               {/* API Endpoint Control */}
               {isEndpointEditing ? (
@@ -201,7 +227,16 @@ export default function AppHeader({
                   <div className="space-y-4">
                     <div className="space-y-2">
                       <h4 className="font-medium">Database Connection</h4>
-                      <DatabaseSelector />
+                      <UnifiedSelector
+                        type="database"
+                        context="query"
+                        style="select"
+                        value={selectedDb || ""}
+                        onChange={setSelectedDb}
+                        className="w-full"
+                        showIcon={false}
+                        label={null}
+                      />
                     </div>
                     <Separator />
                     <div className="space-y-2">

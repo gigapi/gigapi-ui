@@ -5,7 +5,7 @@ import {
   useSearchParams,
   useNavigate,
 } from "react-router-dom";
-import { useDashboard } from "@/contexts/DashboardContext";
+import { useDashboard } from "@/atoms";
 import DashboardGrid from "@/components/dashboard/DashboardGrid";
 import { Button } from "@/components/ui/button";
 import {
@@ -94,6 +94,13 @@ export default function DashboardView() {
     };
   }, [dashboardId, loadDashboard, clearCurrentDashboard]);
 
+  // Refresh all panels when dashboard is loaded
+  useEffect(() => {
+    if (currentDashboard && currentDashboard.panels.length > 0) {
+      refreshAllPanels();
+    }
+  }, [currentDashboard?.id]); // Only refresh when dashboard ID changes
+
   useEffect(() => {
     const edit = searchParams.get("edit");
     setEditMode(edit === "true");
@@ -107,7 +114,7 @@ export default function DashboardView() {
       navigate(`/dashboard/${dashboardId}/panel/new`);
     } else {
       // Editing an existing panel
-      navigate(`/dashboard/${dashboardId}/panel/${panelId}/edit`);
+      navigate(`/dashboard/${dashboardId}/panel/${panelId}`);
     }
   };
 
@@ -134,9 +141,9 @@ export default function DashboardView() {
     [currentDashboard, updateDashboard]
   );
 
-  const handleRefresh = useCallback(async () => {
+  const handleRefresh = useCallback(() => {
     try {
-      await refreshAllPanels();
+      refreshAllPanels();
       toast.success("Dashboard refreshed");
     } catch (err) {
       toast.error("Failed to refresh dashboard");
@@ -144,40 +151,43 @@ export default function DashboardView() {
   }, [refreshAllPanels]);
 
   const handleSave = useCallback(async () => {
+    if (!currentDashboard) return;
     try {
-      await saveDashboard();
+      await saveDashboard(currentDashboard);
       setEditMode(false);
       setSearchParams({}, { replace: true });
       toast.success("Dashboard saved");
     } catch (err) {
       toast.error("Failed to save dashboard");
     }
-  }, [saveDashboard, setEditMode, setSearchParams]);
+  }, [currentDashboard, saveDashboard, setEditMode, setSearchParams]);
 
   const handleExport = useCallback(() => {
     if (!currentDashboard) return;
-    
+
     try {
       // Create export data
       const exportData = {
         dashboard: currentDashboard,
-        panels: Array.from(panels.values()),
+        panels: panels,
         exportedAt: new Date().toISOString(),
-        version: "1.0"
+        version: "1.0",
       };
-      
+
       // Create and download file
       const dataStr = JSON.stringify(exportData, null, 2);
-      const dataBlob = new Blob([dataStr], { type: 'application/json' });
+      const dataBlob = new Blob([dataStr], { type: "application/json" });
       const url = URL.createObjectURL(dataBlob);
-      const link = document.createElement('a');
+      const link = document.createElement("a");
       link.href = url;
-      link.download = `${currentDashboard.name.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_dashboard.json`;
+      link.download = `${currentDashboard.name
+        .replace(/[^a-z0-9]/gi, "_")
+        .toLowerCase()}_dashboard.json`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
-      
+
       toast.success("Dashboard exported successfully");
     } catch (err) {
       toast.error("Failed to export dashboard");
@@ -260,7 +270,6 @@ export default function DashboardView() {
 
   const headerActions = (
     <div className="flex items-center gap-2">
-      {/* Description Tooltip */}
       {currentDashboard.description && (
         <TooltipProvider>
           <Tooltip>
@@ -410,10 +419,7 @@ export default function DashboardView() {
             Dashboard Settings
           </DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuItem 
-            onSelect={handleExport}
-            disabled={isEditMode}
-          >
+          <DropdownMenuItem onSelect={handleExport} disabled={isEditMode}>
             <Download className="w-4 h-4 mr-2" />
             Export
           </DropdownMenuItem>
@@ -431,7 +437,6 @@ export default function DashboardView() {
       <DashboardErrorBoundary
         onError={(error, errorInfo) => {
           console.error("Dashboard rendering error:", error, errorInfo);
-          // Could send to error reporting service here
         }}
       >
         <div className="h-full p-4 overflow-auto">

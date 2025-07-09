@@ -1,41 +1,56 @@
 import { useRef, useEffect, useState, useCallback, useMemo } from "react";
-import { useQuery } from "@/contexts/QueryContext";
-import { useDatabase } from "@/contexts/DatabaseContext";
-import { useTime } from "@/contexts/TimeContext";
-import { useMCP } from "@/contexts/MCPContext";
+import { useAtom, useSetAtom } from "jotai";
+import {
+  queryAtom,
+  executeQueryAtom,
+  queryLoadingAtom,
+  setQueryAtom,
+  selectedDbAtom,
+  selectedTableAtom,
+  getColumnsAtom,
+  setSelectedTableAtom,
+  autoCompleteSchemaAtom,
+  timeRangeAtom,
+  selectedTimeFieldAtom,
+  hasTimeVariablesAtom,
+  setTimeRangeAtom,
+  setSelectedTimeFieldAtom,
+  setHasTimeVariablesAtom,
+} from "@/atoms";
+import { useMCP } from "@/atoms/mcp-atoms";
 import { toast } from "sonner";
-import ChatPanel from "@/components/MCP/ChatPanel";
-import {
-  TimeVariablesPreview,
-  QueryEditorToolbar,
-  QueryEditorSelectors,
-  MonacoSqlEditor,
-} from "./";
-import {
-  checkForTimeVariables,
-  detectTimeFieldsFromSchema,
-  previewProcessedQuery,
-} from "@/lib/";
+import ChatPanelCompact from "@/components/MCP/ChatPanelCompact";
+import { QueryEditorToolbar, QueryEditorSelectors, MonacoSqlEditor } from "./";
+import { checkForTimeVariables, detectTimeFieldsFromSchema } from "@/lib/";
 
 export default function QueryEditor() {
-  const { query, setQuery, executeQuery, isLoading } = useQuery();
-  const {
-    selectedDb,
-    selectedTable,
-    schema,
-    getColumnsForTable,
-  } = useDatabase();
-  const {
-    timeRange,
-    setTimeRange,
-    selectedTimeField,
-    setSelectedTimeField,
-    hasTimeVariables,
-    setHasTimeVariables,
-  } = useTime();
-  const { isConnected: mcpConnected } = useMCP();
+  const [query] = useAtom(queryAtom);
+  const [isLoading] = useAtom(queryLoadingAtom);
+  const [selectedDb] = useAtom(selectedDbAtom);
+  const [selectedTable] = useAtom(selectedTableAtom);
+  const [timeRange] = useAtom(timeRangeAtom);
+  const [selectedTimeField] = useAtom(selectedTimeFieldAtom);
+  const [hasTimeVariables] = useAtom(hasTimeVariablesAtom);
+  const [getColumns] = useAtom(getColumnsAtom);
+  const [autoCompleteSchema] = useAtom(autoCompleteSchemaAtom);
+  const setQuery = useSetAtom(setQueryAtom);
+  const executeQuery = useSetAtom(executeQueryAtom);
+  const setSelectedTableAction = useSetAtom(setSelectedTableAtom);
+  const setSelectedTimeField = useSetAtom(setSelectedTimeFieldAtom);
+  const setHasTimeVariables = useSetAtom(setHasTimeVariablesAtom);
+  
+  console.log("🔥 QUERY EDITOR RENDER:", { query, isLoading, selectedDb, selectedTable, timestamp: new Date().toISOString() });
 
-  const [showChatPanel, setShowChatPanel] = useState(false);
+  // Use schema to get columns for table
+  const getColumnsForTable = (tableName: string) => getColumns(tableName);
+  // Get MCP data
+  const { chatSessions, isConnected: mcpConnected } = useMCP();
+
+  // Load chat panel state from localStorage
+  const [showChatPanel, setShowChatPanel] = useState(() => {
+    const saved = localStorage.getItem("queryEditor.showChatPanel");
+    return saved !== null ? saved === "true" : false; // Default to closed
+  });
 
   // Create refs for editor
   const editorRef = useRef<any>(null);
@@ -60,30 +75,46 @@ export default function QueryEditor() {
   );
 
   // Handle time range change
+  const setTimeRange = useSetAtom(setTimeRangeAtom);
   const handleTimeRangeChange = useCallback(
     (newTimeRange: any) => {
       setTimeRange(newTimeRange);
+      console.log("Time range change:", newTimeRange);
     },
     [setTimeRange]
   );
 
-  // Handle running query
-  const handleRunQuery = useCallback(async () => {
+  // Handle running query with timeout protection - NOT using useCallback to avoid stale closures
+  const handleRunQuery = async () => {
+    console.log("🔥 RUN QUERY CALLED:", { selectedDb, query, timestamp: new Date().toISOString() });
+    
+    // Force sync the editor content before running
+    let finalQuery = query;
+    if (editorRef.current) {
+      const currentEditorContent = editorRef.current.getValue() || "";
+      console.log("🔥 FORCE SYNC EDITOR:", { currentEditorContent, query, different: currentEditorContent !== query });
+      if (currentEditorContent !== query) {
+        console.log("🔥 FORCE SYNC setQuery:", { currentEditorContent });
+        setQuery(currentEditorContent);
+        finalQuery = currentEditorContent; // Use the editor content immediately
+      }
+    }
+
     if (!selectedDb) {
       toast.error("Please select a database first");
       return;
     }
 
-    // Force sync the editor content before running
-    if (editorRef.current) {
-      const currentEditorContent = editorRef.current.getValue() || "";
-      if (currentEditorContent !== query) {
-        setQuery(currentEditorContent);
-      }
+    // Prevent empty query execution
+    const trimmedQuery = finalQuery.trim();
+    if (!trimmedQuery) {
+      toast.error("Please enter a query to execute");
+      return;
     }
 
+    console.log("🔥 EXECUTING QUERY:", { finalQuery: trimmedQuery });
     executeQuery();
-  }, [selectedDb, executeQuery, query, setQuery]);
+  };
 
   // Handle clearing query
   const handleClearQuery = useCallback(() => {
@@ -93,43 +124,44 @@ export default function QueryEditor() {
     }
   }, [setQuery]);
 
-  // Handle editor change with real-time time variables detection
+  // Handle editor change - FIXED: immediate update, no debounce
   const handleEditorChange = useCallback(
     (value: string | undefined) => {
       const newQuery = value || "";
-      
-      console.log('Editor changed:', { newQuery, length: newQuery.length });
-      
-      // Always update the context with the current query immediately
+
+      console.log("🔥 EDITOR CHANGE:", { newQuery, length: newQuery.length, timestamp: new Date().toISOString() });
+
+      // Update immediately - the editor is the source of truth
       setQuery(newQuery);
-
-      // Update time variables detection in real-time
+      
+      // Check for time variables and update immediately
       const hasTimeVars = checkForTimeVariables(newQuery);
-      console.log('Time variables detected:', hasTimeVars);
-      setHasTimeVariables(hasTimeVars);
-
+      console.log("🔥 TIME VARIABLES CHECK:", { hasTimeVars, currentHasTimeVars: hasTimeVariables });
+      
+      if (hasTimeVars !== hasTimeVariables) {
+        console.log("🔥 UPDATING hasTimeVariables:", { from: hasTimeVariables, to: hasTimeVars });
+        setHasTimeVariables(hasTimeVars);
+      }
+      
       // Auto-select first time field if time variables are detected and no field is selected
       if (hasTimeVars && !selectedTimeField && timeFieldOptions.length > 0) {
-        console.log('Auto-selecting time field:', timeFieldOptions[0]);
+        console.log("🔥 AUTO-SELECTING TIME FIELD:", timeFieldOptions[0]);
         setSelectedTimeField(timeFieldOptions[0]);
-        if (timeRange && !timeRange.enabled) {
-          setTimeRange({ ...timeRange, enabled: true });
-        }
       }
     },
     [
       setQuery,
+      hasTimeVariables,
       setHasTimeVariables,
       selectedTimeField,
       timeFieldOptions,
       setSelectedTimeField,
-      timeRange,
-      setTimeRange,
     ]
   );
 
   // Handle editor mount
   const handleEditorMount = useCallback((editor: any, monaco: any) => {
+    console.log("🔥 EDITOR MOUNT:", { timestamp: new Date().toISOString() });
     editorRef.current = editor;
     monacoRef.current = monaco;
 
@@ -142,55 +174,52 @@ export default function QueryEditor() {
     setTimeout(() => editor.layout(), 0);
   }, []);
 
-  // Get processed query preview - always use the most current content
-  const processedQueryPreview = useMemo(() => {
-    if (!hasTimeVariables) {
-      return null;
-    }
-    
-    // Always get the live content from the editor first, fall back to context
-    const currentQuery = (editorRef.current?.getValue() || query || "");
-    if (!currentQuery.trim()) {
-      return null;
-    }
-    
-    const columns = selectedTable ? getColumnsForTable(selectedTable) : null;
-    const fieldDetails = columns?.find(col => col.columnName === selectedTimeField) || null;
-    
-    return previewProcessedQuery(
-      currentQuery,
-      selectedTimeField,
-      timeRange,
-      fieldDetails
-    );
-  }, [hasTimeVariables, query, selectedTimeField, timeRange, selectedTable, getColumnsForTable]);
-
   // Add a getter for the time field details
   const getTimeFieldDetails = useCallback(
     (fieldName: string) => {
-      if (!selectedDb || !schema[selectedDb] || !selectedTable) return null;
-
-      const tableSchema = schema[selectedDb].find(
-        (table) => table.tableName === selectedTable
-      );
-      if (!tableSchema || !tableSchema.columns) return null;
-
-      return (
-        tableSchema.columns.find((col) => col.columnName === fieldName) || null
-      );
+      if (!selectedDb || !selectedTable) return null;
+      const columns = getColumnsForTable(selectedTable);
+      if (!columns) return null;
+      return columns.find((col) => col.columnName === fieldName) || null;
     },
-    [selectedDb, schema, selectedTable]
+    [selectedDb, selectedTable, getColumnsForTable]
   );
 
-  // Sync editor content when query changes from context (e.g., query history)
+  // Save chat panel state to localStorage when it changes
+  useEffect(() => {
+    localStorage.setItem("queryEditor.showChatPanel", showChatPanel.toString());
+  }, [showChatPanel]);
+
+  // Auto-show chat panel when chat sessions are available (only once per session)
+  // Removed since we now persist user preference
+  /*
   useEffect(() => {
     if (
-      editorRef.current &&
-      query !== editorRef.current.getValue()
+      mcpInitialized &&
+      !hasAutoShownChat &&
+      chatSessions &&
+      chatSessions.length > 0 &&
+      !showChatPanel
     ) {
-      editorRef.current.setValue(query);
+      setShowChatPanel(true);
+      setHasAutoShownChat(true);
     }
-  }, [query]);
+  }, [mcpInitialized, chatSessions, hasAutoShownChat, showChatPanel]);
+  */
+
+  // Check for time variables on initial mount and when query changes from outside
+  useEffect(() => {
+    const hasTimeVars = checkForTimeVariables(query);
+    console.log("🔥 INITIAL TIME VARIABLES CHECK:", { query, hasTimeVars, currentHasTimeVars: hasTimeVariables });
+    
+    if (hasTimeVars !== hasTimeVariables) {
+      console.log("🔥 INITIAL TIME VARIABLES UPDATE:", { from: hasTimeVariables, to: hasTimeVars });
+      setHasTimeVariables(hasTimeVars);
+    }
+  }, [query, hasTimeVariables, setHasTimeVariables]);
+
+  // REMOVE the editor sync useEffect - this is what causes the loop!
+  // The editor should be the source of truth, not the query atom
 
   return (
     <div className="flex flex-col gap-3 h-full">
@@ -205,9 +234,12 @@ export default function QueryEditor() {
           query={query}
           mcpConnected={mcpConnected}
           showChatPanel={showChatPanel}
+          chatSessionsCount={chatSessions?.length || 0}
           onRunQuery={handleRunQuery}
           onClearQuery={handleClearQuery}
-          onToggleChat={() => setShowChatPanel(!showChatPanel)}
+          onToggleChat={() => {
+            setShowChatPanel(!showChatPanel);
+          }}
         />
 
         {/* Database, Table, and Time Selectors */}
@@ -218,6 +250,7 @@ export default function QueryEditor() {
           timeRange={timeRange}
           hasTimeVariables={hasTimeVariables}
           timeFieldOptions={timeFieldOptions}
+          onTableChange={setSelectedTableAction}
           onTimeFieldChange={handleTimeFieldChange}
           onTimeRangeChange={handleTimeRangeChange}
           getTimeFieldDetails={getTimeFieldDetails}
@@ -230,12 +263,12 @@ export default function QueryEditor() {
         <div
           className={`${
             showChatPanel ? "w-1/2" : "w-full"
-          } h-full flex flex-col`}
+          } h-full flex flex-col transition-all duration-300`}
         >
           <MonacoSqlEditor
             query={query}
             isLoading={isLoading}
-            schema={schema}
+            schema={autoCompleteSchema}
             selectedDb={selectedDb}
             onChange={handleEditorChange}
             onMount={handleEditorMount}
@@ -246,23 +279,15 @@ export default function QueryEditor() {
         {/* Chat Panel */}
         {showChatPanel && (
           <div className="w-1/2 h-full">
-            <ChatPanel
+            <ChatPanelCompact
               isOpen={showChatPanel}
-              onClose={() => setShowChatPanel(false)}
+              onClose={() => {
+                setShowChatPanel(false);
+              }}
             />
           </div>
         )}
       </div>
-
-      {/* Time Variables Preview Dialog */}
-      <TimeVariablesPreview
-        hasTimeVariables={hasTimeVariables}
-        selectedTimeField={selectedTimeField}
-        timeRange={timeRange}
-        processedQueryPreview={processedQueryPreview}
-        editorContent={editorRef.current?.getValue() || ""}
-        contextQuery={query}
-      />
     </div>
   );
 }

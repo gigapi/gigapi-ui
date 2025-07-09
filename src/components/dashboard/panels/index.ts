@@ -1,8 +1,15 @@
 import { type PanelType, type PanelTypeDefinition } from "@/types/dashboard.types";
-import TimeSeriesPanel from "./TimeSeriesPanel";
+import { ChartRenderer } from "../../shared/ChartRenderer";
 import StatPanel from "./StatPanel";
 import GaugePanel from "./GaugePanel";
 import TablePanel from "./TablePanel";
+import { withPanelWrapper } from "./BasePanel";
+
+// Unified chart component for all chart types
+const UnifiedChartPanel = withPanelWrapper(ChartRenderer);
+
+// Export ChartRenderer for direct use (e.g., in ChatArtifact)
+export { ChartRenderer };
 
 // Panel registry
 export const PANEL_TYPES: Record<PanelType, PanelTypeDefinition> = {
@@ -10,35 +17,35 @@ export const PANEL_TYPES: Record<PanelType, PanelTypeDefinition> = {
     type: 'timeseries',
     name: 'Time Series',
     description: 'Visualize data over time with line charts',
-    component: TimeSeriesPanel,
+    component: UnifiedChartPanel,
   },
   
   line: {
     type: 'line',
     name: 'Line Chart',
     description: 'Simple line chart for data visualization',
-    component: TimeSeriesPanel,
+    component: UnifiedChartPanel,
   },
   
   area: {
     type: 'area',
     name: 'Area Chart',
     description: 'Area chart with filled regions',
-    component: TimeSeriesPanel,
+    component: UnifiedChartPanel,
   },
   
   bar: {
     type: 'bar',
     name: 'Bar Chart',
     description: 'Bar chart for categorical data',
-    component: TimeSeriesPanel,
+    component: UnifiedChartPanel,
   },
   
   scatter: {
     type: 'scatter',
     name: 'Scatter Plot',
     description: 'Scatter plot for correlation analysis',
-    component: TimeSeriesPanel,
+    component: UnifiedChartPanel,
   },
   
   stat: {
@@ -61,6 +68,21 @@ export const PANEL_TYPES: Record<PanelType, PanelTypeDefinition> = {
     description: 'Tabular data display with sorting and filtering',
     component: TablePanel,
   },
+  
+  pie: {
+    type: 'pie',
+    name: 'Pie Chart',
+    description: 'Pie chart for displaying proportional data',
+    component: UnifiedChartPanel,
+  },
+  
+  donut: {
+    type: 'donut',
+    name: 'Donut Chart',
+    description: 'Donut chart with hollow center',
+    component: UnifiedChartPanel,
+  },
+  
 };
 
 // Helper functions
@@ -80,7 +102,8 @@ export function getPanelComponent(type: PanelType) {
 
 // Panel categories for UI organization
 export const PANEL_CATEGORIES = {
-  'Charts': ['timeseries', 'line', 'area', 'bar', 'scatter'] as PanelType[],
+  'Time Series': ['timeseries', 'line', 'area'] as PanelType[],
+  'Charts': ['bar', 'scatter', 'pie', 'donut'] as PanelType[],
   'Single Value': ['stat', 'gauge'] as PanelType[],
   'Data': ['table'] as PanelType[],
 };

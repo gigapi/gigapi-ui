@@ -6,12 +6,15 @@ import {
   CheckCircle,
   XCircle,
   Code,
+  Brain,
+  Server,
+  Cloud,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { useMCP } from "@/contexts/MCPContext";
+import { useMCP } from "@/atoms";
 import {
   Sheet,
   SheetContent,
@@ -81,13 +84,76 @@ const jsonConfigSchema = z.object({
 
 type ConnectionFormData = z.infer<typeof connectionSchema>;
 
+// Template definitions
+interface AITemplate {
+  id: string;
+  name: string;
+  description: string;
+  icon: React.ComponentType<any>;
+  baseUrl: string;
+  model: string;
+  headers?: Record<string, string>;
+  params?: Record<string, string>;
+  requiredFields: {
+    apiKey?: boolean;
+    model?: boolean;
+    baseUrl?: boolean;
+  };
+}
+
+const AI_TEMPLATES: AITemplate[] = [
+  {
+    id: "openai",
+    name: "OpenAI",
+    description: "ChatGPT, GPT-4o, GPT-4o-mini, and other OpenAI models",
+    icon: Brain,
+    baseUrl: "https://api.openai.com/v1",
+    model: "gpt-4o",
+    headers: {},
+    params: {},
+    requiredFields: { apiKey: true }
+  },
+  {
+    id: "ollama",
+    name: "Ollama (Local)",
+    description: "Local AI models running on your machine (Llama, CodeLlama, etc.)",
+    icon: Server,
+    baseUrl: "http://localhost:11434",
+    model: "llama3.2:latest",
+    headers: {},
+    params: {},
+    requiredFields: { model: true }
+  },
+  {
+    id: "anthropic",
+    name: "Anthropic Claude",
+    description: "Claude 3.5 Sonnet, Haiku, and Opus models",
+    icon: Cloud,
+    baseUrl: "https://api.anthropic.com/v1",
+    model: "claude-3-5-sonnet-20241022",
+    headers: { "anthropic-version": "2023-06-01" },
+    params: {},
+    requiredFields: { apiKey: true }
+  }
+];
+
+// Schema for template form
+const templateFormSchema = z.object({
+  apiKey: z.string().optional(),
+  model: z.string().min(1, "Model is required"),
+  baseUrl: z.string().url("Please enter a valid URL").optional(),
+});
+
+type TemplateFormData = z.infer<typeof templateFormSchema>;
+
 export default function MCPConnectionSheet({
   isOpen,
   onClose,
 }: ConnectionSheetProps) {
   const { addConnection } = useMCP();
 
-  const [mode, setMode] = useState<"basic" | "advanced">("basic");
+  const [mode, setMode] = useState<"templates" | "basic" | "advanced">("templates");
+  const [selectedTemplate, setSelectedTemplate] = useState<AITemplate | null>(null);
   const [jsonConfig, setJsonConfig] = useState("");
   const [isTestingConnection, setIsTestingConnection] = useState(false);
   const [testResult, setTestResult] = useState<"success" | "error" | null>(
@@ -107,10 +173,20 @@ export default function MCPConnectionSheet({
     },
   });
 
+  // Template form setup
+  const templateForm = useForm<TemplateFormData>({
+    resolver: zodResolver(templateFormSchema),
+    defaultValues: {
+      apiKey: "",
+      model: "",
+      baseUrl: "",
+    },
+  });
+
   // Reset form when sheet opens/closes
   const handleOpenChange = (open: boolean) => {
     if (open) {
-      // Reset form when opening
+      // Reset forms when opening
       form.reset({
         name: "",
         baseUrl: "",
@@ -118,13 +194,29 @@ export default function MCPConnectionSheet({
         headers: [],
         params: [],
       });
-      setMode("basic");
+      templateForm.reset({
+        apiKey: "",
+        model: "",
+        baseUrl: "",
+      });
+      setMode("templates");
+      setSelectedTemplate(null);
       setJsonConfig("");
       setTestResult(null);
       setTestError("");
     } else {
       onClose();
     }
+  };
+
+  // Handle template selection
+  const handleTemplateSelect = (template: AITemplate) => {
+    setSelectedTemplate(template);
+    templateForm.reset({
+      apiKey: "",
+      model: template.model,
+      baseUrl: template.baseUrl,
+    });
   };
 
   // Generate JSON config from current form values
@@ -207,7 +299,43 @@ export default function MCPConnectionSheet({
     error?: string;
     config?: any;
   } => {
-    if (mode === "advanced") {
+    if (mode === "templates") {
+      // Template mode - validate template form
+      if (!selectedTemplate) {
+        return { isValid: false, error: "Please select a template" };
+      }
+
+      const templateData = templateForm.getValues();
+      
+      // Check required fields based on template
+      if (selectedTemplate.requiredFields.apiKey && !templateData.apiKey?.trim()) {
+        return { isValid: false, error: "API key is required for this provider" };
+      }
+      
+      if (selectedTemplate.requiredFields.model && !templateData.model?.trim()) {
+        return { isValid: false, error: "Model name is required" };
+      }
+
+      // Build connection config from template
+      const config = {
+        name: `${selectedTemplate.name} - ${templateData.model}`,
+        baseUrl: templateData.baseUrl || selectedTemplate.baseUrl,
+        model: templateData.model || selectedTemplate.model,
+        headers: selectedTemplate.headers || {},
+        params: selectedTemplate.params || {},
+      };
+
+      // Add API key to headers if provided
+      if (templateData.apiKey?.trim()) {
+        if (selectedTemplate.id === "openai") {
+          config.headers = { ...config.headers, "Authorization": `Bearer ${templateData.apiKey}` };
+        } else if (selectedTemplate.id === "anthropic") {
+          config.headers = { ...config.headers, "x-api-key": templateData.apiKey };
+        }
+      }
+
+      return { isValid: true, config };
+    } else if (mode === "advanced") {
       // Advanced mode - validate JSON
       if (!jsonConfig.trim())
         return { isValid: false, error: "JSON configuration is required" };
@@ -245,8 +373,8 @@ export default function MCPConnectionSheet({
     try {
       let connectionData;
 
-      if (mode === "advanced") {
-        // Use JSON config directly
+      if (mode === "templates" || mode === "advanced") {
+        // Use validated config directly (from template or JSON)
         connectionData = validation.config!;
       } else {
         // Get form data and convert to connection data
@@ -288,25 +416,45 @@ export default function MCPConnectionSheet({
 
       // Build endpoint - try to detect the correct endpoint based on base URL
       let endpoint = connectionData.baseUrl;
-      
+
       // If baseUrl doesn't already include the endpoint, add the appropriate one
-      if (!endpoint.includes('/chat') && !endpoint.includes('/api/chat') && !endpoint.includes('/v1/chat')) {
+      if (
+        !endpoint.includes("/chat") &&
+        !endpoint.includes("/api/chat") &&
+        !endpoint.includes("/v1/chat")
+      ) {
         // For OpenAI-compatible APIs
-        if (endpoint.includes('openai.com') || endpoint.includes('api.openai.com')) {
-          endpoint = endpoint.endsWith('/') ? endpoint + 'chat/completions' : endpoint + '/chat/completions';
+        if (
+          endpoint.includes("openai.com") ||
+          endpoint.includes("api.openai.com")
+        ) {
+          endpoint = endpoint.endsWith("/")
+            ? endpoint + "chat/completions"
+            : endpoint + "/chat/completions";
         }
         // For Ollama
-        else if (endpoint.includes('localhost') || endpoint.includes('127.0.0.1') || endpoint.includes('ollama')) {
-          endpoint = endpoint.endsWith('/') ? endpoint + 'api/chat' : endpoint + '/api/chat';
+        else if (
+          endpoint.includes("localhost") ||
+          endpoint.includes("127.0.0.1") ||
+          endpoint.includes("ollama")
+        ) {
+          endpoint = endpoint.endsWith("/")
+            ? endpoint + "api/chat"
+            : endpoint + "/api/chat";
         }
         // Default to OpenAI-compatible format for other providers
         else {
-          endpoint = endpoint.endsWith('/') ? endpoint + 'chat/completions' : endpoint + '/chat/completions';
+          endpoint = endpoint.endsWith("/")
+            ? endpoint + "chat/completions"
+            : endpoint + "/chat/completions";
         }
       }
-      
+
       // Add query parameters if provided
-      if (connectionData.params && Object.keys(connectionData.params).length > 0) {
+      if (
+        connectionData.params &&
+        Object.keys(connectionData.params).length > 0
+      ) {
         const url = new URL(endpoint);
         Object.entries(connectionData.params).forEach(([key, value]) => {
           url.searchParams.append(key, String(value));
@@ -348,7 +496,7 @@ export default function MCPConnectionSheet({
 
       // Parse response content from different AI providers
       let responseContent: string | null = null;
-      
+
       // Try OpenAI format first (choices[0].message.content)
       if (data.choices?.[0]?.message?.content) {
         responseContent = data.choices[0].message.content;
@@ -368,7 +516,9 @@ export default function MCPConnectionSheet({
 
       if (!responseContent) {
         console.error("Unexpected response format:", data);
-        throw new Error("Invalid response format - AI provider returned unexpected structure");
+        throw new Error(
+          "Invalid response format - AI provider returned unexpected structure"
+        );
       }
 
       // Verify the AI actually responded (not just an empty response)
@@ -377,7 +527,6 @@ export default function MCPConnectionSheet({
       }
 
       setTestResult("success");
-      toast.success(`Connection test successful! AI responded: "${responseContent.slice(0, 50)}${responseContent.length > 50 ? '...' : ''}"`);
     } catch (error: any) {
       setTestResult("error");
       let errorMessage = error.message || "Connection test failed";
@@ -410,8 +559,8 @@ export default function MCPConnectionSheet({
 
       let connectionData;
 
-      if (mode === "advanced") {
-        // Use JSON config directly
+      if (mode === "templates" || mode === "advanced") {
+        // Use validated config directly (from template or JSON)
         connectionData = validation.config!;
       } else {
         // Get form data and convert to connection data
@@ -444,9 +593,11 @@ export default function MCPConnectionSheet({
       // Add the connection to the context
       await addConnection(connectionData);
 
-      // Reset form after successful save
+      // Reset forms after successful save
       form.reset();
-      setMode("basic");
+      templateForm.reset();
+      setMode("templates");
+      setSelectedTemplate(null);
       setJsonConfig("");
       setTestResult(null);
       setTestError("");
@@ -474,12 +625,138 @@ export default function MCPConnectionSheet({
             {/* Mode Selection */}
             <Tabs
               value={mode}
-              onValueChange={(value) => setMode(value as "basic" | "advanced")}
+              onValueChange={(value) => setMode(value as "templates" | "basic" | "advanced")}
             >
-              <TabsList className="grid w-full grid-cols-2">
+              <TabsList className="grid w-full grid-cols-3">
+                <TabsTrigger value="templates">Templates</TabsTrigger>
                 <TabsTrigger value="basic">Basic Mode</TabsTrigger>
                 <TabsTrigger value="advanced">Advanced Mode</TabsTrigger>
               </TabsList>
+
+              <TabsContent value="templates" className="space-y-6 mt-6">
+                <div className="space-y-4">
+                  <div>
+                    <Label className="text-base font-medium">Choose AI Provider</Label>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      Select a template to quickly set up your AI connection
+                    </p>
+                  </div>
+
+                  {/* Template Selection Grid */}
+                  <div className="grid grid-cols-1 gap-3">
+                    {AI_TEMPLATES.map((template) => {
+                      const IconComponent = template.icon;
+                      return (
+                        <div
+                          key={template.id}
+                          onClick={() => handleTemplateSelect(template)}
+                          className={`p-4 rounded-lg border-2 cursor-pointer transition-all hover:border-primary/50 ${
+                            selectedTemplate?.id === template.id
+                              ? "border-primary bg-primary/5"
+                              : "border-border hover:bg-muted/50"
+                          }`}
+                        >
+                          <div className="flex items-start gap-3">
+                            <IconComponent className="w-8 h-8 text-primary flex-shrink-0 mt-1" />
+                            <div className="flex-1">
+                              <h3 className="font-medium">{template.name}</h3>
+                              <p className="text-sm text-muted-foreground mt-1">
+                                {template.description}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Template Configuration */}
+                  {selectedTemplate && (
+                    <div className="space-y-4 pt-4 border-t">
+                      <div>
+                        <Label className="text-base font-medium">
+                          Configure {selectedTemplate.name}
+                        </Label>
+                        <p className="text-sm text-muted-foreground mt-1">
+                          Enter the required information for your connection
+                        </p>
+                      </div>
+
+                      <Form {...templateForm}>
+                        <div className="space-y-4">
+                          {selectedTemplate.requiredFields.apiKey && (
+                            <FormField
+                              control={templateForm.control}
+                              name="apiKey"
+                              render={({ field }) => (
+                                <FormItem>
+                                  <FormLabel>API Key</FormLabel>
+                                  <FormControl>
+                                    <Input
+                                      type="password"
+                                      placeholder="Enter your API key"
+                                      {...field}
+                                    />
+                                  </FormControl>
+                                  <FormDescription>
+                                    Your API key will be stored securely and used for authentication
+                                  </FormDescription>
+                                  <FormMessage />
+                                </FormItem>
+                              )}
+                            />
+                          )}
+
+                          <FormField
+                            control={templateForm.control}
+                            name="model"
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>Model</FormLabel>
+                                <FormControl>
+                                  <Input
+                                    placeholder={selectedTemplate.model}
+                                    {...field}
+                                  />
+                                </FormControl>
+                                <FormDescription>
+                                  {selectedTemplate.id === "ollama" 
+                                    ? "Model name (e.g., llama3.2:latest, codellama:latest)"
+                                    : "Model name to use for this connection"
+                                  }
+                                </FormDescription>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+
+                          {selectedTemplate.requiredFields.baseUrl && (
+                            <FormField
+                              control={templateForm.control}
+                              name="baseUrl"
+                              render={({ field }) => (
+                                <FormItem>
+                                  <FormLabel>Base URL</FormLabel>
+                                  <FormControl>
+                                    <Input
+                                      placeholder={selectedTemplate.baseUrl}
+                                      {...field}
+                                    />
+                                  </FormControl>
+                                  <FormDescription>
+                                    Custom endpoint URL for your AI provider
+                                  </FormDescription>
+                                  <FormMessage />
+                                </FormItem>
+                              )}
+                            />
+                          )}
+                        </div>
+                      </Form>
+                    </div>
+                  )}
+                </div>
+              </TabsContent>
 
               <TabsContent value="basic" className="space-y-6 mt-6">
                 <Form {...form}>
@@ -553,7 +830,6 @@ export default function MCPConnectionSheet({
                         className="flex items-center gap-2"
                       >
                         <Plus className="h-4 w-4" />
-                        Add Header
                       </Button>
                     </div>
 
@@ -611,7 +887,6 @@ export default function MCPConnectionSheet({
                         className="flex items-center gap-2"
                       >
                         <Plus className="h-4 w-4" />
-                        Add Parameter
                       </Button>
                     </div>
 
@@ -707,12 +982,12 @@ export default function MCPConnectionSheet({
                             </Label>
                             <pre className="mt-1 p-3 bg-muted rounded-md text-xs overflow-x-auto">
                               {`{
-                              "name": "Local Ollama",
-                              "baseUrl": "http://localhost:11434",
-                              "model": "llama3:latest",
-                              "headers": {},
-                              "params": {}
-                            }`}
+"name": "Local Ollama",
+"baseUrl": "http://localhost:11434",
+"model": "llama3:latest",
+"headers": {},
+"params": {}
+}`}
                             </pre>
                           </div>
 
@@ -722,14 +997,14 @@ export default function MCPConnectionSheet({
                             </Label>
                             <pre className="mt-1 p-3 bg-muted rounded-md text-xs overflow-x-auto">
                               {`{
-                                  "name": "OpenAI GPT-4",
-                                  "baseUrl": "https://api.openai.com/v1",
-                                  "model": "gpt-4",
-                                  "headers": {
-                                    "Authorization": "Bearer your-api-key-here"
-                                  },
-                                  "params": {}
-                                }`}
+"name": "OpenAI GPT-4",
+"baseUrl": "https://api.openai.com/v1",
+"model": "gpt-4",
+"headers": {
+  "Authorization": "Bearer your-api-key-here"
+},
+"params": {}
+}`}
                             </pre>
                           </div>
                         </div>

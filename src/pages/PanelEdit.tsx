@@ -1,247 +1,36 @@
 import { useState, useEffect, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { useDashboardSafely } from "@/contexts/DashboardContext";
-import { useConnection } from "@/contexts/ConnectionContext";
-import { useDatabase } from "@/contexts/DatabaseContext";
+import { useAtom, useSetAtom } from "jotai";
+import { useDashboardSafely } from "@/atoms";
+import { apiUrlAtom, availableDatabasesAtom, schemaAtom, loadSchemaForDbAtom, setSelectedDbAtom } from "@/atoms";
 import { Button } from "@/components/ui/button";
-import {
-  ArrowLeft,
-  Save,
-  RefreshCw,
-  Play,
-  Settings,
-  Clock,
-  Hash,
-  Type,
-} from "lucide-react";
+import { ArrowLeft, Save, RefreshCw, Play } from "lucide-react";
 import { MonacoSqlEditor } from "@/components/query";
 import { Label } from "@/components/ui/label";
-import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   ResizablePanelGroup,
   ResizablePanel,
   ResizableHandle,
 } from "@/components/ui/resizable";
-import { PANEL_TYPES } from "@/components/dashboard/panels";
 import DashboardPanel from "@/components/dashboard/DashboardPanel";
 import { DashboardTimeFilter } from "@/components/dashboard/DashboardTimeFilter";
-import {
-  type PanelConfig,
-  type PanelTypeDefinition,
-} from "@/types/dashboard.types";
+import { PanelConfigurationForm } from "@/components/dashboard/PanelConfigurationForm";
+import { UnifiedSelector } from "@/components/shared/DbTableTimeSelector";
+import { type PanelConfig } from "@/types/dashboard.types";
 import { toast } from "sonner";
 import Loader from "@/components/Loader";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AlertCircle } from "lucide-react";
 import axios from "axios";
-import QueryProcessor from "@/lib/query-processor";
-import { PanelFactory } from "@/lib/panel-factory";
+import { SchemaAnalyzer } from "@/lib/dashboard/schema-analyzer";
+import { PanelFactory } from "@/lib/dashboard/panel-factory";
+import { QueryProcessor } from "@/lib/query-processor";
 
 interface PanelEditProps {
   dashboardId?: string;
   panelId?: string;
   onSaveSuccess?: () => void;
   onCancel?: () => void;
-}
-
-// Field type analysis helper functions (same as QueryResults)
-function analyzeFieldType(
-  fieldName: string,
-  value: any,
-  schemaType?: string
-): { type: string; format?: string } {
-  const fieldLower = fieldName.toLowerCase();
-
-  // Use schema type if available
-  if (schemaType) {
-    const typeLower = schemaType.toLowerCase();
-    if (typeLower.includes("datetime") || typeLower.includes("timestamp")) {
-      return { type: "DATETIME", format: "Time" };
-    }
-    if (typeLower.includes("bigint")) {
-      if (fieldLower.includes("time") || fieldLower.includes("timestamp")) {
-        return { type: "BIGINT", format: "Time (ns)" };
-      }
-      return { type: "BIGINT" };
-    }
-    if (typeLower.includes("int")) {
-      return { type: "INTEGER" };
-    }
-    if (typeLower.includes("double") || typeLower.includes("float")) {
-      return { type: "DOUBLE" };
-    }
-    if (typeLower.includes("string") || typeLower.includes("varchar")) {
-      return { type: "VARCHAR" };
-    }
-  }
-
-  // Fallback to value-based analysis
-  if (
-    fieldLower.includes("time") ||
-    fieldLower.includes("date") ||
-    fieldLower.includes("timestamp")
-  ) {
-    if (typeof value === "number") {
-      if (value > 1e15) {
-        return { type: "BIGINT", format: "Time (ns)" };
-      } else if (value > 1e12) {
-        return { type: "BIGINT", format: "Time (μs)" };
-      } else if (value > 1e10) {
-        return { type: "BIGINT", format: "Time (ms)" };
-      } else {
-        return { type: "INTEGER", format: "Time (s)" };
-      }
-    }
-    return { type: "DATETIME", format: "Time" };
-  }
-
-  if (typeof value === "number") {
-    if (Number.isInteger(value)) {
-      return { type: "INTEGER" };
-    }
-    return { type: "DOUBLE" };
-  }
-
-  if (typeof value === "string") {
-    if (!isNaN(Number(value))) {
-      return { type: "VARCHAR", format: "Numeric String" };
-    }
-    if (!isNaN(Date.parse(value))) {
-      return { type: "VARCHAR", format: "Date String" };
-    }
-    return { type: "VARCHAR" };
-  }
-
-  if (typeof value === "boolean") {
-    return { type: "BOOLEAN" };
-  }
-
-  return { type: "UNKNOWN" };
-}
-
-function getFieldTypeIcon(fieldType: { type: string; format?: string }) {
-  if (fieldType.format?.includes("Time") || fieldType.type === "DATETIME") {
-    return Clock;
-  }
-  if (
-    fieldType.type === "INTEGER" ||
-    fieldType.type === "DOUBLE" ||
-    fieldType.type === "BIGINT"
-  ) {
-    return Hash;
-  }
-  if (fieldType.type === "VARCHAR") {
-    return Type;
-  }
-  return Type;
-}
-
-function getSmartFieldLabel(
-  fieldType: { type: string; format?: string },
-  panelType: string,
-  isXField: boolean = false
-) {
-  if (isXField && (panelType === "bar" || panelType === "scatter")) {
-    if (fieldType.format?.includes("Time") || fieldType.type === "DATETIME") {
-      return "Date Field";
-    }
-    return "Category Field";
-  }
-
-  if (
-    isXField &&
-    (panelType === "timeseries" || panelType === "line" || panelType === "area")
-  ) {
-    return "Time Field";
-  }
-
-  return isXField ? "X-Axis Field" : "Value Field (Y-Axis)";
-}
-
-// Smart field defaults - auto-select best fields (same as QueryResults)
-function getSmartFieldDefaults(
-  fields: string[],
-  fieldTypes: Record<string, { type: string; format?: string }>,
-  schemaFields: { name: string; type: string }[]
-): any {
-  const mapping: any = {};
-
-  // Combine schema and runtime field analysis
-  const allFieldTypes: Record<string, { type: string; format?: string }> = {
-    ...fieldTypes,
-  };
-  schemaFields.forEach((field) => {
-    if (!allFieldTypes[field.name]) {
-      allFieldTypes[field.name] = analyzeFieldType(
-        field.name,
-        null,
-        field.type
-      );
-    }
-  });
-
-  const allFields = [
-    ...new Set([...fields, ...schemaFields.map((f) => f.name)]),
-  ];
-
-  // Find time fields (prioritize timestamp fields with Time format)
-  const timeFields = allFields.filter((field) => {
-    const fieldType = allFieldTypes[field];
-    return (
-      fieldType?.format?.includes("Time") ||
-      fieldType?.type === "DATETIME" ||
-      field.toLowerCase().includes("time") ||
-      field.toLowerCase().includes("timestamp") ||
-      field.toLowerCase().includes("date") ||
-      field === "__timestamp"
-    );
-  });
-
-  // Find numeric fields for Y-axis
-  const numericFields = allFields.filter((field) => {
-    const fieldType = allFieldTypes[field];
-    return (
-      fieldType?.type === "DOUBLE" ||
-      fieldType?.type === "INTEGER" ||
-      (fieldType?.type === "BIGINT" && !fieldType?.format?.includes("Time"))
-    );
-  });
-
-  // Auto-select X field (time/timestamp first priority)
-  if (timeFields.length > 0) {
-    // Prefer __timestamp or fields with Time format
-    const preferredTimeField =
-      timeFields.find((field) => field === "__timestamp") ||
-      timeFields.find((field) =>
-        allFieldTypes[field]?.format?.includes("Time")
-      ) ||
-      timeFields[0];
-    mapping.xField = preferredTimeField;
-  } else if (allFields.length > 0) {
-    // Fallback to first field
-    mapping.xField = allFields[0];
-  }
-
-  // Auto-select Y field (first numeric field)
-  if (numericFields.length > 0) {
-    // Prefer DOUBLE over INTEGER over BIGINT
-    const preferredNumField =
-      numericFields.find((field) => allFieldTypes[field]?.type === "DOUBLE") ||
-      numericFields.find((field) => allFieldTypes[field]?.type === "INTEGER") ||
-      numericFields[0];
-    mapping.yField = preferredNumField;
-  }
-
-  // Series field is left empty by default - user can choose to group by any field
-
-  return mapping;
 }
 
 export default function PanelEdit(props?: PanelEditProps) {
@@ -253,8 +42,12 @@ export default function PanelEdit(props?: PanelEditProps) {
 
   const dashboardId = props?.dashboardId || routeDashboardId;
   const panelId = props?.panelId || routePanelId;
+  
+  console.log("🔥 PANEL EDIT RENDER:", { dashboardId, panelId, props: !!props, timestamp: new Date().toISOString() });
 
   const dashboardContext = useDashboardSafely();
+  
+  console.log("🔥 DASHBOARD CONTEXT:", { hasContext: !!dashboardContext, timestamp: new Date().toISOString() });
 
   if (!dashboardContext) {
     return (
@@ -275,8 +68,12 @@ export default function PanelEdit(props?: PanelEditProps) {
     getPanelById,
   } = dashboardContext;
 
-  const { apiUrl } = useConnection();
-  const { availableDatabases } = useDatabase();
+  const [apiUrl] = useAtom(apiUrlAtom);
+  const [availableDatabases] = useAtom(availableDatabasesAtom);
+  // const [availableTables] = useAtom(availableTablesAtom);
+  const [schema] = useAtom(schemaAtom);
+  const loadSchemaForDb = useSetAtom(loadSchemaForDbAtom);
+  const setSelectedDb = useSetAtom(setSelectedDbAtom);
 
   const [localConfig, setLocalConfig] = useState<Partial<PanelConfig> | null>(
     null
@@ -286,11 +83,35 @@ export default function PanelEdit(props?: PanelEditProps) {
   const [isExecuting, setIsExecuting] = useState(false);
   const [previewData, setPreviewData] = useState<any[] | null>(null);
   const [availableFields, setAvailableFields] = useState<string[]>([]);
-  const [schemaFields, setSchemaFields] = useState<
-    { name: string; type: string }[]
-  >([]);
+  const [queryError, setQueryError] = useState<string | null>(null);
 
   const isNewPanel = !panelId;
+  
+  console.log("🔥 PANEL EDIT STATE:", { 
+    currentDashboard: !!currentDashboard, 
+    apiUrl, 
+    availableDatabases: availableDatabases.length, 
+    schema: Object.keys(schema).length, 
+    localConfig: !!localConfig, 
+    isLoadingPanel, 
+    isExecuting, 
+    queryError, 
+    isNewPanel,
+    timestamp: new Date().toISOString() 
+  });
+
+  // Helper function to extract table name from SQL query
+  const extractTableFromQuery = (query: string): string | null => {
+    if (!query) return null;
+
+    // Simple regex to match "FROM table_name" - case insensitive
+    const fromMatch = query.match(/FROM\s+([`"]?)(\w+)\1/i);
+    if (fromMatch && fromMatch[2]) {
+      return fromMatch[2];
+    }
+
+    return null;
+  };
 
   const handleConfigChange = useCallback(
     (updates: Partial<PanelConfig>) => {
@@ -320,11 +141,11 @@ export default function PanelEdit(props?: PanelEditProps) {
     if (!isLoadingPanel) return;
 
     if (isNewPanel) {
-      // Create new panel with Grafana-like structure
+      // Create new panel with structure
       const newPanel = PanelFactory.createPanel({
         type: "timeseries",
         title: "New Panel",
-        database: "",
+        database: availableDatabases[0] || "",
         dashboardId: dashboardId,
       });
 
@@ -334,8 +155,18 @@ export default function PanelEdit(props?: PanelEditProps) {
     } else if (panelId && currentDashboard) {
       const panel = getPanelById(panelId);
       if (panel) {
+        // Extract table from query if not already set
+        let table = panel.table;
+        if (!table && panel.query) {
+          table = extractTableFromQuery(panel.query) || undefined;
+        }
+
+        // Create a deep copy of the panel to avoid direct mutations
+        const panelCopy = JSON.parse(JSON.stringify(panel));
+        
         setLocalConfig({
-          ...panel,
+          ...panelCopy,
+          table, // Set extracted or existing table
           useParentTimeFilter: true,
         });
         setHasChanges(false);
@@ -346,7 +177,7 @@ export default function PanelEdit(props?: PanelEditProps) {
           setTimeout(() => {
             const event = new CustomEvent("autoRunQuery");
             window.dispatchEvent(event);
-          }, 200); // Small delay to ensure component is fully loaded
+          }, 200); //  Delay to ensure component is fully loaded
         }
       } else {
         toast.error(
@@ -371,8 +202,13 @@ export default function PanelEdit(props?: PanelEditProps) {
       const updatedConfig = { ...localConfig, query: newQuery || "" };
       setLocalConfig(updatedConfig);
       setHasChanges(true);
+
+      // Clear query error when query changes
+      if (queryError) {
+        setQueryError(null);
+      }
     },
-    [localConfig]
+    [localConfig, queryError]
   );
 
   const handleRunQuery = useCallback(async () => {
@@ -392,14 +228,17 @@ export default function PanelEdit(props?: PanelEditProps) {
     }
 
     setIsExecuting(true);
+    setQueryError(null); // Clear previous errors
     try {
-      // Process query with simplified QueryProcessor
+      // Process query with unified query processor
       const processedResult = QueryProcessor.process({
         database: localConfig.database,
         query: localConfig.query,
         timeRange: currentDashboard.timeRange,
         timeZone: currentDashboard.timeZone || "UTC",
-        maxDataPoints: 1000,
+        maxDataPoints: 2000,
+        timeField: localConfig.timeField,
+        table: localConfig.table,
       });
 
       let processedQuery = processedResult.query;
@@ -409,7 +248,7 @@ export default function PanelEdit(props?: PanelEditProps) {
         processedQuery.trim().toUpperCase().startsWith("SELECT") &&
         !processedQuery.toUpperCase().includes("LIMIT")
       ) {
-        processedQuery += " LIMIT 1000";
+        processedQuery += " LIMIT 2000";
       }
 
       const response = await axios.post(
@@ -417,7 +256,13 @@ export default function PanelEdit(props?: PanelEditProps) {
           localConfig.database
         )}&format=ndjson`,
         { query: processedQuery },
-        { responseType: "text", timeout: 60000 }
+        {
+          responseType: "text",
+          headers: {
+            "Content-Type": "application/x-ndjson",
+            Accept: "application/x-ndjson",
+          },
+        }
       );
 
       const textData = response.data;
@@ -536,12 +381,29 @@ export default function PanelEdit(props?: PanelEditProps) {
         error.response?.data?.error ||
         error.message ||
         "Query execution failed";
+      setQueryError(errorMessage);
       toast.error(`Failed to execute query: ${errorMessage}`);
       console.error("Query execution error:", error);
     } finally {
       setIsExecuting(false);
     }
   }, [localConfig, apiUrl, currentDashboard]);
+
+  // Load tables when database changes
+  useEffect(() => {
+    if (localConfig?.database) {
+      // Set the selected database to load tables
+      setSelectedDb(localConfig.database);
+      
+      // Also load schema if not already loaded
+      if (
+        !schema[localConfig.database] ||
+        Object.keys(schema[localConfig.database]).length === 0
+      ) {
+        loadSchemaForDb(localConfig.database);
+      }
+    }
+  }, [localConfig?.database, schema, loadSchemaForDb, setSelectedDb]);
 
   // Listen for auto-run query event
   useEffect(() => {
@@ -555,156 +417,31 @@ export default function PanelEdit(props?: PanelEditProps) {
     return () => window.removeEventListener("autoRunQuery", handleAutoRunQuery);
   }, [handleRunQuery, localConfig]);
 
-  // Auto-load schema when database or query changes
+  // Schema detection is now handled by atoms
+
+  // Auto-suggest field mappings when available fields are loaded
   useEffect(() => {
-    if (!localConfig?.database || !localConfig?.query?.trim()) return;
-
-    const loadSchemaFields = async () => {
-      try {
-        // Try to introspect schema from the query
-        const response = await axios.post(
-          `${apiUrl}?db=${encodeURIComponent(
-            localConfig.database!
-          )}&format=ndjson`,
-          {
-            query: `DESCRIBE ${localConfig.query!
-              .replace(/WHERE.*$/i, "")
-              .replace(/LIMIT.*$/i, "")
-              .trim()} LIMIT 1`,
+    if (
+      availableFields.length > 0 &&
+      !localConfig?.fieldMapping?.xField &&
+      !localConfig?.fieldMapping?.yField
+    ) {
+      const smartMapping = SchemaAnalyzer.getSmartFieldDefaults(
+        availableFields,
+        {},
+        [] // No schema fields needed
+      );
+      if (Object.keys(smartMapping).length > 0) {
+        handleConfigChange({
+          fieldMapping: {
+            ...localConfig?.fieldMapping,
+            ...smartMapping,
           },
-          { responseType: "text", timeout: 10000 }
-        );
-
-        const textData = response.data;
-        const lines = textData
-          .split("\n")
-          .filter((line: string) => line.trim());
-        const schemaInfo: { name: string; type: string }[] = [];
-
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          try {
-            const record = JSON.parse(line);
-            if (record.column_name && record.column_type) {
-              schemaInfo.push({
-                name: record.column_name,
-                type: record.column_type,
-              });
-            }
-          } catch (e) {
-            // Skip invalid lines
-          }
-        }
-
-        setSchemaFields(schemaInfo);
-
-        // Auto-suggest field mappings based on schema
-        if (
-          schemaInfo.length > 0 &&
-          !localConfig?.fieldMapping?.xField &&
-          !localConfig?.fieldMapping?.yField
-        ) {
-          const timeFields = schemaInfo.filter((field) => {
-            const lower = field.name.toLowerCase();
-            const isTime =
-              lower.includes("time") ||
-              lower.includes("date") ||
-              lower.includes("timestamp") ||
-              field.name === "__timestamp";
-            return isTime;
-          });
-
-          const numericFields = schemaInfo.filter((field) => {
-            const type = field.type.toLowerCase();
-            return (
-              type.includes("int") ||
-              type.includes("float") ||
-              type.includes("double") ||
-              type.includes("decimal") ||
-              type.includes("number")
-            );
-          });
-
-          const stringFields = schemaInfo.filter((field) => {
-            const type = field.type.toLowerCase();
-            const lower = field.name.toLowerCase();
-            const isTime =
-              lower.includes("time") ||
-              lower.includes("date") ||
-              lower.includes("timestamp") ||
-              field.name === "__timestamp";
-            return (
-              type.includes("string") ||
-              type.includes("varchar") ||
-              (type.includes("text") && !isTime)
-            );
-          });
-
-          const suggestedMapping: any = {};
-
-          if (timeFields.length > 0) {
-            suggestedMapping.xField = timeFields[0].name;
-          }
-
-          if (numericFields.length > 0) {
-            suggestedMapping.yField = numericFields[0].name;
-          }
-
-          // Smart series field suggestion
-          if (stringFields.length > 0) {
-            const seriesCandidate =
-              stringFields.find((field) => {
-                const lower = field.name.toLowerCase();
-                return (
-                  lower.includes("location") ||
-                  lower.includes("region") ||
-                  lower.includes("zone") ||
-                  lower.includes("name") ||
-                  lower.includes("type") ||
-                  lower.includes("category") ||
-                  lower.includes("group") ||
-                  lower.includes("class")
-                );
-              }) || stringFields[0];
-
-            suggestedMapping.seriesField = seriesCandidate.name;
-          }
-
-          if (Object.keys(suggestedMapping).length > 0) {
-            handleConfigChange({
-              fieldMapping: {
-                ...localConfig?.fieldMapping,
-                ...suggestedMapping,
-              },
-            });
-            toast.success(`Auto-detected field mappings from schema`);
-          }
-        } else {
-          // Use smart defaults even without explicit suggestion logic
-          const smartMapping = getSmartFieldDefaults(
-            availableFields,
-            {},
-            schemaInfo
-          );
-          if (Object.keys(smartMapping).length > 0) {
-            handleConfigChange({
-              fieldMapping: {
-                ...localConfig?.fieldMapping,
-                ...smartMapping,
-              },
-            });
-          }
-        }
-      } catch (error) {
-        // Schema detection failed, not critical
-        console.warn("Schema detection failed:", error);
+        });
+        toast.success(`Auto-detected field mappings from schema`);
       }
-    };
-
-    const timeoutId = setTimeout(loadSchemaFields, 1000); // Debounce for 1 second
-
-    return () => clearTimeout(timeoutId);
-  }, [localConfig?.database, localConfig?.query, apiUrl, handleConfigChange]);
+    }
+  }, [localConfig?.fieldMapping, availableFields]);
 
   const handleSave = useCallback(async () => {
     if (!localConfig || !dashboardId) return;
@@ -720,9 +457,12 @@ export default function PanelEdit(props?: PanelEditProps) {
     try {
       if (isNewPanel) {
         await addPanel({
-          ...localConfig,
-          useParentTimeFilter: true,
-        } as Omit<PanelConfig, "id">);
+          panelData: {
+            ...localConfig,
+            useParentTimeFilter: true,
+          },
+          dashboardId: dashboardId!,
+        });
         toast.success("Panel created successfully");
       } else if (panelId) {
         await updatePanel(panelId, {
@@ -850,23 +590,10 @@ export default function PanelEdit(props?: PanelEditProps) {
             <ResizablePanelGroup direction="vertical">
               {/* Top: Panel Preview */}
               <ResizablePanel defaultSize={40} minSize={25}>
-                <div className="h-full flex flex-col border-b">
-                  <div className="p-4 border-b bg-muted/30">
-                    <div className="flex justify-between items-center">
-                      <h3 className="text-sm font-medium">Panel Preview</h3>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={handleRunQuery}
-                        disabled={!localConfig.query?.trim()}
-                      >
-                        <RefreshCw className="h-3 w-3 mr-1.5" />
-                        Refresh
-                      </Button>
-                    </div>
-                  </div>
-                  <div className="flex-1 p-4 overflow-auto">
-                    <div className="h-full border rounded-lg bg-muted/20">
+                <div className="h-full flex flex-col bg-background">
+                  {/* Preview Content */}
+                  <div className="flex-1 p-6 overflow-auto bg-muted/20">
+                    <div className="h-full rounded-lg border bg-background shadow-sm overflow-hidden">
                       {localConfig.type &&
                       currentData?.data &&
                       currentData.data.length > 0 ? (
@@ -883,16 +610,72 @@ export default function PanelEdit(props?: PanelEditProps) {
                         />
                       ) : (
                         <div className="flex items-center justify-center h-full">
-                          <div className="text-center text-muted-foreground">
-                            <p className="mb-2">
-                              {!localConfig.query?.trim()
-                                ? "Write a query to see preview"
-                                : !currentData?.data?.length
-                                ? "No data - run query to see results"
-                                : !localConfig.type
-                                ? "Select a panel type"
-                                : "Configure panel to see preview"}
-                            </p>
+                          <div className="text-center max-w-md">
+                            {!localConfig.query?.trim() ? (
+                              <div className="space-y-3">
+                                <div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center mx-auto">
+                                  <Play className="h-6 w-6 text-muted-foreground" />
+                                </div>
+                                <h4 className="text-sm font-medium text-foreground">
+                                  Write a Query
+                                </h4>
+                                <p className="text-xs text-muted-foreground">
+                                  Start by writing a SQL query to fetch data for
+                                  your panel
+                                </p>
+                              </div>
+                            ) : queryError ? (
+                              <div className="space-y-3">
+                                <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center mx-auto">
+                                  <AlertCircle className="h-6 w-6 text-red-600" />
+                                </div>
+                                <h4 className="text-sm font-medium text-foreground">
+                                  Query Error
+                                </h4>
+                                <p className="text-xs text-muted-foreground">
+                                  Fix the query error to see the panel preview
+                                </p>
+                              </div>
+                            ) : !currentData?.data?.length ? (
+                              <div className="space-y-3">
+                                <div className="w-12 h-12 rounded-full bg-orange-100 flex items-center justify-center mx-auto">
+                                  <AlertCircle className="h-6 w-6 text-orange-600" />
+                                </div>
+                                <h4 className="text-sm font-medium text-foreground">
+                                  No Data
+                                </h4>
+                                <p className="text-xs text-muted-foreground">
+                                  Run your query to see results and preview the
+                                  panel
+                                </p>
+                              </div>
+                            ) : !localConfig.type ? (
+                              <div className="space-y-3">
+                                <div className="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center mx-auto">
+                                  <RefreshCw className="h-6 w-6 text-blue-600" />
+                                </div>
+                                <h4 className="text-sm font-medium text-foreground">
+                                  Select Panel Type
+                                </h4>
+                                <p className="text-xs text-muted-foreground">
+                                  Choose a visualization type from the settings
+                                  panel
+                                </p>
+                              </div>
+                            ) : (
+                              <div className="space-y-3">
+                                <div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center mx-auto">
+                                  <RefreshCw className="h-6 w-6 text-muted-foreground" />
+                                </div>
+                                <h4 className="text-sm font-medium text-foreground">
+                                  Configure Panel
+                                </h4>
+                                <p className="text-xs text-muted-foreground">
+                                  Complete the panel configuration to see the
+                                  preview
+                                </p>
+                              </div>
+                            )}
                           </div>
                         </div>
                       )}
@@ -901,63 +684,235 @@ export default function PanelEdit(props?: PanelEditProps) {
                 </div>
               </ResizablePanel>
 
-              <ResizableHandle />
+              <ResizableHandle withHandle />
 
               {/* Bottom: Query Editor */}
               <ResizablePanel defaultSize={60} minSize={40}>
-                <div className="h-full flex flex-col">
-                  <div className="p-4 border-b bg-muted/30">
-                    <div className="flex items-center justify-between mb-4">
-                      <h3 className="text-sm font-medium">Query Editor</h3>
+                <div className="h-full flex flex-col bg-background">
+                  {/* Query Editor Header */}
+                  <div className="px-6 py-3 border-b bg-background">
+                    <div className="flex items-center justify-between gap-4">
+                      {/* Left Side - Title, Database Selector, and Status */}
+                      <div className="flex items-center gap-4 min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <Label className="text-sm font-medium text-muted-foreground whitespace-nowrap">
+                            Database:
+                          </Label>
+                          <UnifiedSelector
+                            type="database"
+                            context="dashboard"
+                            style="select"
+                            value={localConfig?.database || ""}
+                            onChange={(value) =>
+                              handleConfigChange({
+                                database: value === "" ? "" : value,
+                                table: "", // Reset table when database changes
+                                timeField: "", // Reset time field when database changes
+                              })
+                            }
+                            className="w-[180px] h-8 text-sm"
+                            showIcon={false}
+                            label={null}
+                          />
+                        </div>
+
+                        {/* Table Selector */}
+                        {localConfig?.database && (
+                          <div className="flex items-center gap-2">
+                            <Label className="text-sm font-medium text-muted-foreground whitespace-nowrap">
+                              Table:
+                            </Label>
+                            <UnifiedSelector
+                              type="table"
+                              context="dashboard"
+                              style="select"
+                              value={localConfig?.table || ""}
+                              onChange={(value) => {
+                                const updates: Partial<PanelConfig> = {
+                                  table: value === "" ? "" : value,
+                                  timeField: "", // Reset time field when table changes
+                                };
+
+                                // Auto-select first time field if available
+                                if (value && localConfig?.database && schema[localConfig.database]) {
+                                  // Schema structure is { database: { table: [...columns] } }
+                                  const tableSchema = schema[localConfig.database][value];
+                                  if (tableSchema && Array.isArray(tableSchema)) {
+                                    const timeColumns = tableSchema.filter(
+                                      (col: any) => {
+                                        const colName = (col.column_name || col.name || '').toLowerCase();
+                                        const dataType = (col.column_type || col.type || '').toLowerCase();
+                                        return (
+                                          colName.includes("time") ||
+                                          colName.includes("date") ||
+                                          colName.includes("timestamp") ||
+                                          colName === "__timestamp" ||
+                                          dataType.includes("timestamp") ||
+                                          dataType.includes("datetime")
+                                        );
+                                      }
+                                    );
+
+                                    if (timeColumns && timeColumns.length > 0) {
+                                      // Prefer __timestamp or first available time column
+                                      const preferredTimeField =
+                                        timeColumns.find(
+                                          (col: any) =>
+                                            (col.column_name || col.name) === "__timestamp"
+                                        ) || timeColumns[0];
+                                      updates.timeField =
+                                        preferredTimeField.column_name || preferredTimeField.name;
+                                    }
+                                  }
+                                }
+
+                                  // Update query to use selected table
+                                  if (
+                                    localConfig.query &&
+                                    localConfig.query.includes("your_table")
+                                  ) {
+                                    updates.query = localConfig.query.replace(
+                                      /your_table/g,
+                                      value
+                                    );
+                                  }
+
+                                handleConfigChange(updates);
+                              }}
+                              database={localConfig?.database}
+                              className="w-[180px] h-8 text-sm"
+                              showIcon={false}
+                              label={null}
+                            />
+                          </div>
+                        )}
+
+                        {/* Time Field Selector */}
+                        {localConfig?.database && localConfig?.table && (
+                          <div className="flex items-center gap-2">
+                            <Label className="text-sm font-medium text-muted-foreground whitespace-nowrap">
+                              Time Field:
+                            </Label>
+                            <UnifiedSelector
+                              type="timeField"
+                              context="dashboard"
+                              style="select"
+                              value={localConfig?.timeField || ""}
+                              onChange={(value) =>
+                                handleConfigChange({
+                                  timeField: value === "" ? "" : value,
+                                })
+                              }
+                              database={localConfig?.database}
+                              table={localConfig?.table}
+                              className="w-[180px] h-8 text-sm"
+                              showIcon={false}
+                              label={null}
+                            />
+                          </div>
+                        )}
+
+                        {/* Query Status */}
+                        {previewData && (
+                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                            <div className="w-2 h-2 rounded-full bg-green-500"></div>
+                            {previewData.length} rows returned
+                          </div>
+                        )}
+
+                        {queryError && (
+                          <div className="flex items-center gap-2 text-xs text-red-600">
+                            <div className="w-2 h-2 rounded-full bg-red-500"></div>
+                            Query failed
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Right Side - Run Button */}
                       <Button
                         onClick={handleRunQuery}
                         disabled={!localConfig?.query?.trim() || isExecuting}
                         size="sm"
+                        className="bg-blue-600 hover:bg-blue-700 text-white shadow-sm"
                       >
-                        <Play className="h-4 w-4 mr-2" />
+                        <Play className="h-3 w-3 mr-1.5" />
                         {isExecuting ? "Running..." : "Run Query"}
                       </Button>
                     </div>
-
-                    {/* Simple Database Selector */}
-                    <div className="mb-4">
-                      <Label
-                        htmlFor="database-select"
-                        className="text-sm font-medium"
-                      >
-                        Database
-                      </Label>
-                      <Select
-                        value={localConfig?.database || "none"}
-                        onValueChange={(value) =>
-                          handleConfigChange({
-                            database: value === "none" ? "" : value,
-                          })
-                        }
-                      >
-                        <SelectTrigger className="w-full">
-                          <SelectValue placeholder="Select database" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {availableDatabases.map((db) => (
-                            <SelectItem key={db} value={db}>
-                              {db}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
                   </div>
-                  <div className="flex-1 overflow-hidden">
-                    <MonacoSqlEditor
-                      query={localConfig?.query || ""}
-                      isLoading={isExecuting}
-                      schema={{}}
-                      selectedDb=""
-                      onChange={handleQueryChange}
-                      onMount={() => {}}
-                      onRunQuery={handleRunQuery}
-                    />
+
+                  {/* Error Display */}
+                  {queryError && (
+                    <div className="px-6 py-3 bg-red-50 border-b border-red-200">
+                      <div className="flex items-start gap-2">
+                        <AlertCircle className="h-4 w-4 text-red-600 mt-0.5 flex-shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-red-800">
+                            Query Error
+                          </p>
+                          <p className="text-sm text-red-700 mt-1 font-mono break-all">
+                            {queryError}
+                          </p>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setQueryError(null)}
+                          className="text-red-600 hover:text-red-800 hover:bg-red-100"
+                        >
+                          ✕
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Monaco Editor Container */}
+                  <div className="flex-1 overflow-hidden relative">
+                    <div className="absolute inset-0 border border-border rounded-none">
+                      <MonacoSqlEditor
+                        query={localConfig?.query || ""}
+                        isLoading={isExecuting}
+                        schema={schema}
+                        selectedDb={localConfig?.database || ""}
+                        onChange={handleQueryChange}
+                        onMount={() => {}}
+                        onRunQuery={handleRunQuery}
+                      />
+                    </div>
+
+                    {/* Loading Overlay */}
+                    {isExecuting && (
+                      <div className="absolute inset-0 bg-background/80 backdrop-blur-sm flex items-center justify-center z-10">
+                        <div className="flex items-center gap-3 bg-card border rounded-lg px-4 py-3 shadow-lg">
+                          <RefreshCw className="h-4 w-4 animate-spin text-blue-600" />
+                          <span className="text-sm font-medium">
+                            Executing query...
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Query Footer */}
+                  <div className="px-6 py-3 border-t bg-card/50 text-xs text-muted-foreground">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-4">
+                        <span>Press Ctrl+Enter to run query</span>
+                        {localConfig?.query && (
+                          <span>
+                            • {localConfig.query.split("\n").length} lines
+                          </span>
+                        )}
+                      </div>
+                      {localConfig?.database && (
+                        <div className="flex items-center gap-2">
+                          <span>Connected to:</span>
+                          <code className="bg-muted px-1.5 py-0.5 rounded text-xs font-mono">
+                            {localConfig.database}
+                          </code>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
               </ResizablePanel>
@@ -968,515 +923,24 @@ export default function PanelEdit(props?: PanelEditProps) {
 
           {/* Right Panel: Settings */}
           <ResizablePanel defaultSize={30} minSize={20}>
-            <div className="h-full overflow-auto">
-              <div className="p-4 border-b bg-muted/30">
-                <h3 className="text-sm font-medium flex items-center gap-2">
-                  <Settings className="h-4 w-4" />
-                  Panel Settings
+            <div className="h-full flex flex-col">
+              {/* Settings Header */}
+              <div className="px-6 py-4 border-b bg-background">
+                <h3 className="text-base font-semibold text-foreground">
+                  Panel Configuration
                 </h3>
               </div>
-              <div className="p-4 space-y-6">
-                {/* Basic Settings */}
-                <div className="space-y-4">
-                  <div>
-                    <Label htmlFor="panel-title">Panel Title</Label>
-                    <Input
-                      id="panel-title"
-                      value={localConfig.title || ""}
-                      onChange={(e) =>
-                        handleConfigChange({ title: e.target.value })
-                      }
-                      placeholder="e.g., CPU Usage Over Time"
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor="panel-type">Panel Type</Label>
-                    <Select
-                      value={localConfig.type || ""}
-                      onValueChange={(value) =>
-                        handleConfigChange({
-                          type: value as PanelConfig["type"],
-                        })
-                      }
-                    >
-                      <SelectTrigger id="panel-type">
-                        <SelectValue placeholder="Select panel type" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {Object.values(PANEL_TYPES).map(
-                          (type: PanelTypeDefinition) => (
-                            <SelectItem key={type.type} value={type.type}>
-                              {type.name}
-                            </SelectItem>
-                          )
-                        )}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
 
-                {/* Field Mapping */}
-                {localConfig.type && (
-                  <div className="space-y-4">
-                    <h4 className="text-sm font-medium border-b pb-2">
-                      Field Mapping
-                    </h4>
-                    <div className="space-y-3">
-                      {/* X Field (Time/Category) */}
-                      <div>
-                        <Label>
-                          {getSmartFieldLabel(
-                            { type: "", format: "" },
-                            localConfig.type || "",
-                            true
-                          )}
-                        </Label>
-                        <Select
-                          value={localConfig.fieldMapping?.xField || ""}
-                          onValueChange={(value) =>
-                            handleConfigChange({
-                              fieldMapping: {
-                                ...localConfig.fieldMapping,
-                                xField: value || undefined,
-                              },
-                            })
-                          }
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select field" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {/* Show current field mapping even if not in other lists */}
-                            {localConfig.fieldMapping?.xField &&
-                              !availableFields.includes(
-                                localConfig.fieldMapping.xField
-                              ) &&
-                              !schemaFields.some(
-                                (f) =>
-                                  f.name === localConfig.fieldMapping?.xField
-                              ) && (
-                                <SelectItem
-                                  value={localConfig.fieldMapping.xField}
-                                >
-                                  <div className="flex items-center gap-2 w-full">
-                                    <Type className="h-3 w-3 text-muted-foreground" />
-                                    <span className="flex-1">
-                                      {localConfig.fieldMapping.xField}
-                                    </span>
-                                    <span className="text-xs bg-muted px-1.5 py-0.5 rounded text-muted-foreground">
-                                      CURRENT
-                                    </span>
-                                  </div>
-                                </SelectItem>
-                              )}
-                            {/* Show schema fields first (with enhanced type info) */}
-                            {schemaFields.map((field) => {
-                              const fieldType = analyzeFieldType(
-                                field.name,
-                                null,
-                                field.type
-                              );
-                              const IconComponent = getFieldTypeIcon(fieldType);
-                              return (
-                                <SelectItem
-                                  key={`schema-${field.name}`}
-                                  value={field.name}
-                                >
-                                  <div className="flex items-center gap-2 w-full">
-                                    <IconComponent className="h-3 w-3 text-muted-foreground" />
-                                    <span className="flex-1">{field.name}</span>
-                                    <div className="flex items-center gap-1">
-                                      <span className="text-xs bg-muted px-1.5 py-0.5 rounded text-muted-foreground">
-                                        {fieldType.type}
-                                      </span>
-                                      {fieldType.format && (
-                                        <span className="text-xs bg-blue-100 dark:bg-blue-900 px-1.5 py-0.5 rounded text-blue-700 dark:text-blue-300">
-                                          {fieldType.format}
-                                        </span>
-                                      )}
-                                    </div>
-                                  </div>
-                                </SelectItem>
-                              );
-                            })}
-                            {/* Show runtime fields from query results */}
-                            {availableFields
-                              .filter(
-                                (field) =>
-                                  !schemaFields.some((sf) => sf.name === field)
-                              )
-                              .map((field) => {
-                                const fieldType = analyzeFieldType(
-                                  field,
-                                  previewData?.[0]?.[field]
-                                );
-                                const IconComponent =
-                                  getFieldTypeIcon(fieldType);
-                                return (
-                                  <SelectItem
-                                    key={`runtime-${field}`}
-                                    value={field}
-                                  >
-                                    <div className="flex items-center gap-2 w-full">
-                                      <IconComponent className="h-3 w-3 text-muted-foreground" />
-                                      <span className="flex-1">{field}</span>
-                                      <div className="flex items-center gap-1">
-                                        <span className="text-xs bg-muted px-1.5 py-0.5 rounded text-muted-foreground">
-                                          {fieldType.type}
-                                        </span>
-                                        {fieldType.format && (
-                                          <span className="text-xs bg-green-100 dark:bg-green-900 px-1.5 py-0.5 rounded text-green-700 dark:text-green-300">
-                                            {fieldType.format}
-                                          </span>
-                                        )}
-                                        <span className="text-xs bg-orange-100 dark:bg-orange-900 px-1.5 py-0.5 rounded text-orange-700 dark:text-orange-300">
-                                          Query
-                                        </span>
-                                      </div>
-                                    </div>
-                                  </SelectItem>
-                                );
-                              })}
-                          </SelectContent>
-                        </Select>
-                      </div>
-
-                      {/* Y Field (Value) */}
-                      <div>
-                        <Label>Value Field (Y-Axis)</Label>
-                        <Select
-                          value={localConfig.fieldMapping?.yField || ""}
-                          onValueChange={(value) =>
-                            handleConfigChange({
-                              fieldMapping: {
-                                ...localConfig.fieldMapping,
-                                yField: value || undefined,
-                              },
-                            })
-                          }
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select field" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {/* Show current field mapping even if not in other lists */}
-                            {localConfig.fieldMapping?.yField &&
-                              !availableFields.includes(
-                                localConfig.fieldMapping.yField
-                              ) &&
-                              !schemaFields.some(
-                                (f) =>
-                                  f.name === localConfig.fieldMapping?.yField
-                              ) && (
-                                <SelectItem
-                                  value={localConfig.fieldMapping.yField}
-                                >
-                                  <div className="flex items-center gap-2 w-full">
-                                    <Type className="h-3 w-3 text-muted-foreground" />
-                                    <span className="flex-1">
-                                      {localConfig.fieldMapping.yField}
-                                    </span>
-                                    <span className="text-xs bg-muted px-1.5 py-0.5 rounded text-muted-foreground">
-                                      CURRENT
-                                    </span>
-                                  </div>
-                                </SelectItem>
-                              )}
-                            {/* Show schema fields first (with enhanced type info) */}
-                            {schemaFields.map((field) => {
-                              const fieldType = analyzeFieldType(
-                                field.name,
-                                null,
-                                field.type
-                              );
-                              const IconComponent = getFieldTypeIcon(fieldType);
-                              return (
-                                <SelectItem
-                                  key={`schema-${field.name}`}
-                                  value={field.name}
-                                >
-                                  <div className="flex items-center gap-2 w-full">
-                                    <IconComponent className="h-3 w-3 text-muted-foreground" />
-                                    <span className="flex-1">{field.name}</span>
-                                    <div className="flex items-center gap-1">
-                                      <span className="text-xs bg-muted px-1.5 py-0.5 rounded text-muted-foreground">
-                                        {fieldType.type}
-                                      </span>
-                                      {fieldType.format && (
-                                        <span className="text-xs bg-blue-100 dark:bg-blue-900 px-1.5 py-0.5 rounded text-blue-700 dark:text-blue-300">
-                                          {fieldType.format}
-                                        </span>
-                                      )}
-                                    </div>
-                                  </div>
-                                </SelectItem>
-                              );
-                            })}
-                            {/* Show runtime fields from query results */}
-                            {availableFields
-                              .filter(
-                                (field) =>
-                                  !schemaFields.some((sf) => sf.name === field)
-                              )
-                              .map((field) => {
-                                const fieldType = analyzeFieldType(
-                                  field,
-                                  previewData?.[0]?.[field]
-                                );
-                                const IconComponent =
-                                  getFieldTypeIcon(fieldType);
-                                return (
-                                  <SelectItem
-                                    key={`runtime-${field}`}
-                                    value={field}
-                                  >
-                                    <div className="flex items-center gap-2 w-full">
-                                      <IconComponent className="h-3 w-3 text-muted-foreground" />
-                                      <span className="flex-1">{field}</span>
-                                      <div className="flex items-center gap-1">
-                                        <span className="text-xs bg-muted px-1.5 py-0.5 rounded text-muted-foreground">
-                                          {fieldType.type}
-                                        </span>
-                                        {fieldType.format && (
-                                          <span className="text-xs bg-green-100 dark:bg-green-900 px-1.5 py-0.5 rounded text-green-700 dark:text-green-300">
-                                            {fieldType.format}
-                                          </span>
-                                        )}
-                                        <span className="text-xs bg-orange-100 dark:bg-orange-900 px-1.5 py-0.5 rounded text-orange-700 dark:text-orange-300">
-                                          Query
-                                        </span>
-                                      </div>
-                                    </div>
-                                  </SelectItem>
-                                );
-                              })}
-                          </SelectContent>
-                        </Select>
-                      </div>
-
-                      {/* Series Field (optional) */}
-                      <div>
-                        <Label>Group by (optional)</Label>
-                        <Select
-                          value={
-                            localConfig.fieldMapping?.seriesField || "none"
-                          }
-                          onValueChange={(value) =>
-                            handleConfigChange({
-                              fieldMapping: {
-                                ...localConfig.fieldMapping,
-                                seriesField:
-                                  value === "none" ? undefined : value,
-                              },
-                            })
-                          }
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select field" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="none">None</SelectItem>
-                            {/* Show current field mapping even if not in other lists */}
-                            {localConfig.fieldMapping?.seriesField &&
-                              !availableFields.includes(
-                                localConfig.fieldMapping.seriesField
-                              ) &&
-                              !schemaFields.some(
-                                (f) =>
-                                  f.name ===
-                                  localConfig.fieldMapping?.seriesField
-                              ) && (
-                                <SelectItem
-                                  value={localConfig.fieldMapping.seriesField}
-                                >
-                                  <div className="flex items-center gap-2 w-full">
-                                    <Type className="h-3 w-3 text-muted-foreground" />
-                                    <span className="flex-1">
-                                      {localConfig.fieldMapping.seriesField}
-                                    </span>
-                                    <span className="text-xs bg-muted px-1.5 py-0.5 rounded text-muted-foreground">
-                                      CURRENT
-                                    </span>
-                                  </div>
-                                </SelectItem>
-                              )}
-                            {/* Show schema fields first (with enhanced type info) */}
-                            {schemaFields.map((field) => {
-                              const fieldType = analyzeFieldType(
-                                field.name,
-                                null,
-                                field.type
-                              );
-                              const IconComponent = getFieldTypeIcon(fieldType);
-                              return (
-                                <SelectItem
-                                  key={`schema-${field.name}`}
-                                  value={field.name}
-                                >
-                                  <div className="flex items-center gap-2 w-full">
-                                    <IconComponent className="h-3 w-3 text-muted-foreground" />
-                                    <span className="flex-1">{field.name}</span>
-                                    <div className="flex items-center gap-1">
-                                      <span className="text-xs bg-muted px-1.5 py-0.5 rounded text-muted-foreground">
-                                        {fieldType.type}
-                                      </span>
-                                      {fieldType.format && (
-                                        <span className="text-xs bg-blue-100 dark:bg-blue-900 px-1.5 py-0.5 rounded text-blue-700 dark:text-blue-300">
-                                          {fieldType.format}
-                                        </span>
-                                      )}
-                                    </div>
-                                  </div>
-                                </SelectItem>
-                              );
-                            })}
-                            {/* Show runtime fields from query results */}
-                            {availableFields
-                              .filter(
-                                (field) =>
-                                  !schemaFields.some((sf) => sf.name === field)
-                              )
-                              .map((field) => {
-                                const fieldType = analyzeFieldType(
-                                  field,
-                                  previewData?.[0]?.[field]
-                                );
-                                const IconComponent =
-                                  getFieldTypeIcon(fieldType);
-                                return (
-                                  <SelectItem
-                                    key={`runtime-${field}`}
-                                    value={field}
-                                  >
-                                    <div className="flex items-center gap-2 w-full">
-                                      <IconComponent className="h-3 w-3 text-muted-foreground" />
-                                      <span className="flex-1">{field}</span>
-                                      <div className="flex items-center gap-1">
-                                        <span className="text-xs bg-muted px-1.5 py-0.5 rounded text-muted-foreground">
-                                          {fieldType.type}
-                                        </span>
-                                        {fieldType.format && (
-                                          <span className="text-xs bg-green-100 dark:bg-green-900 px-1.5 py-0.5 rounded text-green-700 dark:text-green-300">
-                                            {fieldType.format}
-                                          </span>
-                                        )}
-                                        <span className="text-xs bg-orange-100 dark:bg-orange-900 px-1.5 py-0.5 rounded text-orange-700 dark:text-orange-300">
-                                          Query
-                                        </span>
-                                      </div>
-                                    </div>
-                                  </SelectItem>
-                                );
-                              })}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
-
-                    {!availableFields.length && !schemaFields.length && (
-                      <div className="text-sm text-muted-foreground p-3 bg-muted/50 rounded-lg">
-                        {localConfig.database && localConfig.query
-                          ? "Run a query to see available fields"
-                          : "Select database and write a query to see field suggestions"}
-                      </div>
-                    )}
-
-                    {schemaFields.length > 0 && (
-                      <div className="text-sm text-muted-foreground p-3 bg-blue-50 dark:bg-blue-950 rounded-lg">
-                        Found {schemaFields.length} fields from schema analysis
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Field Configuration */}
-                {localConfig.type && (
-                  <div className="space-y-4">
-                    <h4 className="text-sm font-medium border-b pb-2">
-                      Field Configuration
-                    </h4>
-                    <div>
-                      <Label htmlFor="unit">Unit</Label>
-                      <Input
-                        id="unit"
-                        value={localConfig.fieldConfig?.defaults?.unit || ""}
-                        onChange={(e) =>
-                          handleConfigChange({
-                            fieldConfig: {
-                              ...localConfig.fieldConfig,
-                              defaults: {
-                                ...localConfig.fieldConfig?.defaults,
-                                unit: e.target.value,
-                              },
-                            },
-                          })
-                        }
-                        placeholder="e.g., %, ms, MB"
-                      />
-                    </div>
-                    <div>
-                      <Label htmlFor="decimals">Decimals</Label>
-                      <Input
-                        id="decimals"
-                        type="number"
-                        value={
-                          localConfig.fieldConfig?.defaults?.decimals || ""
-                        }
-                        onChange={(e) =>
-                          handleConfigChange({
-                            fieldConfig: {
-                              ...localConfig.fieldConfig,
-                              defaults: {
-                                ...localConfig.fieldConfig?.defaults,
-                                decimals: parseInt(e.target.value) || 0,
-                              },
-                            },
-                          })
-                        }
-                        placeholder="2"
-                      />
-                    </div>
-                  </div>
-                )}
-
-                {/* Panel Options */}
-                {localConfig.type && (
-                  <div className="space-y-4">
-                    <h4 className="text-sm font-medium border-b pb-2">
-                      Panel Options
-                    </h4>
-                    <div>
-                      <Label>Legend Placement</Label>
-                      <Select
-                        value={
-                          localConfig.options?.legend?.placement || "bottom"
-                        }
-                        onValueChange={(value) =>
-                          handleConfigChange({
-                            options: {
-                              ...localConfig.options,
-                              legend: {
-                                ...localConfig.options?.legend,
-                                placement: value as any,
-                                showLegend: localConfig.options?.legend?.showLegend ?? true,
-                                displayMode: localConfig.options?.legend?.displayMode ?? "list",
-                              },
-                            },
-                          })
-                        }
-                      >
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="bottom">Bottom</SelectItem>
-                          <SelectItem value="top">Top</SelectItem>
-                          <SelectItem value="right">Right</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                )}
+              {/* Settings Content */}
+              <div className="flex-1 overflow-auto p-6">
+                <PanelConfigurationForm
+                  config={localConfig}
+                  onConfigChange={handleConfigChange}
+                  availableFields={availableFields}
+                  schemaFields={[]}
+                  previewData={previewData || undefined}
+                  showAdvancedOptions={true}
+                />
               </div>
             </div>
           </ResizablePanel>

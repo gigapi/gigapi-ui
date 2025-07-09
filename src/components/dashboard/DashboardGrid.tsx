@@ -2,7 +2,7 @@ import { useMemo, useCallback } from "react";
 import { Responsive, WidthProvider, type Layout } from "react-grid-layout";
 import "react-grid-layout/css/styles.css";
 import "react-resizable/css/styles.css";
-import { useDashboard } from "@/contexts/DashboardContext";
+import { useDashboard } from "@/atoms";
 import { type PanelLayout, type GridLayoutItem } from "@/types/dashboard.types";
 import DashboardPanel from "./DashboardPanel";
 import { cn } from "@/lib/utils/class-utils";
@@ -18,12 +18,12 @@ interface DashboardGridProps {
 export default function DashboardGrid({ className, onEditPanel }: DashboardGridProps) {
   const {
     currentDashboard,
-    panels,
     panelData,
     isEditMode,
     selectedPanelId,
     updateLayout,
     setSelectedPanel,
+    isPanelLoading,
   } = useDashboard();
 
   // Convert panel layouts to grid layout format
@@ -87,6 +87,7 @@ export default function DashboardGrid({ className, onEditPanel }: DashboardGridP
     );
   }
 
+
   const gridSettings = currentDashboard.layout.gridSettings || {
     columns: 12,
     rowHeight: 60, // Increase from 30 to 60 for better panel height
@@ -129,10 +130,15 @@ export default function DashboardGrid({ className, onEditPanel }: DashboardGridP
             verticalCompact={true}
           >
             {currentDashboard.layout.panels.map(panelLayout => {
-              const panel = panels.get(panelLayout.panelId);
+              // Find the panel from the embedded panels array
+              const panel = currentDashboard.panels.find(p => p.id === panelLayout.panelId);
               const data = panelData.get(panelLayout.panelId);
               
-              if (!panel) return null;
+              
+              if (!panel) {
+                console.warn(`Panel with id ${panelLayout.panelId} not found in dashboard panels`);
+                return null;
+              }
 
               return (
                 <div key={panelLayout.panelId} className="panel-container w-full h-full">
@@ -140,6 +146,7 @@ export default function DashboardGrid({ className, onEditPanel }: DashboardGridP
                     config={panel}
                     data={data?.data || []}
                     error={data?.error}
+                    isLoading={isPanelLoading(panel.id)}
                     isEditMode={isEditMode}
                     isSelected={selectedPanelId === panel.id}
                     onSelect={() => setSelectedPanel(panel.id)}

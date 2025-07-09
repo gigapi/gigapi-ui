@@ -17,8 +17,14 @@ import { Card } from "@/components/ui/card";
 import { DEFAULT_TIME_RANGE } from "@/lib/";
 import { NO_TIME_FILTER, QUICK_RANGES } from "@/types/utils.types";
 import { Badge } from "@/components/ui/badge";
-import { useTime } from "@/contexts/TimeContext";
-import { useQuery } from "@/contexts/QueryContext";
+import { useAtom, useSetAtom } from "jotai";
+import { 
+  selectedTimeZoneAtom, 
+  selectedTimeFieldAtom,
+  hasTimeVariablesAtom
+} from "@/atoms";
+import { queryAtom, setQueryAtom } from "@/atoms";
+import { getColumnsAtom } from "@/atoms";
 import {
   Tooltip,
   TooltipContent,
@@ -26,47 +32,27 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import type { TimeRange } from "@/types";
-import { type TimeRange as DashboardTimeRange } from "@/types/dashboard.types";
 import {
   parseRelativeTime,
   getDisplayTime,
   validateTimeInputs,
   convertDateInput,
-  validateInput,
+  validateTimeInput,
 } from "@/lib/";
 import TimezoneSelector from "@/components/TimezoneSelector";
-import DateTimePicker from "@/components/DateTimePicker";
+import DateTimePicker from "@/components/shared/DateTimePicker";
 import QuickRanges from "@/components/QuickRanges";
 import { toast } from "sonner";
 
-// Union type for both query and dashboard time ranges
-type TimeRangeUnion = TimeRange | DashboardTimeRange;
-
-// Type guards
-function isQueryTimeRange(timeRange: TimeRangeUnion): timeRange is TimeRange {
-  return 'enabled' in timeRange || 'display' in timeRange;
-}
-
-// Helper function to get enabled status
-function getEnabledStatus(timeRange: TimeRangeUnion): boolean {
-  if (isQueryTimeRange(timeRange)) {
-    return timeRange.enabled !== false;
-  }
-  return true; // Dashboard time ranges are always enabled
-}
-
-// Helper function to get string value for dates
-function getStringValue(value: string | Date): string {
-  return typeof value === 'string' ? value : value.toISOString();
-}
+// TimeRange is now imported from the centralized types file
 
 interface TimeRangeSelectorProps {
-  timeRange: TimeRangeUnion;
-  onTimeRangeChange: (range: TimeRangeUnion) => void;
+  timeRange: TimeRange;
+  onTimeRangeChange: (range: TimeRange) => void;
   className?: string;
-  disabled?: boolean;
-  fieldName?: string;
-  tableName?: string;
+  disabled?: boolean; // Whether the selector should be disabled
+  fieldName?: string; // The name of the field being filtered
+  tableName?: string; // The name of the table being filtered
 }
 
 // Component code uses imported utilities for time parsing and timezone handling
@@ -77,22 +63,24 @@ export default function TimeRangeSelector({
   disabled = false,
 }: TimeRangeSelectorProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const [fromInput, setFromInput] = useState<string>(
-    getStringValue(timeRange?.from || DEFAULT_TIME_RANGE.from)
+  const [fromInput, setFromInput] = useState(
+    timeRange?.from || DEFAULT_TIME_RANGE.from
   );
-  const [toInput, setToInput] = useState<string>(
-    getStringValue(timeRange?.to || DEFAULT_TIME_RANGE.to)
+  const [toInput, setToInput] = useState(
+    timeRange?.to || DEFAULT_TIME_RANGE.to
   );
   const [currentTime, setCurrentTime] = useState("");
 
-  const {
-    selectedTimeFieldDetails,
-    selectedTimeZone,
-    setSelectedTimeZone,
-    hasTimeVariables,
-    selectedTimeField,
-  } = useTime();
-  const { query, setQuery } = useQuery();
+  const [selectedTimeZone] = useAtom(selectedTimeZoneAtom);
+  const [hasTimeVariables] = useAtom(hasTimeVariablesAtom);
+  const [selectedTimeField] = useAtom(selectedTimeFieldAtom);
+  const [query] = useAtom(queryAtom);
+  const [getColumns] = useAtom(getColumnsAtom);
+  const setSelectedTimeZone = useSetAtom(selectedTimeZoneAtom);
+  const setQuery = useSetAtom(setQueryAtom);
+  
+  // Get time field details from columns
+  const selectedTimeFieldDetails = selectedTimeField && getColumns ? getColumns(selectedTimeField) : null;
 
   // Get browser timezone and current time
   useEffect(() => {
@@ -125,8 +113,8 @@ export default function TimeRangeSelector({
   // Update the input fields when timeRange changes
   useEffect(() => {
     if (safeTimeRange) {
-      setFromInput(getStringValue(safeTimeRange.from));
-      setToInput(getStringValue(safeTimeRange.to));
+      setFromInput(safeTimeRange.from);
+      setToInput(safeTimeRange.to);
     }
   }, [safeTimeRange]);
 
@@ -136,22 +124,21 @@ export default function TimeRangeSelector({
     if (!safeTimeRange) return "Select time range";
 
     // Check if time filtering is disabled
-    if (!getEnabledStatus(safeTimeRange)) {
+    if (safeTimeRange.enabled === false) {
       return "No time filter";
     }
 
     const quickRange = QUICK_RANGES.find(
       (r: TimeRange) =>
-        getStringValue(r.from) === getStringValue(safeTimeRange.from) && 
-        getStringValue(r.to) === getStringValue(safeTimeRange.to)
+        r.from === safeTimeRange.from && r.to === safeTimeRange.to
     );
 
     if (quickRange) {
       return quickRange.display;
     }
 
-    const fromDisplay = getDisplayTime(getStringValue(safeTimeRange.from));
-    const toDisplay = getDisplayTime(getStringValue(safeTimeRange.to));
+    const fromDisplay = getDisplayTime(safeTimeRange.from);
+    const toDisplay = getDisplayTime(safeTimeRange.to);
 
     return `${fromDisplay} to ${toDisplay}`;
   }, [safeTimeRange]);
@@ -160,7 +147,7 @@ export default function TimeRangeSelector({
   const isTimeFilterActive = useMemo(() => {
     return (
       hasTimeVariables &&
-      getEnabledStatus(safeTimeRange) &&
+      safeTimeRange.enabled !== false &&
       selectedTimeFieldDetails !== null
     );
   }, [hasTimeVariables, safeTimeRange, selectedTimeFieldDetails]);
@@ -169,7 +156,7 @@ export default function TimeRangeSelector({
   const isTimeFilterUnused = useMemo(() => {
     return (
       !hasTimeVariables &&
-      getEnabledStatus(safeTimeRange) &&
+      safeTimeRange.enabled !== false &&
       selectedTimeField !== null &&
       selectedTimeField !== "_none_" &&
       query.trim() !== ""
@@ -196,22 +183,17 @@ export default function TimeRangeSelector({
       );
 
       if (nextClauseMatch) {
-        // Insert time filter before the next clause
-        wherePos + nextClauseMatch.index;
         newQuery =
           newQuery.substring(0, wherePos) +
           "$__timeFilter " +
           newQuery.substring(wherePos);
       } else {
-        // Add to the end of the WHERE clause
         newQuery =
           newQuery.substring(0, wherePos) +
           "$__timeFilter AND " +
           newQuery.substring(wherePos);
       }
     } else {
-      // Need to add a WHERE clause
-      // Check for GROUP BY, ORDER BY, or LIMIT
       const clauseMatch = /\b(GROUP BY|ORDER BY|LIMIT)\b/i.exec(newQuery);
 
       if (clauseMatch) {
@@ -258,8 +240,12 @@ export default function TimeRangeSelector({
   // Apply relative time range from inputs
   const applyRelativeRange = () => {
     // Validate inputs before applying
-    const fromError = validateInput(fromInput, { required: true }, "From time");
-    const toError = validateInput(toInput, { required: true }, "To time");
+    const fromError = validateTimeInput(
+      fromInput,
+      { required: true },
+      "From time"
+    );
+    const toError = validateTimeInput(toInput, { required: true }, "To time");
 
     if (fromError || toError || !validateTimeInputs(fromInput, toInput)) {
       toast.error(
@@ -322,7 +308,7 @@ export default function TimeRangeSelector({
                   <CalendarIcon className="h-3.5 w-3.5 shrink-0" />
                 )}
                 <span className="truncate font-normal">
-                  {!getEnabledStatus(timeRange)
+                  {timeRange?.enabled === false
                     ? "No time filter"
                     : currentRangeDisplay}
                 </span>
@@ -342,7 +328,7 @@ export default function TimeRangeSelector({
                     unused
                   </Badge>
                 )}
-                {!getEnabledStatus(timeRange) && (
+                {timeRange?.enabled === false && (
                   <Badge
                     variant="outline"
                     className="ml-1 h-4 px-1 py-0 border-primary/20 text-[10px] bg-red-400/20"
@@ -472,13 +458,11 @@ export default function TimeRangeSelector({
                     <div>Current Time:</div>
                     <div className="font-mono">{currentTime}</div>
                   </div>
-                  {selectedTimeFieldDetails && (
+                  {selectedTimeField && (
                     <div className="flex justify-between items-center text-xs text-muted-foreground">
-                      <div>Field Type:</div>
+                      <div>Time Field:</div>
                       <div className="font-mono">
-                        {selectedTimeFieldDetails.dataType.toUpperCase()}
-                        {selectedTimeFieldDetails.timeUnit &&
-                          ` (${selectedTimeFieldDetails.timeUnit})`}
+                        {selectedTimeField}
                       </div>
                     </div>
                   )}

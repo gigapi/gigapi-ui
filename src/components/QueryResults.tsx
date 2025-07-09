@@ -9,18 +9,25 @@ import {
   Server,
   BarChart3,
   Save,
-  Clock,
-  Hash,
-  Type,
 } from "lucide-react";
 import { toast } from "sonner";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { formatBytes, formatExecutionTime } from "@/lib/utils/formatting";
-import { useQuery } from "@/contexts/QueryContext";
-import { useDatabase } from "@/contexts/DatabaseContext";
-import { useTime } from "@/contexts/TimeContext";
-import { useDashboard } from "@/contexts/DashboardContext";
+import { formatExecutionTime, formatBytes } from "@/lib/time";
+import { useAtom, useSetAtom } from "jotai";
+import {
+  queryResultsAtom,
+  queryMetricsAtom,
+  queryLoadingAtom,
+  queryErrorAtom,
+  queryHistoryAtom,
+  queryAtom,
+  rawQueryResponseAtom,
+  processedQueryAtom,
+} from "@/atoms";
+import { selectedDbAtom, selectedTableAtom } from "@/atoms";
+import { timeRangeAtom, selectedTimeFieldAtom } from "@/atoms";
+import { createDashboardAtom, addPanelAtom } from "@/atoms";
 import GigTable from "@/components/GigTable";
 import Loader from "@/components/Loader";
 import { Button } from "@/components/ui/button";
@@ -50,19 +57,20 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { PanelFactory } from "@/lib/panel-factory";
-import { PANEL_TYPES } from "@/components/dashboard/panels";
-import { transformDataForPanel, parseNDJSON } from "@/lib/dashboard/data-transformers";
-import { 
-  type PanelConfig, 
-  type FieldMapping,
+import { PanelFactory } from "@/lib/dashboard/panel-factory";
+import { parseNDJSON } from "@/lib/parsers/ndjson";
+import {
+  type PanelConfig,
   type Dashboard,
-  type NDJSONRecord 
+  type NDJSONRecord,
+  type PanelProps,
 } from "@/types/dashboard.types";
-import TimeSeriesPanel from "@/components/dashboard/panels/TimeSeriesPanel";
-import StatPanel from "@/components/dashboard/panels/StatPanel";
-import GaugePanel from "@/components/dashboard/panels/GaugePanel";
-import TablePanel from "@/components/dashboard/panels/TablePanel";
+import {
+  getPanelComponent,
+  ChartRenderer,
+} from "@/components/dashboard/panels";
+import { PanelConfigurationForm } from "@/components/dashboard/PanelConfigurationForm";
+import { SchemaAnalyzer } from "@/lib/dashboard/schema-analyzer";
 
 // Local interface for display-specific performance metrics
 interface DisplayPerformanceMetrics {
@@ -72,166 +80,46 @@ interface DisplayPerformanceMetrics {
   clientTime: number;
 }
 
-// Field type analysis
-function analyzeFieldType(fieldName: string, value: any): { type: string; format?: string } {
-  const fieldLower = fieldName.toLowerCase();
-  
-  // Time field detection
-  if (fieldLower.includes('time') || fieldLower.includes('date') || fieldLower.includes('timestamp')) {
-    if (typeof value === 'number') {
-      // Detect timestamp precision
-      if (value > 1e15) {
-        return { type: 'BIGINT', format: 'Time (ns)' };
-      } else if (value > 1e12) {
-        return { type: 'BIGINT', format: 'Time (μs)' };
-      } else if (value > 1e10) {
-        return { type: 'BIGINT', format: 'Time (ms)' };
-      } else {
-        return { type: 'INTEGER', format: 'Time (s)' };
-      }
-    }
-    return { type: 'DATETIME', format: 'Time' };
-  }
-  
-  // Numeric field detection
-  if (typeof value === 'number') {
-    if (Number.isInteger(value)) {
-      return { type: 'INTEGER' };
-    }
-    return { type: 'DOUBLE' };
-  }
-  
-  // String field detection
-  if (typeof value === 'string') {
-    // Check if it's a parseable number
-    if (!isNaN(Number(value))) {
-      return { type: 'VARCHAR', format: 'Numeric String' };
-    }
-    // Check if it's a date string
-    if (!isNaN(Date.parse(value))) {
-      return { type: 'VARCHAR', format: 'Date String' };
-    }
-    return { type: 'VARCHAR' };
-  }
-  
-  // Boolean
-  if (typeof value === 'boolean') {
-    return { type: 'BOOLEAN' };
-  }
-  
-  // Default
-  return { type: 'UNKNOWN' };
-}
-
-// Field type icon mapping
-function getFieldTypeIcon(fieldType: { type: string; format?: string }) {
-  if (fieldType.format?.includes('Time') || fieldType.type === 'DATETIME') {
-    return Clock;
-  }
-  if (fieldType.type === 'INTEGER' || fieldType.type === 'DOUBLE' || fieldType.type === 'BIGINT') {
-    return Hash;
-  }
-  if (fieldType.type === 'VARCHAR') {
-    return Type;
-  }
-  return Type;
-}
-
-// Smart field label for different panel types
-function getSmartFieldLabel(fieldType: { type: string; format?: string }, panelType: string, isXField: boolean = false) {
-  if (isXField && (panelType === 'bar' || panelType === 'scatter')) {
-    // For bar/scatter charts, time fields become "Date" on X-axis
-    if (fieldType.format?.includes('Time') || fieldType.type === 'DATETIME') {
-      return 'Date Field';
-    }
-    return 'Category Field';
-  }
-  
-  if (isXField && (panelType === 'timeseries' || panelType === 'line' || panelType === 'area')) {
-    return 'Time Field';
-  }
-  
-  return isXField ? 'X Field' : 'Value Field';
-}
-
-// Smart field defaults - auto-select best fields
-function getSmartFieldDefaults(fields: string[], fieldTypes: Record<string, { type: string; format?: string }>): FieldMapping {
-  const mapping: FieldMapping = {};
-  
-  // Find time fields (prioritize timestamp fields with Time format)
-  const timeFields = fields.filter(field => {
-    const fieldType = fieldTypes[field];
-    return fieldType?.format?.includes('Time') || 
-           fieldType?.type === 'DATETIME' ||
-           field.toLowerCase().includes('time') ||
-           field.toLowerCase().includes('timestamp') ||
-           field.toLowerCase().includes('date') ||
-           field === '__timestamp';
-  });
-  
-  // Find numeric fields for Y-axis
-  const numericFields = fields.filter(field => {
-    const fieldType = fieldTypes[field];
-    return fieldType?.type === 'DOUBLE' || 
-           fieldType?.type === 'INTEGER' || 
-           fieldType?.type === 'BIGINT' && !fieldType?.format?.includes('Time');
-  });
-  
-  // Auto-select X field (time/timestamp first priority)
-  if (timeFields.length > 0) {
-    // Prefer __timestamp or fields with Time format
-    const preferredTimeField = timeFields.find(field => field === '__timestamp') ||
-                              timeFields.find(field => fieldTypes[field]?.format?.includes('Time')) ||
-                              timeFields[0];
-    mapping.xField = preferredTimeField;
-  } else if (fields.length > 0) {
-    // Fallback to first field
-    mapping.xField = fields[0];
-  }
-  
-  // Auto-select Y field (first numeric field)
-  if (numericFields.length > 0) {
-    // Prefer DOUBLE over INTEGER over BIGINT
-    const preferredNumField = numericFields.find(field => fieldTypes[field]?.type === 'DOUBLE') ||
-                             numericFields.find(field => fieldTypes[field]?.type === 'INTEGER') ||
-                             numericFields[0];
-    mapping.yField = preferredNumField;
-  }
-  
-  // Series field is left empty by default - user can choose to group by any field
-  
-  return mapping;
-}
-
 export default function QueryResults() {
-  const {
-    results,
-    rawJson,
-    isLoading,
-    error,
-    queryErrorDetail,
-    executionTime, // This is server execution time
-    responseSize,
-    query,
-    queryHistory,
-    actualExecutedQuery, // Added from previous context reading
-  } = useQuery();
+  const [results] = useAtom(queryResultsAtom);
+  const [isLoading] = useAtom(queryLoadingAtom);
+  const [error] = useAtom(queryErrorAtom);
+  const [queryMetrics] = useAtom(queryMetricsAtom);
+  const [query] = useAtom(queryAtom);
+  const [queryHistory] = useAtom(queryHistoryAtom);
+  const [selectedDb] = useAtom(selectedDbAtom);
+  const [selectedTable] = useAtom(selectedTableAtom);
+  const [selectedTimeField] = useAtom(selectedTimeFieldAtom);
+  const [timeRange] = useAtom(timeRangeAtom);
+  const [rawQueryResponse] = useAtom(rawQueryResponseAtom);
+  const [processedQuery] = useAtom(processedQueryAtom);
+  const createDashboard = useSetAtom(createDashboardAtom);
+  const addPanel = useSetAtom(addPanelAtom);
 
-  const { selectedDb, selectedTable } = useDatabase();
-  const { selectedTimeField, timeRange } = useTime();
-  const { createDashboard, addPanel, loadDashboard } = useDashboard();
+  // Extract values from metrics
+  const executionTime = queryMetrics?.executionTime || null;
+  const responseSize = queryMetrics?.size || null;
+  const rawJson = rawQueryResponse; // Now using the atom
+  const queryErrorDetail = error; // Use the error from atom
+  const actualExecutedQuery = processedQuery; // Now using the atom
 
   const [activeTab, setActiveTab] = useState("results");
   const [currentExecutedQuery, setCurrentExecutedQuery] = useState(query);
   const [transformedQuery, setTransformedQuery] = useState("");
 
-  // Panel creation states
-  const [panelConfig, setPanelConfig] = useState<PanelConfig>(() => 
-    PanelFactory.createPanel('timeseries', 'Query Panel', query)
-  );
-  const [fieldMapping, setFieldMapping] = useState<FieldMapping>({});
+  // Panel creation states - initialize with empty field mapping
+  const [panelConfig, setPanelConfig] = useState<PanelConfig>(() => {
+    const initial = PanelFactory.createPanel({
+      type: "timeseries",
+      title: "Query Panel",
+      database: selectedDb || "",
+      query: query,
+    });
+    // Clear field mapping to allow smart defaults to work
+    initial.fieldMapping = {};
+    return initial;
+  });
   const [availableFields, setAvailableFields] = useState<string[]>([]);
-  const [fieldTypes, setFieldTypes] = useState<Record<string, { type: string; format?: string }>>({});
   const [showSaveToDashboard, setShowSaveToDashboard] = useState(false);
   const [newDashboardName, setNewDashboardName] = useState("");
   const [selectedDashboardId, setSelectedDashboardId] = useState<string>("new");
@@ -327,65 +215,109 @@ export default function QueryResults() {
     }
   }, [actualExecutedQuery, rawJson]);
 
+  // apiUrl is already defined above
+
+  // Schema fields are now handled by atoms/API calls, no need for separate hook
+
   // Update available fields when results change
   useEffect(() => {
     if (results && results.length > 0) {
-      const fields = Object.keys(results[0]).filter(key => !key.startsWith('_'));
-      setAvailableFields(fields);
-      
-      // Analyze field types from sample data
-      const types: Record<string, { type: string; format?: string }> = {};
-      const sampleRow = results[0];
-      
-      fields.forEach(field => {
-        const value = sampleRow[field];
-        const fieldType = analyzeFieldType(field, value);
-        types[field] = fieldType;
+      const fields = Object.keys(results[0]).filter((key) => {
+        // Include __timestamp but exclude other internal fields
+        if (key === "__timestamp") return true;
+        // Exclude other fields starting with _ (like _processed_query)
+        return !key.startsWith("_");
       });
-      
-      setFieldTypes(types);
-
-      // Auto-select smart defaults if no mapping exists
-      if (!fieldMapping.xField && !fieldMapping.yField) {
-        const smartMapping = getSmartFieldDefaults(fields, types);
-        setFieldMapping(smartMapping);
-      }
+      console.log("Query results fields:", fields);
+      setAvailableFields(fields);
     } else {
       setAvailableFields([]);
-      setFieldTypes({});
     }
   }, [results]);
 
+  // Smart field mapping - only when panel type changes or initial setup
+  useEffect(() => {
+    if (availableFields.length > 0) {
+      let smartMapping: any = {};
+
+      // Use enhanced analyzer if we have actual results data
+      if (results && results.length > 0) {
+        console.log(
+          "Using enhanced schema analysis for",
+          results.length,
+          "records"
+        );
+        const enhancedAnalysis = SchemaAnalyzer.analyzeDataset(results, 500);
+        console.log("Enhanced field analysis:", enhancedAnalysis);
+
+        smartMapping = SchemaAnalyzer.getEnhancedSmartDefaults(
+          enhancedAnalysis,
+          panelConfig.type || "timeseries"
+        );
+      } else {
+        // Fallback to basic field mapping
+        const fieldTypes: Record<string, any> = {};
+
+        smartMapping = SchemaAnalyzer.getSmartFieldDefaults(
+          availableFields,
+          fieldTypes,
+          [], // No schema fields needed
+          panelConfig.type || "timeseries"
+        );
+      }
+
+      console.log("Smart field mapping:", smartMapping);
+
+      // Update panel config with smart defaults
+      setPanelConfig((prev) => ({
+        ...prev,
+        fieldMapping: {
+          ...prev.fieldMapping,
+          // Only set fields that aren't already set
+          xField: prev.fieldMapping?.xField || smartMapping.xField,
+          yField: prev.fieldMapping?.yField || smartMapping.yField,
+          seriesField:
+            prev.fieldMapping?.seriesField || smartMapping.seriesField, // Include series field suggestions
+        },
+      }));
+    }
+  }, [panelConfig.type, availableFields, results]);
+
   // Update panel config when query changes
   useEffect(() => {
-    setPanelConfig(prev => ({
+    setPanelConfig((prev) => ({
       ...prev,
       query: query,
-      fieldMapping: fieldMapping,
+      // Reset field mapping when query changes to allow new smart defaults
+      fieldMapping: query !== prev.query ? {} : prev.fieldMapping,
     }));
-  }, [query, fieldMapping]);
+  }, [query]);
+
+  // Update panel config when database changes
+  useEffect(() => {
+    setPanelConfig((prev) => ({
+      ...prev,
+      database: selectedDb || "",
+      // Reset field mapping when database changes to allow new smart defaults
+      fieldMapping: selectedDb !== prev.database ? {} : prev.fieldMapping,
+    }));
+  }, [selectedDb]);
 
   // Load dashboards for the save dialog
   useEffect(() => {
-    const loadDashboards = async () => {
+    const loadDashboards = () => {
       try {
-        const { dashboardStorage } = await import("@/lib/dashboard/storage");
-        const dashboardList = await dashboardStorage.listDashboards();
-        setDashboards(dashboardList.map(item => ({
-          id: item.id,
-          title: item.name,
-          description: item.description || "",
-          timeRange: { type: "relative" as const, from: "1h", to: "now" as const },
-          timeZone: "UTC",
-          layout: { panels: [] },
-          metadata: {
-            createdAt: item.createdAt,
-            updatedAt: item.updatedAt,
-            tags: item.tags || []
-          }
-        })));
+        // Get dashboards from localStorage
+        const storedDashboards = localStorage.getItem("gigapi_dashboards");
+        if (storedDashboards) {
+          const dashboardList = JSON.parse(storedDashboards);
+          setDashboards(dashboardList);
+        } else {
+          setDashboards([]);
+        }
       } catch (error) {
         console.error("Failed to load dashboards:", error);
+        setDashboards([]);
       }
     };
 
@@ -480,15 +412,7 @@ export default function QueryResults() {
         </div>
       );
     }
-    return (
-      <GigTable
-        data={results}
-        // Pass relevant performance data if GigTable uses it
-        // executionTime={localPerformanceMetrics.serverTime}
-        // responseSize={responseSize}
-        initialPageSize={25}
-      />
-    );
+    return <GigTable data={results} initialPageSize={25} />;
   }
 
   function renderPanelContent() {
@@ -506,266 +430,102 @@ export default function QueryResults() {
         <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
           <BarChart3 className="h-12 w-12 mb-4 opacity-50" />
           <p className="text-lg">Execute a query to create a panel</p>
-          <p className="text-sm mt-2">Your query results will be visualized here</p>
+          <p className="text-sm mt-2">
+            Your query results will be visualized here
+          </p>
         </div>
       );
     }
 
     return (
-      <div className="h-full flex gap-4 p-4">
-        {/* Panel Preview - Left Side */}
-        <div className="flex-1 flex flex-col">
-          <Card className="flex-1">
-            <CardHeader>
-              <CardTitle className="text-lg">Preview</CardTitle>
-            </CardHeader>
-            <CardContent className="h-[600px]">
-              {renderPanelPreview()}
-            </CardContent>
-          </Card>
+      <div className="h-full flex gap-3 p-3">
+        <div className="flex-1 flex flex-col min-h-0">
+          <div className="h-full min-h-[400px] max-h-[800px] resize-y overflow-hidden border rounded">
+            {renderPanelPreview()}
+          </div>
         </div>
 
         {/* Panel Configuration - Right Side */}
         <div className="w-80 flex flex-col space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg flex items-center gap-2">
-                <BarChart3 className="h-5 w-5" />
-                Panel Configuration
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {/* Panel Type */}
-              <div className="space-y-2">
-                <Label htmlFor="panel-type">Panel Type</Label>
-                <Select
-                  value={panelConfig.type}
-                  onValueChange={(value: any) => {
-                    const newConfig = PanelFactory.createPanel(value, panelConfig.title, query);
-                    setPanelConfig({
-                      ...newConfig,
-                      fieldMapping: fieldMapping,
-                    });
-                  }}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {Object.entries(PANEL_TYPES).map(([key, panelType]) => (
-                      <SelectItem key={key} value={key}>
-                        {panelType.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+          <PanelConfigurationForm
+            config={panelConfig}
+            schemaFields={availableFields}
+            onConfigChange={(updates) =>
+              setPanelConfig((prev) => ({ ...prev, ...updates }))
+            }
+            availableFields={availableFields}
+            previewData={results}
+            showAdvancedOptions={false}
+          />
 
-              {/* Panel Title */}
-              <div className="space-y-2">
-                <Label htmlFor="panel-title">Panel Title</Label>
-                <Input
-                  id="panel-title"
-                  value={panelConfig.title}
-                  onChange={(e) => setPanelConfig(prev => ({ ...prev, title: e.target.value }))}
-                  placeholder="Panel title"
-                />
-              </div>
-
-              {/* Field Mapping */}
-              {availableFields.length > 0 && (
-                <div className="space-y-3">
-                  <Label className="text-sm font-medium">Field Mapping</Label>
-                  
-                  {/* X Field */}
-                  <div className="space-y-2">
-                    <Label htmlFor="x-field" className="text-xs text-muted-foreground">
-                      {getSmartFieldLabel({ type: '', format: '' }, panelConfig.type, true)}
-                    </Label>
-                    <Select
-                      value={fieldMapping.xField || ""}
-                      onValueChange={(value) => setFieldMapping(prev => ({ 
-                        ...prev, 
-                        xField: value || undefined 
-                      }))}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select field" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {availableFields.map(field => {
-                          const fieldType = fieldTypes[field] || { type: 'UNKNOWN' };
-                          const IconComponent = getFieldTypeIcon(fieldType);
-                          return (
-                            <SelectItem key={field} value={field}>
-                              <div className="flex items-center gap-2 w-full">
-                                <IconComponent className="h-3 w-3 text-muted-foreground" />
-                                <span className="flex-1">{field}</span>
-                                <div className="flex items-center gap-1">
-                                  <span className="text-xs bg-muted px-1.5 py-0.5 rounded text-muted-foreground">
-                                    {fieldType.type}
-                                  </span>
-                                  {fieldType.format && (
-                                    <span className="text-xs bg-blue-100 dark:bg-blue-900 px-1.5 py-0.5 rounded text-blue-700 dark:text-blue-300">
-                                      {fieldType.format}
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-                            </SelectItem>
-                          );
-                        })}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  {/* Y Field */}
-                  <div className="space-y-2">
-                    <Label htmlFor="y-field" className="text-xs text-muted-foreground">Value Field (Y-Axis)</Label>
-                    <Select
-                      value={fieldMapping.yField || ""}
-                      onValueChange={(value) => setFieldMapping(prev => ({ 
-                        ...prev, 
-                        yField: value || undefined 
-                      }))}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select field" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {availableFields.map(field => {
-                          const fieldType = fieldTypes[field] || { type: 'UNKNOWN' };
-                          const IconComponent = getFieldTypeIcon(fieldType);
-                          return (
-                            <SelectItem key={field} value={field}>
-                              <div className="flex items-center gap-2 w-full">
-                                <IconComponent className="h-3 w-3 text-muted-foreground" />
-                                <span className="flex-1">{field}</span>
-                                <div className="flex items-center gap-1">
-                                  <span className="text-xs bg-muted px-1.5 py-0.5 rounded text-muted-foreground">
-                                    {fieldType.type}
-                                  </span>
-                                  {fieldType.format && (
-                                    <span className="text-xs bg-blue-100 dark:bg-blue-900 px-1.5 py-0.5 rounded text-blue-700 dark:text-blue-300">
-                                      {fieldType.format}
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-                            </SelectItem>
-                          );
-                        })}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  {/* Series Field */}
-                  <div className="space-y-2">
-                    <Label htmlFor="series-field" className="text-xs text-muted-foreground">Group by (optional)</Label>
-                    <Select
-                      value={fieldMapping.seriesField || "none"}
-                      onValueChange={(value) => setFieldMapping(prev => ({ 
-                        ...prev, 
-                        seriesField: value === "none" ? undefined : value 
-                      }))}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">None</SelectItem>
-                        {availableFields.map(field => {
-                          const fieldType = fieldTypes[field] || { type: 'UNKNOWN' };
-                          const IconComponent = getFieldTypeIcon(fieldType);
-                          return (
-                            <SelectItem key={field} value={field}>
-                              <div className="flex items-center gap-2 w-full">
-                                <IconComponent className="h-3 w-3 text-muted-foreground" />
-                                <span className="flex-1">{field}</span>
-                                <div className="flex items-center gap-1">
-                                  <span className="text-xs bg-muted px-1.5 py-0.5 rounded text-muted-foreground">
-                                    {fieldType.type}
-                                  </span>
-                                  {fieldType.format && (
-                                    <span className="text-xs bg-blue-100 dark:bg-blue-900 px-1.5 py-0.5 rounded text-blue-700 dark:text-blue-300">
-                                      {fieldType.format}
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-                            </SelectItem>
-                          );
-                        })}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-              )}
-
-              {/* Save to Dashboard */}
-              <div className="pt-4 border-t">
-                <Dialog open={showSaveToDashboard} onOpenChange={setShowSaveToDashboard}>
-                  <DialogTrigger asChild>
-                    <Button className="w-full">
-                      <Save className="h-4 w-4 mr-2" />
-                      Save to Dashboard
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent>
-                    <DialogHeader>
-                      <DialogTitle>Save Panel to Dashboard</DialogTitle>
-                      <DialogDescription>
-                        Choose an existing dashboard or create a new one for this panel.
-                      </DialogDescription>
-                    </DialogHeader>
-                    <div className="space-y-4">
-                      <div className="space-y-2">
-                        <Label>Dashboard</Label>
-                        <Select
-                          value={selectedDashboardId}
-                          onValueChange={setSelectedDashboardId}
-                        >
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="new">Create New Dashboard</SelectItem>
-                            {dashboards.map(dashboard => (
-                              <SelectItem key={dashboard.id} value={dashboard.id}>
-                                {dashboard.title}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-
-                      {selectedDashboardId === "new" && (
-                        <div className="space-y-2">
-                          <Label>New Dashboard Name</Label>
-                          <Input
-                            value={newDashboardName}
-                            onChange={(e) => setNewDashboardName(e.target.value)}
-                            placeholder="Enter dashboard name"
-                          />
-                        </div>
-                      )}
-                    </div>
-                    <DialogFooter>
-                      <Button
-                        variant="outline"
-                        onClick={() => setShowSaveToDashboard(false)}
+          {/* Save to Dashboard */}
+          <div>
+            <CardContent className="pt-6">
+              <Dialog
+                open={showSaveToDashboard}
+                onOpenChange={setShowSaveToDashboard}
+              >
+                <DialogTrigger asChild>
+                  <Button className="w-full">
+                    <Save className="h-4 w-4 mr-2" />
+                    Save to Dashboard
+                  </Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Save Panel to Dashboard</DialogTitle>
+                    <DialogDescription>
+                      Choose an existing dashboard or create a new one for this
+                      panel.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <Label>Dashboard</Label>
+                      <Select
+                        value={selectedDashboardId}
+                        onValueChange={setSelectedDashboardId}
                       >
-                        Cancel
-                      </Button>
-                      <Button onClick={handleSaveToDashboard}>
-                        Save Panel
-                      </Button>
-                    </DialogFooter>
-                  </DialogContent>
-                </Dialog>
-              </div>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="new">
+                            Create New Dashboard
+                          </SelectItem>
+                          {dashboards.map((dashboard) => (
+                            <SelectItem key={dashboard.id} value={dashboard.id}>
+                              {dashboard.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {selectedDashboardId === "new" && (
+                      <div className="space-y-2">
+                        <Label>New Dashboard Name</Label>
+                        <Input
+                          value={newDashboardName}
+                          onChange={(e) => setNewDashboardName(e.target.value)}
+                          placeholder="Enter dashboard name"
+                        />
+                      </div>
+                    )}
+                  </div>
+                  <DialogFooter>
+                    <Button
+                      variant="outline"
+                      onClick={() => setShowSaveToDashboard(false)}
+                    >
+                      Cancel
+                    </Button>
+                    <Button onClick={handleSaveToDashboard}>Save Panel</Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
             </CardContent>
-          </Card>
+          </div>
         </div>
       </div>
     );
@@ -786,49 +546,67 @@ export default function QueryResults() {
     try {
       // Parse NDJSON if needed
       let records: NDJSONRecord[];
-      if (typeof rawJson === 'string') {
-        records = parseNDJSON(rawJson);
+      if (typeof rawJson === "string") {
+        const parsed = parseNDJSON(rawJson);
+        if (parsed.errors.length > 0) {
+          console.warn("NDJSON parsing errors:", parsed.errors);
+        }
+        records = parsed.records;
       } else if (Array.isArray(results)) {
         records = results;
       } else {
         records = [results];
       }
 
-      const configWithMapping = {
-        ...panelConfig,
-        fieldMapping: fieldMapping,
-      };
+      const configWithMapping = panelConfig;
 
-      const transformedData = transformDataForPanel(records, configWithMapping);
+      // Chart types that use the unified ChartRenderer
+      const CHART_TYPES = [
+        "timeseries",
+        "line",
+        "area",
+        "bar",
+        "scatter",
+        "pie",
+        "donut",
+      ];
+      const isChartType = CHART_TYPES.includes(panelConfig.type);
 
-      // Render the appropriate panel component
-      const panelProps = {
+      if (isChartType) {
+        return (
+          <ChartRenderer
+            config={configWithMapping}
+            data={records}
+            isEditMode={false}
+            height="100%"
+            width="100%"
+          />
+        );
+      }
+
+      // Use the unified panel system for non-chart types
+      const panelProps: PanelProps = {
         config: configWithMapping,
         data: records,
-        transformedData,
-        isLoading: false,
-        error: null,
+        isEditMode: false,
       };
 
-      switch (panelConfig.type) {
-        case 'timeseries':
-        case 'line':
-        case 'area':
-          return <TimeSeriesPanel {...panelProps} />;
-        case 'stat':
-          return <StatPanel {...panelProps} />;
-        case 'gauge':
-          return <GaugePanel {...panelProps} />;
-        case 'table':
-          return <TablePanel {...panelProps} />;
-        case 'bar':
-        case 'scatter':
-          return <TimeSeriesPanel {...panelProps} />;
-        default:
-          return <TimeSeriesPanel {...panelProps} />;
+      const PanelComponent = getPanelComponent(panelConfig.type);
+
+      if (!PanelComponent) {
+        return (
+          <div className="flex items-center justify-center h-full text-muted-foreground">
+            <div className="text-center">
+              <AlertCircle className="h-12 w-12 mx-auto mb-4" />
+              <p>Unsupported panel type: {panelConfig.type}</p>
+            </div>
+          </div>
+        );
       }
+
+      return <PanelComponent {...panelProps} />;
     } catch (error) {
-      console.error('Error rendering panel preview:', error);
+      console.error("Error rendering panel preview:", error);
       return (
         <div className="flex items-center justify-center h-full text-red-500">
           <div className="text-center">
@@ -853,35 +631,57 @@ export default function QueryResults() {
         }
 
         const newDashboard = await createDashboard({
-          title: newDashboardName,
+          name: newDashboardName,
           description: `Dashboard created from query: ${query.slice(0, 50)}...`,
+          timeRange: { type: "relative", from: "1h", to: "now" },
+          timeZone: "UTC",
+          layout: { panels: [] },
         });
 
         dashboardId = newDashboard.id;
-        
-        // Load the new dashboard to make it current
-        await loadDashboard(dashboardId);
-      } else {
-        // Load the selected existing dashboard to make it current
-        await loadDashboard(dashboardId);
       }
 
-      // Create panel with current configuration
+      // Create panel with current configuration - ensure all required fields
       const finalConfig = {
         ...panelConfig,
-        fieldMapping: fieldMapping,
-        query: query,
-        database: selectedDb, // Add current database
+        query: query || panelConfig.query || "",
+        database: selectedDb || panelConfig.database || "",
+        table: selectedTable || panelConfig.table || "",
+        timeField: selectedTimeField || panelConfig.timeField || "",
+        title: panelConfig.title || "Query Panel",
+        type: panelConfig.type || "timeseries",
+        fieldMapping: panelConfig.fieldMapping || {},
+        fieldConfig: panelConfig.fieldConfig || {
+          defaults: {
+            unit: "",
+            decimals: 2,
+          },
+        },
+        options: panelConfig.options || {
+          legend: {
+            showLegend: true,
+            placement: "bottom",
+          },
+        },
       };
 
-      await addPanel(finalConfig);
+      console.log("Saving panel config:", finalConfig);
+      console.log("Target dashboard ID:", dashboardId);
+
+      // Add panel to the specified dashboard (no need to load it first)
+      await addPanel({ panelData: finalConfig, dashboardId });
 
       toast.success(`Panel saved to dashboard successfully!`);
       setShowSaveToDashboard(false);
       setNewDashboardName("");
+      setSelectedDashboardId("new"); // Reset for next use
     } catch (error) {
-      console.error('Error saving panel:', error);
-      toast.error("Failed to save panel to dashboard");
+      console.error("Error saving panel:", error);
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Failed to save panel to dashboard"
+      );
     }
   }
 
@@ -921,7 +721,7 @@ export default function QueryResults() {
             >
               Performance
             </TabsTrigger>
-            
+
             <TabsTrigger
               value="panel"
               className="px-3 py-1 rounded-md text-sm data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=inactive]:text-muted-foreground"

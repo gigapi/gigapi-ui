@@ -1,13 +1,5 @@
 import { useCallback } from "react";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Badge } from "@/components/ui/badge";
-import TableSelector from "@/components/TableSelector";
+import { UnifiedSelector } from "@/components/shared/DbTableTimeSelector";
 import TimeRangeSelector from "@/components/TimeRangeSelector";
 import type { TimeRange, ColumnSchema } from "@/types/utils.types";
 import type { TimeRange as DashboardTimeRange } from "@/types/dashboard.types";
@@ -47,6 +39,7 @@ interface QueryEditorSelectorsProps {
   timeRange: TimeRange;
   hasTimeVariables: boolean;
   timeFieldOptions: string[];
+  onTableChange: (value: string) => void;
   onTimeFieldChange: (value: string) => void;
   onTimeRangeChange: (timeRange: TimeRange) => void;
   getTimeFieldDetails: (fieldName: string) => ColumnSchema | null;
@@ -57,11 +50,9 @@ export default function QueryEditorSelectors({
   selectedTable,
   selectedTimeField,
   timeRange,
-  hasTimeVariables,
-  timeFieldOptions,
+  onTableChange,
   onTimeFieldChange,
   onTimeRangeChange,
-  getTimeFieldDetails,
 }: QueryEditorSelectorsProps) {
   const handleTimeFieldChange = useCallback(
     (value: string) => {
@@ -81,21 +72,6 @@ export default function QueryEditorSelectors({
     [onTimeRangeChange]
   );
 
-  // Add a component to render the type badge
-  const renderTimeFieldTypeBadge = (fieldName: string) => {
-    const fieldDetails = getTimeFieldDetails(fieldName);
-    if (!fieldDetails) return null;
-
-    const { dataType, timeUnit } = fieldDetails;
-    const displayType = dataType?.toUpperCase() || 'UNKNOWN';
-    const displayUnit = timeUnit ? ` (${timeUnit})` : "";
-
-    return (
-      <Badge variant="outline" className="font-mono text-[10px] ml-1 px-1 bg-blue-50 text-blue-700">
-        {displayType}{displayUnit}
-      </Badge>
-    );
-  };
 
   if (!selectedDb) {
     return null;
@@ -110,56 +86,35 @@ export default function QueryEditorSelectors({
         {/* Table Selector */}
         <div className="flex items-center gap-1.5">
           <span className="text-xs text-muted-foreground">FROM</span>
-          <TableSelector />
+          <UnifiedSelector
+            type="table"
+            context="query"
+            style="select"
+            value={selectedTable || ""}
+            onChange={onTableChange}
+            database={selectedDb}
+            className="w-auto"
+            showIcon={false}
+            label={null}
+          />
         </div>
 
         {/* Time Field Selector */}
         {selectedTable && (
           <div className="flex items-center gap-1.5 ml-2">
             <span className="text-xs text-muted-foreground">TIME BY</span>
-            <Select
-              value={selectedTimeField}
-              onValueChange={handleTimeFieldChange}
-            >
-              <SelectTrigger
-                className={`h-8 text-xs min-w-[120px] ${
-                  hasTimeVariables && !selectedTimeField
-                    ? "border-destructive bg-destructive/10"
-                    : ""
-                }`}
-              >
-                <SelectValue placeholder="">
-                  <div className="flex items-center">
-                    {selectedTimeField ||
-                      (hasTimeVariables ? "⚠️ Required" : "None")}
-                    {selectedTimeField &&
-                      renderTimeFieldTypeBadge(selectedTimeField)}
-                  </div>
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                {hasTimeVariables && timeFieldOptions.length === 0 && (
-                  <SelectItem
-                    key="no-time-fields"
-                    value="_NO_TIME_FIELDS_"
-                    disabled
-                    className="text-xs text-muted-foreground"
-                  >
-                    <div className="flex items-center">
-                      <span>No time fields available</span>
-                    </div>
-                  </SelectItem>
-                )}
-                {timeFieldOptions.map((field: string) => (
-                  <SelectItem key={field} value={field} className="text-xs">
-                    <div className="flex items-center">
-                      <span>{field}</span>
-                      {renderTimeFieldTypeBadge(field)}
-                    </div>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <UnifiedSelector
+              type="timeField"
+              context="query"
+              style="select"
+              value={selectedTimeField || ""}
+              onChange={handleTimeFieldChange}
+              database={selectedDb}
+              table={selectedTable}
+              className="w-auto min-w-[120px]"
+              showIcon={false}
+              label={null}
+            />
           </div>
         )}
 
@@ -184,7 +139,17 @@ export default function QueryEditorSelectors({
           <div className="flex items-center gap-1.5 min-w-0 flex-1">
             <span className="text-xs text-muted-foreground flex-shrink-0">FROM</span>
             <div className="min-w-0 flex-1">
-              <TableSelector />
+              <UnifiedSelector
+                type="table"
+                context="query"
+                style="select"
+                value={selectedTable || ""}
+                onChange={onTableChange}
+                database={selectedDb}
+                className="w-full"
+                showIcon={false}
+                label={null}
+              />
             </div>
           </div>
 
@@ -195,49 +160,18 @@ export default function QueryEditorSelectors({
                 TIME BY
               </span>
               <div className="min-w-0 flex-1">
-                <Select
-                  value={selectedTimeField}
-                  onValueChange={handleTimeFieldChange}
-                >
-                  <SelectTrigger
-                    className={`h-8 text-xs ${
-                      hasTimeVariables && !selectedTimeField
-                        ? "border-destructive bg-destructive/10"
-                        : ""
-                    }`}
-                  >
-                    <SelectValue placeholder="">
-                      <div className="flex items-center">
-                        {selectedTimeField ||
-                          (hasTimeVariables ? "⚠️ Required" : "None")}
-                        {selectedTimeField &&
-                          renderTimeFieldTypeBadge(selectedTimeField)}
-                      </div>
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    {hasTimeVariables && timeFieldOptions.length === 0 && (
-                      <SelectItem
-                        key="no-time-fields"
-                        value="_NO_TIME_FIELDS_"
-                        disabled
-                        className="text-xs text-muted-foreground"
-                      >
-                        <div className="flex items-center">
-                          <span>No time fields available</span>
-                        </div>
-                      </SelectItem>
-                    )}
-                    {timeFieldOptions.map((field: string) => (
-                      <SelectItem key={field} value={field} className="text-xs">
-                        <div className="flex items-center">
-                          <span>{field}</span>
-                          {renderTimeFieldTypeBadge(field)}
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <UnifiedSelector
+                  type="timeField"
+                  context="query"
+                  style="select"
+                  value={selectedTimeField || ""}
+                  onChange={handleTimeFieldChange}
+                  database={selectedDb}
+                  table={selectedTable}
+                  className="w-full"
+                  showIcon={false}
+                  label={null}
+                />
               </div>
             </div>
           )}

@@ -1,13 +1,13 @@
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { 
-  Play, 
-  Copy, 
-  Eraser, 
-  Share, 
-  MessageCircle, 
+import {
+  Play,
+  Copy,
+  Eraser,
+  Share,
+  MessageCircle,
   Bot,
-  Share2
+  Share2,
 } from "lucide-react";
 import {
   Tooltip,
@@ -29,6 +29,7 @@ interface QueryEditorToolbarProps {
   query: string;
   mcpConnected: boolean;
   showChatPanel: boolean;
+  chatSessionsCount?: number;
   onRunQuery: () => void;
   onClearQuery: () => void;
   onToggleChat: () => void;
@@ -43,6 +44,7 @@ export default function QueryEditorToolbar({
   query,
   mcpConnected,
   showChatPanel,
+  chatSessionsCount = 0,
   onRunQuery,
   onClearQuery,
   onToggleChat,
@@ -52,7 +54,7 @@ export default function QueryEditorToolbar({
       toast.error("No query to copy");
       return;
     }
-    
+
     try {
       await navigator.clipboard.writeText(query);
       toast.success("Query copied to clipboard");
@@ -91,7 +93,7 @@ export default function QueryEditorToolbar({
   return (
     <>
       {/* Desktop Layout */}
-      <div className="hidden lg:flex items-center justify-between bg-card rounded-md border p-2">
+      <div className="hidden lg:flex items-center p-2">
         <div className="flex items-center gap-2">
           <Button
             onClick={onRunQuery}
@@ -176,9 +178,9 @@ export default function QueryEditorToolbar({
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
-                    variant={showChatPanel ? "default" : "ghost"}
+                    variant={showChatPanel ? "default" : "outline"}
                     size="sm"
-                    className="h-8 w-8 p-0"
+                    className="h-8 px-3 relative bg-gradient-to-r from-purple-500 to-blue-600 hover:from-purple-600 hover:to-blue-700 text-white border-0"
                     onClick={onToggleChat}
                   >
                     {mcpConnected ? (
@@ -186,19 +188,22 @@ export default function QueryEditorToolbar({
                     ) : (
                       <MessageCircle className="h-3.5 w-3.5" />
                     )}
+                    {chatSessionsCount > 0 && (
+                      <Badge
+                        variant="secondary"
+                        className="ml-1.5 h-4 px-1 flex items-center justify-center text-xs bg-white/20 text-white border-0"
+                      >
+                        {chatSessionsCount > 9 ? "9+" : chatSessionsCount}
+                      </Badge>
+                    )}
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="bottom">
                   <p className="text-xs">
-                    <Badge
-                      variant="outline"
-                      className="mr-1 bg-purple-100 text-purple-800"
-                    >
-                      Alpha
-                    </Badge>
+                    {showChatPanel ? "Hide" : "Show"} AI assistant
                     {mcpConnected
-                      ? "AI chat (Connected)"
-                      : "AI chat (Disconnected)"}
+                      ? ` (${chatSessionsCount} sessions)`
+                      : " (Setup required)"}
                   </p>
                 </TooltipContent>
               </Tooltip>
@@ -293,27 +298,33 @@ export default function QueryEditorToolbar({
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
-                    variant={showChatPanel ? "default" : "ghost"}
+                    variant={showChatPanel ? "default" : "outline"}
                     size="sm"
-                    className="h-8 w-8 p-0"
+                    className="h-8 px-2 relative bg-gradient-to-r from-purple-500 to-blue-600 hover:from-purple-600 hover:to-blue-700 text-white border-0"
                     onClick={onToggleChat}
                   >
                     {mcpConnected ? (
-                      <Bot className="h-3.5 w-3.5" />
+                      <Bot className="h-3.5 w-3.5 mr-1" />
                     ) : (
-                      <MessageCircle className="h-3.5 w-3.5" />
+                      <MessageCircle className="h-3.5 w-3.5 mr-1" />
+                    )}
+                    <span className="text-xs sm:inline hidden">AI</span>
+                    {chatSessionsCount > 0 && (
+                      <Badge
+                        variant="secondary"
+                        className="ml-1 h-4 w-4 p-0 flex items-center justify-center text-xs bg-white/20 text-white border-0"
+                      >
+                        {chatSessionsCount > 9 ? "9+" : chatSessionsCount}
+                      </Badge>
                     )}
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="bottom">
                   <p className="text-xs">
-                    <Badge
-                      variant="outline"
-                      className="mr-1 bg-purple-100 text-purple-800"
-                    >
-                      Alpha
-                    </Badge>
-                    {mcpConnected ? "AI Chat" : "AI Chat"}
+                    {showChatPanel ? "Hide" : "Show"} AI assistant
+                    {mcpConnected
+                      ? ` (${chatSessionsCount} sessions)`
+                      : " (Setup required)"}
                   </p>
                 </TooltipContent>
               </Tooltip>

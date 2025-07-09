@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import {
   BarChart3,
@@ -9,6 +9,8 @@ import {
   Trash2,
   Edit,
   Eye,
+  Info,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import type {
@@ -16,7 +18,7 @@ import type {
   ColumnFiltersState,
   SortingState,
   VisibilityState,
-} from "@tanstack/react-table"; 
+} from "@tanstack/react-table";
 import {
   flexRender,
   getCoreRowModel,
@@ -26,8 +28,9 @@ import {
   useReactTable,
 } from "@tanstack/react-table";
 
-import { useDashboardStorage } from "@/lib/dashboard/storage";
+import { useDashboard } from "@/atoms";
 import type { DashboardListItem } from "@/types/dashboard.types";
+import { getStorageImplementation } from "@/lib";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -40,9 +43,15 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import ConfirmAction from "@/components/ConfirmAction";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import ConfirmAction from "@/components/shared/ConfirmAction";
 import Loader from "@/components/Loader";
-import CreateDashboardSheet from "@/components/CreateDashboardSheet";
+import CreateDashboardSheet from "@/components/dashboard/CreateDashboardSheet";
 import {
   Table,
   TableBody,
@@ -51,7 +60,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Checkbox } from "@/components/ui/checkbox"; // Assuming you have a Checkbox component
 import AppLayout from "@/components/navigation/AppLayout";
 
 // Helper function to format date/time
@@ -63,51 +71,157 @@ const formatDateTime = (date: Date | string) => {
   });
 };
 
+// Helper function to parse search query with filters
+const parseSearchQuery = (query: string) => {
+  const filters: { [key: string]: string[] } = {};
+  let generalSearch = "";
+  const parts = query.match(/(?:[^\s"]+|"[^"]*")+/g) || [];
+
+  parts.forEach((part) => {
+    const filterMatch = part.match(/^(\w+):(.+)$/);
+    if (filterMatch) {
+      const [, key, value] = filterMatch;
+      const cleanValue = value.replace(/^"(.*)"$/, "$1");
+      if (!filters[key]) filters[key] = [];
+      filters[key].push(cleanValue.toLowerCase());
+    } else {
+      generalSearch += part.replace(/^"(.*)"$/, "$1") + " ";
+    }
+  });
+
+  return {
+    filters,
+    generalSearch: generalSearch.trim().toLowerCase(),
+  };
+};
+
+const filterDashboards = (
+  dashboards: DashboardListItem[],
+  searchQuery: string
+) => {
+  if (!searchQuery.trim()) return dashboards;
+
+  const { filters, generalSearch } = parseSearchQuery(searchQuery);
+
+  return dashboards.filter((dashboard) => {
+    // Check filter conditions
+    for (const [key, values] of Object.entries(filters)) {
+      switch (key) {
+        case "tag":
+        case "tags":
+          if (!dashboard.tags || dashboard.tags.length === 0) return false;
+          const hasMatchingTag = values.some((value) =>
+            dashboard.tags?.some((tag) => tag.toLowerCase().includes(value))
+          );
+          if (!hasMatchingTag) return false;
+          break;
+        case "title":
+        case "name":
+          const hasMatchingName = values.some((value) =>
+            dashboard.name.toLowerCase().includes(value)
+          );
+          if (!hasMatchingName) return false;
+          break;
+        case "description":
+        case "desc":
+          if (!dashboard.description) return false;
+          const hasMatchingDesc = values.some((value) =>
+            dashboard.description?.toLowerCase().includes(value)
+          );
+          if (!hasMatchingDesc) return false;
+          break;
+        default:
+          // Unknown filter, ignore
+          break;
+      }
+    }
+
+    // Check general search (searches in name, description, and tags)
+    if (generalSearch) {
+      const searchLower = generalSearch;
+      const matchesName = dashboard.name.toLowerCase().includes(searchLower);
+      const matchesDesc = dashboard.description
+        ?.toLowerCase()
+        .includes(searchLower);
+      const matchesTags = dashboard.tags?.some((tag) =>
+        tag.toLowerCase().includes(searchLower)
+      );
+
+      if (!matchesName && !matchesDesc && !matchesTags) {
+        return false;
+      }
+    }
+
+    return true;
+  });
+};
+
 export default function DashboardList() {
-  const [dashboards, setDashboards] = useState<DashboardListItem[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isCreateSheetOpen, setIsCreateSheetOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchFilters, setSearchFilters] = useState<
+    Array<{ key: string; value: string }>
+  >([]);
   const [confirmDelete, setConfirmDelete] = useState<{
     isOpen: boolean;
     dashboard: DashboardListItem | null;
   }>({ isOpen: false, dashboard: null });
+  const [isCreateSheetOpen, setIsCreateSheetOpen] = useState(false);
 
-  const storage = useDashboardStorage();
+  const { dashboardList, loading, deleteDashboard } = useDashboard();
   const navigate = useNavigate();
+
+  // Use dashboard list from atoms
+  const dashboards = dashboardList || [];
 
   // Table state
   const [sorting, setSorting] = useState<SortingState>([]);
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
-  const [rowSelection, setRowSelection] = useState({});
 
-  const loadDashboards = useCallback(async () => {
-    try {
-      setIsLoading(true);
-      const dashboardList = await storage.listDashboards();
-      setDashboards(dashboardList);
-    } catch (error) {
-      toast.error("Failed to load dashboards");
-      console.error("Error loading dashboards:", error);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [storage]);
+  // Filter dashboards based on search query
+  const filteredDashboards = useMemo(
+    () => filterDashboards(dashboards, searchQuery),
+    [dashboards, searchQuery]
+  );
 
-  useEffect(() => {
-    loadDashboards();
-  }, [loadDashboards]);
+  // Handle search input changes and extract filters
+  const handleSearchChange = (value: string) => {
+    setSearchQuery(value);
 
-  const handleDashboardCreated = useCallback((dashboardId: string) => {
-    loadDashboards(); // Refresh the list
-    navigate(`/dashboard/${dashboardId}`);
-  }, [loadDashboards, navigate]);
+    // Extract filters from search query
+    const { filters } = parseSearchQuery(value);
+    const filterArray = Object.entries(filters).flatMap(([key, values]) =>
+      values.map((value) => ({ key, value }))
+    );
+    setSearchFilters(filterArray);
+  };
+
+  // Remove a specific filter
+  const removeFilter = (filterToRemove: { key: string; value: string }) => {
+    const newQuery = searchQuery
+      .replace(
+        new RegExp(`\\b${filterToRemove.key}:${filterToRemove.value}\\b`, "gi"),
+        ""
+      )
+      .replace(/\s+/g, " ")
+      .trim();
+    setSearchQuery(newQuery);
+  };
+
+  // Dashboards are automatically loaded from atoms
+
+  const handleDashboardCreated = useCallback(
+    (dashboardId: string) => {
+      // No need to refresh - atoms automatically update
+      navigate(`/dashboard/${dashboardId}`);
+    },
+    [navigate]
+  );
 
   const handleDeleteDashboard = useCallback(
     async (dashboard: DashboardListItem) => {
       try {
-        await storage.deleteDashboard(dashboard.id);
-        await loadDashboards(); // Refresh the list
+        await deleteDashboard(dashboard.id);
         setConfirmDelete({ isOpen: false, dashboard: null }); // Close confirmation
         toast.success(`Dashboard "${dashboard.name}" deleted successfully`);
       } catch (error) {
@@ -115,12 +229,13 @@ export default function DashboardList() {
         console.error("Error deleting dashboard:", error);
       }
     },
-    [storage, loadDashboards]
+    [deleteDashboard]
   );
 
   const handleExportDashboard = useCallback(
     async (dashboardId: string, dashboardName: string) => {
       try {
+        const storage = getStorageImplementation();
         const exportData = await storage.exportDashboard(dashboardId);
         const blob = new Blob([exportData], { type: "application/json" });
         const url = URL.createObjectURL(blob);
@@ -139,32 +254,10 @@ export default function DashboardList() {
         console.error("Error exporting dashboard:", error);
       }
     },
-    [storage]
+    []
   );
 
   const columns: ColumnDef<DashboardListItem>[] = [
-    {
-      id: "select",
-      header: ({ table }) => (
-        <Checkbox
-          checked={
-            table.getIsAllPageRowsSelected() ||
-            (table.getIsSomePageRowsSelected() && "indeterminate")
-          }
-          onCheckedChange={(value) => table.toggleAllPageRowsSelected(!!value)}
-          aria-label="Select all"
-        />
-      ),
-      cell: ({ row }) => (
-        <Checkbox
-          checked={row.getIsSelected()}
-          onCheckedChange={(value) => row.toggleSelected(!!value)}
-          aria-label="Select row"
-        />
-      ),
-      enableSorting: false,
-      enableHiding: false,
-    },
     {
       accessorKey: "name",
       header: "Name",
@@ -207,7 +300,31 @@ export default function DashboardList() {
               </Badge>
             ))}
             {tags.length > 2 && (
-              <Badge variant="outline">+{tags.length - 2}</Badge>
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Badge variant="outline" className="cursor-help">
+                      +{tags.length - 2}
+                    </Badge>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <div className="space-y-1">
+                      <p className="font-medium text-xs">Additional tags:</p>
+                      <div className="flex flex-wrap gap-1 max-w-xs">
+                        {tags.slice(2).map((tag) => (
+                          <Badge
+                            key={tag}
+                            variant="secondary"
+                            className="text-xs"
+                          >
+                            {tag}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
             )}
           </div>
         );
@@ -233,7 +350,9 @@ export default function DashboardList() {
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuLabel>Actions</DropdownMenuLabel>
-              <DropdownMenuItem onClick={() => navigate(`/dashboard/${dashboard.id}`)}>
+              <DropdownMenuItem
+                onClick={() => navigate(`/dashboard/${dashboard.id}`)}
+              >
                 <Eye className="mr-2 h-4 w-4" /> View
               </DropdownMenuItem>
               <DropdownMenuItem
@@ -242,7 +361,9 @@ export default function DashboardList() {
                 <Edit className="mr-2 h-4 w-4" /> Edit
               </DropdownMenuItem>
               <DropdownMenuItem
-                onClick={() => handleExportDashboard(dashboard.id, dashboard.name)}
+                onClick={() =>
+                  handleExportDashboard(dashboard.id, dashboard.name)
+                }
               >
                 <FileText className="mr-2 h-4 w-4" /> Export
               </DropdownMenuItem>
@@ -261,7 +382,7 @@ export default function DashboardList() {
   ];
 
   const table = useReactTable({
-    data: dashboards,
+    data: filteredDashboards,
     columns,
     onSortingChange: setSorting,
     onColumnFiltersChange: setColumnFilters,
@@ -270,76 +391,141 @@ export default function DashboardList() {
     getSortedRowModel: getSortedRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
     onColumnVisibilityChange: setColumnVisibility,
-    onRowSelectionChange: setRowSelection,
     state: {
       sorting,
       columnFilters,
       columnVisibility,
-      rowSelection,
     },
   });
 
-  const globalFilter =
-    (table.getColumn("name")?.getFilterValue() as string) ?? "";
-
-  const setGlobalFilter = (value: string) => {
-    table.getColumn("name")?.setFilterValue(value);
-    // If you want to filter on multiple columns with a single input:
-    // table.setGlobalFilter(value); // Requires globalFilterFn setup
-  };
-
-  const breadcrumbs = [
-    { label: "Dashboards" }
-  ];
-
-  const headerActions = (
-    <Button onClick={() => setIsCreateSheetOpen(true)}>
-      <Plus className="mr-2 h-4 w-4" /> Create Dashboard
-    </Button>
-  );
+  const breadcrumbs = [{ label: "Dashboards" }];
 
   return (
-    <AppLayout 
-      breadcrumbs={breadcrumbs} 
-      actions={headerActions}
-      showDatabaseControls={true}
-    >
+    <AppLayout breadcrumbs={breadcrumbs} showDatabaseControls={true}>
       <div className="flex-1 overflow-y-auto p-4 md:p-6">
-        <div className="container mx-auto">
-          <div className="flex items-center justify-between py-4 gap-2">
-            <Input
-              placeholder="Filter dashboards by name..."
-              value={globalFilter}
-              onChange={(event) => setGlobalFilter(event.target.value)}
-              className="max-w-sm"
-            />
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" className="ml-auto">
-                  Columns <ChevronDown className="ml-2 h-4 w-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                {table
-                  .getAllColumns()
-                  .filter((column) => column.getCanHide())
-                  .map((column) => {
-                    return (
-                      <DropdownMenuCheckboxItem
-                        key={column.id}
-                        className="capitalize"
-                        checked={column.getIsVisible()}
-                        onCheckedChange={(value) =>
-                          column.toggleVisibility(!!value)
-                        }
+        <div className="container mx-auto ">
+          <div className="flex items-center py-4 gap-2 justify-between">
+            <div className="flex flex-col gap-3 max-w-lg flex-1 ">
+              {/* Search Input with Info Tooltip */}
+              <div className="flex items-center gap-2">
+                <div className="relative flex-1">
+                  <Input
+                    placeholder="Search dashboards..."
+                    value={searchQuery}
+                    onChange={(event) => handleSearchChange(event.target.value)}
+                    className="pr-16"
+                  />
+                  {searchQuery && (
+                    <div className="absolute right-8 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
+                      {filteredDashboards.length}
+                    </div>
+                  )}
+                </div>
+
+                {/* Info Tooltip */}
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Info className="h-4 w-4 text-muted-foreground cursor-pointer" />
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" className="max-w-80">
+                      <div className="space-y-2">
+                        <p className="font-medium">Advanced Search</p>
+                        <div className="space-y-1 text-sm">
+                          <p>
+                            <code className="bg-muted px-1 rounded">
+                              tag:tagname
+                            </code>{" "}
+                            - Filter by tags
+                          </p>
+                          <p>
+                            <code className="bg-muted px-1 rounded">
+                              title:title
+                            </code>{" "}
+                            - Filter by title
+                          </p>
+                          <p>
+                            <code className="bg-muted px-1 rounded">
+                              desc: `report description`
+                            </code>{" "}
+                            - Filter by description
+                          </p>
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          Combine multiple filters for precise results
+                        </p>
+                      </div>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              </div>
+
+              {/* Active Filters as Badges */}
+              {searchFilters.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {searchFilters.map((filter, index) => (
+                    <Badge
+                      key={`${filter.key}-${filter.value}-${index}`}
+                      variant="secondary"
+                      className="flex items-center gap-1.5 pr-1"
+                    >
+                      <span className="text-xs font-medium text-blue-600">
+                        {filter.key}:
+                      </span>
+                      <span className="text-xs">{filter.value}</span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-auto w-auto p-0.5 hover:bg-destructive hover:text-destructive-foreground rounded-full"
+                        onClick={() => removeFilter(filter)}
                       >
-                        {column.id}
-                      </DropdownMenuCheckboxItem>
-                    );
-                  })}
-              </DropdownMenuContent>
-            </DropdownMenu>
+                        <X className="h-3 w-3" />
+                      </Button>
+                    </Badge>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="justify-end flex items-center gap-2">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" className="ml-auto">
+                    Columns <ChevronDown className="ml-2 h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  {table
+                    .getAllColumns()
+                    .filter((column) => column.getCanHide())
+                    .map((column) => {
+                      return (
+                        <DropdownMenuCheckboxItem
+                          key={column.id}
+                          className="capitalize"
+                          checked={column.getIsVisible()}
+                          onCheckedChange={(value) =>
+                            column.toggleVisibility(!!value)
+                          }
+                        >
+                          {column.id}
+                        </DropdownMenuCheckboxItem>
+                      );
+                    })}
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <Button
+                onClick={() => setIsCreateSheetOpen(true)}
+                className="flex items-center gap-2"
+                size={"sm"}
+              >
+                <Plus className="h-4 w-4" />
+                New Dashboard
+              </Button>
+            </div>
           </div>
+
+          {/* Dashboard Table */}
           <div className="rounded-md border">
             <Table>
               <TableHeader>
@@ -361,7 +547,7 @@ export default function DashboardList() {
                 ))}
               </TableHeader>
               <TableBody>
-                {isLoading ? (
+                {loading ? (
                   <TableRow>
                     <TableCell
                       colSpan={columns.length}
@@ -372,10 +558,7 @@ export default function DashboardList() {
                   </TableRow>
                 ) : table.getRowModel().rows?.length ? (
                   table.getRowModel().rows.map((row) => (
-                    <TableRow
-                      key={row.id}
-                      data-state={row.getIsSelected() && "selected"}
-                    >
+                    <TableRow key={row.id}>
                       {row.getVisibleCells().map((cell) => (
                         <TableCell key={cell.id}>
                           {flexRender(
@@ -395,19 +578,19 @@ export default function DashboardList() {
                       <div className="flex flex-col items-center justify-center py-12">
                         <BarChart3 className="w-16 h-16 mx-auto mb-4 text-muted-foreground opacity-50" />
                         <h3 className="text-xl font-semibold mb-2">
-                          {globalFilter
+                          {searchQuery
                             ? "No dashboards match your search"
                             : "No dashboards yet"}
                         </h3>
                         <p className="text-muted-foreground mb-4">
-                          {globalFilter
+                          {searchQuery
                             ? "Try adjusting your search term or creating a new dashboard."
                             : "Get started by creating a new dashboard."}
                         </p>
-                        {!globalFilter && (
-                           <Button onClick={() => setIsCreateSheetOpen(true)}>
-                             <Plus className="mr-2 h-4 w-4" /> Create Dashboard
-                           </Button>
+                        {!searchQuery && (
+                          <Button onClick={() => setIsCreateSheetOpen(true)}>
+                            <Plus className="mr-2 h-4 w-4" /> Create Dashboard
+                          </Button>
                         )}
                       </div>
                     </TableCell>
@@ -418,8 +601,11 @@ export default function DashboardList() {
           </div>
           <div className="flex items-center justify-end space-x-2 py-4">
             <div className="flex-1 text-sm text-muted-foreground">
-              {table.getFilteredSelectedRowModel().rows.length} of{" "}
-              {table.getFilteredRowModel().rows.length} row(s) selected.
+              Showing {table.getRowModel().rows.length} of{" "}
+              {filteredDashboards.length} dashboard(s)
+              {searchQuery &&
+                filteredDashboards.length !== dashboards.length &&
+                ` (filtered from ${dashboards.length} total)`}
             </div>
             <div className="space-x-2">
               <Button
@@ -468,4 +654,3 @@ export default function DashboardList() {
     </AppLayout>
   );
 }
-

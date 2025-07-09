@@ -5,6 +5,7 @@ export interface Dashboard {
   timeRange: TimeRange;
   timeZone?: string;
   refreshInterval?: number;
+  panels: PanelConfig[];  // Embedded panels directly in dashboard
   layout: {
     panels: PanelLayout[];
     gridSettings?: {
@@ -28,6 +29,7 @@ export interface PanelConfig {
 
   query: string;
   database?: string;
+  table?: string;
 
   fieldMapping?: FieldMapping;
 
@@ -42,6 +44,7 @@ export interface PanelConfig {
 
   timeOverride?: TimeRange;
   useParentTimeFilter?: boolean;
+  timeField?: string; // Field to use for time filtering when useParentTimeFilter is true
 
   links?: PanelLink[];
 }
@@ -75,6 +78,7 @@ export interface FieldMapping {
   yField?: string;
   seriesField?: string;
   labelField?: string;
+  valueField?: string;
 }
 
 export interface FieldConfig {
@@ -170,7 +174,7 @@ export interface PanelOptions {
 export interface LegendOptions {
   showLegend: boolean;
   displayMode: "list" | "table" | "hidden";
-  placement: "bottom" | "right" | "top";
+  placement: "bottom" | "right" | "top" | "left";
   calcs?: string[];
   values?: string[];
 }
@@ -203,7 +207,9 @@ export type PanelType =
   | "bar"
   | "line"
   | "area"
-  | "scatter";
+  | "scatter"
+  | "pie"
+  | "donut";
 
 export interface PanelData {
   panelId: string;
@@ -243,6 +249,7 @@ export interface DashboardContextType {
   currentDashboard: Dashboard | null;
   panels: Map<string, PanelConfig>;
   panelData: Map<string, PanelData>;
+  panelLoadingStates: Map<string, boolean>;
 
   isEditMode: boolean;
   selectedPanelId: string | null;
@@ -260,11 +267,15 @@ export interface DashboardContextType {
   saveDashboard: () => Promise<void>;
   clearCurrentDashboard: () => void;
 
-  addPanel: (panel: Omit<PanelConfig, "id">) => Promise<string>;
+  addPanel: (
+    panel: Omit<PanelConfig, "id">,
+    dashboardId?: string
+  ) => Promise<string>;
   updatePanel: (id: string, updates: Partial<PanelConfig>) => Promise<void>;
   deletePanel: (id: string) => Promise<void>;
   duplicatePanel: (id: string) => Promise<string>;
   getPanelById: (panelId: string) => PanelConfig | undefined;
+  isPanelLoading: (panelId: string) => boolean;
 
   updateLayout: (layouts: PanelLayout[]) => void;
 

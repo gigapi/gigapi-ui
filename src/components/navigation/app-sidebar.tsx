@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   Home,
   BarChart3,
+  MessageSquare,
   ExternalLink,
   MessageSquareHeart,
   Github,
@@ -36,6 +37,11 @@ const data = {
       isActive: true,
     },
     {
+      title: "Assistant",
+      url: "/chat",
+      icon: MessageSquare,
+    },
+    {
       title: "Dashboards",
       url: "/dashboards",
       icon: BarChart3,
@@ -43,19 +49,6 @@ const data = {
   ],
 
   tools: [
-    {
-      title: "Database Connection",
-      items: [
-        {
-          title: "Select Database",
-          component: "DatabaseSelector",
-        },
-        {
-          title: "API Endpoint",
-          component: "APIEndpoint",
-        },
-      ],
-    },
     {
       title: "Query Tools",
       items: [
