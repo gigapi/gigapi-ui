@@ -4,9 +4,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import Loader from "@/components/Loader";
 import { useTheme } from "@/components/theme-provider";
 import type { SchemaInfo } from "@/types";
-import { 
-  analyzeQueryContext, 
-  getWordAtPosition, 
+import {
+  analyzeQueryContext,
+  getWordAtPosition,
   extractTableAliases,
   getContextualSuggestions,
 } from "@/lib/utils/sql-autocomplete";
@@ -39,10 +39,8 @@ export default function MonacoSqlEditor({
   const isMountedRef = useRef(true);
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Get Monaco instance
   const monaco = useMonaco();
 
-  // PERFORMANCE FIX 1: Memoize the schema structure to prevent unnecessary recalculations
   const memoizedSchema = useMemo(() => {
     if (!schema || !selectedDb || !schema[selectedDb]) {
       return null;
@@ -50,228 +48,237 @@ export default function MonacoSqlEditor({
     return schema[selectedDb];
   }, [schema, selectedDb]);
 
-  // PERFORMANCE FIX 2: Memoize the completion provider to prevent recreation
-  const createCompletionProvider = useCallback((monacoInstance: any, currentDbSchema: any) => {
-    return {
-      provideCompletionItems: (model: any, position: any) => {
-        const suggestions: any[] = [];
-        
-        // Get current query and analyze context
-        const lines = model.getLinesContent();
-        const query = lines.join('\n');
-        const context = analyzeQueryContext(query, position, lines);
-        const currentWord = getWordAtPosition(lines, position);
-        const tableAliases = extractTableAliases(query);
-        
-        // Add time variables as suggestions - always show at top priority
-        const timeVariables = [
-          {
-            label: "$__timeFilter",
-            detail: "Time range filter condition",
-            documentation:
-              "Expands to a WHERE condition for the selected time field and range",
-            sortText: "0_$__timeFilter", // Ensure time vars appear first
-          },
-          {
-            label: "$__timeField",
-            detail: "Selected time field name",
-            documentation: "Expands to the selected time field name",
-            sortText: "0_$__timeField",
-          },
-          {
-            label: "$__timeFrom",
-            detail: "Start of time range",
-            documentation:
-              "Expands to the SQL representation of the start time",
-            sortText: "0_$__timeFrom",
-          },
-          {
-            label: "$__timeTo",
-            detail: "End of time range",
-            documentation:
-              "Expands to the SQL representation of the end time",
-            sortText: "0_$__timeTo",
-          },
-        ];
+  const createCompletionProvider = useCallback(
+    (monacoInstance: any, currentDbSchema: any) => {
+      return {
+        provideCompletionItems: (model: any, position: any) => {
+          const suggestions: any[] = [];
 
-        timeVariables.forEach((variable) => {
-          if (!currentWord || variable.label.toLowerCase().includes(currentWord.toLowerCase())) {
-            suggestions.push({
-              label: variable.label,
-              kind: monacoInstance.languages.CompletionItemKind.Variable,
-              detail: variable.detail,
-              documentation: variable.documentation,
-              insertText: variable.label,
-              sortText: variable.sortText,
-              range: {
-                startLineNumber: position.lineNumber,
-                endLineNumber: position.lineNumber,
-                startColumn: position.column - currentWord.length,
-                endColumn: position.column,
-              },
-            });
-          }
-        });
-        
-        // Get context-aware suggestions
-        const contextualSuggestions = getContextualSuggestions(
-          monacoInstance,
-          context,
-          currentDbSchema,
-          currentWord,
-          tableAliases
-        );
-        
-        // Create proper range for replacements
-        const range = {
-          startLineNumber: position.lineNumber,
-          endLineNumber: position.lineNumber,
-          startColumn: position.column - currentWord.length,
-          endColumn: position.column,
-        };
-        
-        // Add range to all suggestions
-        contextualSuggestions.forEach(suggestion => {
-          suggestion.range = range;
-        });
-        
-        suggestions.push(...contextualSuggestions);
+          const lines = model.getLinesContent();
+          const query = lines.join("\n");
+          const context = analyzeQueryContext(query, position, lines);
+          const currentWord = getWordAtPosition(lines, position);
+          const tableAliases = extractTableAliases(query);
 
-        return { suggestions };
-      },
-    };
-  }, []);
+          const timeVariables = [
+            {
+              label: "$__timeFilter",
+              detail: "Time range filter condition",
+              documentation:
+                "Expands to a WHERE condition for the selected time field and range",
+              sortText: "0_$__timeFilter",
+            },
+            {
+              label: "$__timeField",
+              detail: "Selected time field name",
+              documentation: "Expands to the selected time field name",
+              sortText: "0_$__timeField",
+            },
+            {
+              label: "$__timeFrom",
+              detail: "Start of time range",
+              documentation:
+                "Expands to the SQL representation of the start time",
+              sortText: "0_$__timeFrom",
+            },
+            {
+              label: "$__timeTo",
+              detail: "End of time range",
+              documentation:
+                "Expands to the SQL representation of the end time",
+              sortText: "0_$__timeTo",
+            },
+          ];
 
-  // PERFORMANCE FIX 3: Setup keyboard shortcut with proper memoization and error handling
-  const setupKeyboardShortcut = useCallback((editor: any, monacoInstance: any) => {
-    // Dispose of previous keyboard shortcut
-    if (keyboardDisposableRef.current) {
-      try {
-        if (typeof keyboardDisposableRef.current.dispose === 'function') {
-          keyboardDisposableRef.current.dispose();
-        }
-      } catch (e) {
-        // Silently ignore Monaco disposal errors
-      } finally {
-        keyboardDisposableRef.current = null;
-      }
-    }
+          timeVariables.forEach((variable) => {
+            if (
+              !currentWord ||
+              variable.label.toLowerCase().includes(currentWord.toLowerCase())
+            ) {
+              suggestions.push({
+                label: variable.label,
+                kind: monacoInstance.languages.CompletionItemKind.Variable,
+                detail: variable.detail,
+                documentation: variable.documentation,
+                insertText: variable.label,
+                sortText: variable.sortText,
+                range: {
+                  startLineNumber: position.lineNumber,
+                  endLineNumber: position.lineNumber,
+                  startColumn: position.column - currentWord.length,
+                  endColumn: position.column,
+                },
+              });
+            }
+          });
 
-    try {
-      // Create Ctrl+Enter shortcut to run query
-      const disposable = editor.addCommand(
-        monacoInstance.KeyMod.CtrlCmd | monacoInstance.KeyCode.Enter,
-        () => {
-          console.log("🔥 MONACO KEYBOARD SHORTCUT TRIGGERED");
-          // Get the current editor content and call onRunQuery
-          const currentContent = editor.getValue();
-          console.log("🔥 MONACO SHORTCUT CONTENT:", { currentContent });
-          onRunQuery();
-        }
-      );
+          // Get context-aware suggestions
+          const contextualSuggestions = getContextualSuggestions(
+            monacoInstance,
+            context,
+            currentDbSchema,
+            currentWord,
+            tableAliases
+          );
 
-      if (disposable && typeof disposable !== "string") {
-        keyboardDisposableRef.current = disposable;
-      }
-    } catch (e) {
-      // Silently ignore Monaco command registration errors
-    }
-  }, [onRunQuery]);
+          // Create proper range for replacements
+          const range = {
+            startLineNumber: position.lineNumber,
+            endLineNumber: position.lineNumber,
+            startColumn: position.column - currentWord.length,
+            endColumn: position.column,
+          };
 
-  // PERFORMANCE FIX 4: Setup intellisense with debouncing and safer disposal
-  const setupIntellisense = useCallback((monacoInstance: any, currentDbSchema: any) => {
-    // Clear any pending debounce
-    if (debounceTimerRef.current) {
-      clearTimeout(debounceTimerRef.current);
-      debounceTimerRef.current = null;
-    }
+          // Add range to all suggestions
+          contextualSuggestions.forEach((suggestion) => {
+            suggestion.range = range;
+          });
 
-    // Debounce the setup to prevent rapid re-registration
-    debounceTimerRef.current = setTimeout(() => {
-      // Only proceed if component is still mounted
-      if (!isMountedRef.current) return;
-      
-      // Dispose of previous completion provider if exists
-      if (completionDisposableRef.current) {
+          suggestions.push(...contextualSuggestions);
+
+          return { suggestions };
+        },
+      };
+    },
+    []
+  );
+
+  const setupKeyboardShortcut = useCallback(
+    (editor: any, monacoInstance: any) => {
+      if (keyboardDisposableRef.current) {
         try {
-          if (typeof completionDisposableRef.current.dispose === 'function') {
-            completionDisposableRef.current.dispose();
+          if (typeof keyboardDisposableRef.current.dispose === "function") {
+            keyboardDisposableRef.current.dispose();
           }
         } catch (e) {
-          // Silently ignore Monaco disposal errors
+          console.error(
+            "[MONACO EDITOR] - Error disposing previous Monaco keyboard shortcut:",
+            e
+          );
         } finally {
-          completionDisposableRef.current = null;
+          keyboardDisposableRef.current = null;
         }
       }
 
       try {
-        const disposable = monacoInstance.languages.registerCompletionItemProvider(
-          "sql",
-          createCompletionProvider(monacoInstance, currentDbSchema)
+        const disposable = editor.addCommand(
+          monacoInstance.KeyMod.CtrlCmd | monacoInstance.KeyCode.Enter,
+          () => {
+            onRunQuery();
+          }
         );
 
-        // Store the disposable in ref
-        completionDisposableRef.current = disposable;
+        if (disposable && typeof disposable !== "string") {
+          keyboardDisposableRef.current = disposable;
+        }
       } catch (e) {
-        // Silently ignore Monaco registration errors
+        console.error(
+          "[MONACO EDITOR] - Error setting up Monaco keyboard shortcut:",
+          e
+        );
       }
-    }, 100); // 100ms debounce
-  }, [createCompletionProvider]);
+    },
+    [onRunQuery]
+  );
 
-  // PERFORMANCE FIX 5: Optimized editor mount handler
-  const handleEditorDidMount = useCallback((editor: any, monacoInstance: any) => {
-    if (!isMountedRef.current) return;
-    
-    editorRef.current = editor;
-    monacoRef.current = monacoInstance;
-    
-    // Set initial value from query prop
-    if (query && query !== editor.getValue()) {
-      console.log("🔥 MONACO SETTING INITIAL VALUE:", { query, currentValue: editor.getValue() });
-      editor.setValue(query);
-    }
+  const setupIntellisense = useCallback(
+    (monacoInstance: any, currentDbSchema: any) => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+        debounceTimerRef.current = null;
+      }
 
-    // Configure SQL language settings
-    monacoInstance.languages.setLanguageConfiguration("sql", {
-      comments: {
-        lineComment: "--",
-        blockComment: ["/*", "*/"],
-      },
-      brackets: [
-        ["[", "]"],
-        ["(", ")"],
-      ],
-      autoClosingPairs: [
-        { open: "[", close: "]" },
-        { open: "(", close: ")" },
-        { open: "'", close: "'", notIn: ["string"] },
-        { open: '"', close: '"', notIn: ["string"] },
-      ],
-      surroundingPairs: [
-        { open: "[", close: "]" },
-        { open: "(", close: ")" },
-        { open: "'", close: "'" },
-        { open: '"', close: '"' },
-      ],
-    });
+      debounceTimerRef.current = setTimeout(() => {
+        if (!isMountedRef.current) return;
 
-    // Setup keyboard shortcut
-    setupKeyboardShortcut(editor, monacoInstance);
+        // Dispose of previous completion provider if exists
+        if (completionDisposableRef.current) {
+          try {
+            if (typeof completionDisposableRef.current.dispose === "function") {
+              completionDisposableRef.current.dispose();
+            }
+          } catch (e) {
+            console.error(
+              "[MONACO EDITOR] - Error disposing previous Monaco completion provider:",
+              e
+            );
+          } finally {
+            completionDisposableRef.current = null;
+          }
+        }
 
-    // Setup intellisense if schema is available
-    if (memoizedSchema) {
-      setupIntellisense(monacoInstance, memoizedSchema);
-    }
+        try {
+          const disposable =
+            monacoInstance.languages.registerCompletionItemProvider(
+              "sql",
+              createCompletionProvider(monacoInstance, currentDbSchema)
+            );
 
-    // Mark editor as ready
-    setIsEditorReady(true);
+          // Store the disposable in ref
+          completionDisposableRef.current = disposable;
+        } catch (e) {
+          console.error(
+            "[MONACO EDITOR] - Error registering Monaco completion provider:",
+            e
+          );
+        }
+      }, 500); // 500ms debounce
+    },
+    [createCompletionProvider]
+  );
 
-    // Layout editor
-    setTimeout(() => editor.layout(), 0);
+  const handleEditorDidMount = useCallback(
+    (editor: any, monacoInstance: any) => {
+      if (!isMountedRef.current) return;
 
-    // Call parent onMount handler
-    onMount(editor, monacoInstance);
-  }, [query, onMount, setupKeyboardShortcut, setupIntellisense, memoizedSchema]);
+      editorRef.current = editor;
+      monacoRef.current = monacoInstance;
+
+      if (query && query !== editor.getValue()) {
+        console.log("🔥 MONACO SETTING INITIAL VALUE:", {
+          query,
+          currentValue: editor.getValue(),
+        });
+        editor.setValue(query);
+      }
+
+      monacoInstance.languages.setLanguageConfiguration("sql", {
+        comments: {
+          lineComment: "--",
+          blockComment: ["/*", "*/"],
+        },
+        brackets: [
+          ["[", "]"],
+          ["(", ")"],
+        ],
+        autoClosingPairs: [
+          { open: "[", close: "]" },
+          { open: "(", close: ")" },
+          { open: "'", close: "'", notIn: ["string"] },
+          { open: '"', close: '"', notIn: ["string"] },
+        ],
+        surroundingPairs: [
+          { open: "[", close: "]" },
+          { open: "(", close: ")" },
+          { open: "'", close: "'" },
+          { open: '"', close: '"' },
+        ],
+      });
+
+      setupKeyboardShortcut(editor, monacoInstance);
+
+      if (memoizedSchema) {
+        setupIntellisense(monacoInstance, memoizedSchema);
+      }
+      setIsEditorReady(true);
+
+      setTimeout(() => editor.layout(), 0);
+
+      // Call parent onMount handler
+      onMount(editor, monacoInstance);
+    },
+    [query, onMount, setupKeyboardShortcut, setupIntellisense, memoizedSchema]
+  );
 
   // PERFORMANCE FIX 6: Consolidated effect for Monaco instance and setup
   useEffect(() => {
@@ -287,28 +294,34 @@ export default function MonacoSqlEditor({
 
   // Sync external query changes to Monaco editor
   useEffect(() => {
-    if (editorRef.current && query !== undefined && query !== editorRef.current.getValue()) {
-      console.log("🔥 SYNCING EXTERNAL QUERY CHANGE:", { query, currentValue: editorRef.current.getValue() });
+    if (
+      editorRef.current &&
+      query !== undefined &&
+      query !== editorRef.current.getValue()
+    ) {
+      console.log("🔥 SYNCING EXTERNAL QUERY CHANGE:", {
+        query,
+        currentValue: editorRef.current.getValue(),
+      });
       editorRef.current.setValue(query);
     }
   }, [query]);
 
-  // PERFORMANCE FIX 7: Cleanup with proper disposal and error handling
   useEffect(() => {
     return () => {
       isMountedRef.current = false;
-      
+
       // Clear any pending debounce
       if (debounceTimerRef.current) {
         clearTimeout(debounceTimerRef.current);
         debounceTimerRef.current = null;
       }
-      
+
       // Dispose completion provider with better error handling
       if (completionDisposableRef.current) {
         try {
           // Check if dispose method exists before calling
-          if (typeof completionDisposableRef.current.dispose === 'function') {
+          if (typeof completionDisposableRef.current.dispose === "function") {
             completionDisposableRef.current.dispose();
           }
         } catch (e) {
@@ -317,12 +330,12 @@ export default function MonacoSqlEditor({
           completionDisposableRef.current = null;
         }
       }
-      
+
       // Dispose keyboard shortcut with better error handling
       if (keyboardDisposableRef.current) {
         try {
           // Check if dispose method exists before calling
-          if (typeof keyboardDisposableRef.current.dispose === 'function') {
+          if (typeof keyboardDisposableRef.current.dispose === "function") {
             keyboardDisposableRef.current.dispose();
           }
         } catch (e) {
@@ -347,10 +360,13 @@ export default function MonacoSqlEditor({
       <Editor
         height="100%"
         defaultLanguage="sql"
-        defaultValue={query || ""} // Use defaultValue - controlled mode causes issues
+        defaultValue={query || ""}
         theme={editorTheme}
         onChange={(value) => {
-          console.log("🔥 MONACO EDITOR onChange:", { value, timestamp: new Date().toISOString() });
+          console.log("🔥 MONACO EDITOR onChange:", {
+            value,
+            timestamp: new Date().toISOString(),
+          });
           onChange(value);
         }}
         onMount={handleEditorDidMount}

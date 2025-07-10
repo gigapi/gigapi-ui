@@ -399,7 +399,6 @@ export default function TimeRangeSelector({
                             value={fromInput}
                             onChange={setFromInput}
                             placeholder="e.g., now-24h or now-7d"
-                            defaultTime="00:00:00"
                           />
                         </div>
                         <div className="text-xs text-muted-foreground">
@@ -420,7 +419,6 @@ export default function TimeRangeSelector({
                             value={toInput}
                             onChange={setToInput}
                             placeholder="e.g., now"
-                            defaultTime="23:59:59"
                           />
                         </div>
                         <div className="text-xs text-muted-foreground">

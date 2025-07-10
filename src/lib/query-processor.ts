@@ -305,6 +305,7 @@ export class UnifiedQueryProcessor {
     if ('type' in timeRange) {
       if (timeRange.type === 'relative') {
         to = now;
+        console.log('[QueryProcessor] Parsing relative time:', timeRange.from);
         from = this.parseRelativeTime(timeRange.from, now);
       } else {
         from = timeRange.from instanceof Date ? timeRange.from : new Date(timeRange.from);
@@ -347,6 +348,7 @@ export class UnifiedQueryProcessor {
    * Parse relative time string like "5m", "1h", "24h", "now-1h"
    */
   private static parseRelativeTime(timeStr: string, baseTime: Date): Date {
+    console.log('[QueryProcessor] parseRelativeTime input:', timeStr);
     if (timeStr === 'now') return baseTime;
     
     // Remove "now-" prefix if present

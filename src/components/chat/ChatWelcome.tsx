@@ -12,7 +12,7 @@ import {
   Settings,
   Table,
 } from "lucide-react";
-import MCPConnectionSheet from "@/components/MCP/MCPConnectionSheet";
+import AIConnectionSheet from "@/components/chat/AIConnectionSheet";
 import Logo from "@/assets/logo.svg";
 
 interface ChatWelcomeProps {
@@ -132,7 +132,7 @@ export default function ChatWelcome({ onStartChat }: ChatWelcomeProps) {
         >
           <Sparkles className="w-5 h-5 mr-2" />
           Start Chatting
-        </Button>
+        </Button> 
         {!isConnected && (
           <p className="text-xs text-muted-foreground mt-2">
             Configure a new model connection to start chatting
@@ -141,9 +141,9 @@ export default function ChatWelcome({ onStartChat }: ChatWelcomeProps) {
       </div>
 
       {/* Connection Dialog */}
-      <MCPConnectionSheet
+      <AIConnectionSheet
         isOpen={showConnectionDialog}
-        onClose={() => setShowConnectionDialog(false)}
+        onOpenChange={setShowConnectionDialog}
       />
     </div>
   );

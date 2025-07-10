@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Plus,
   Trash2,
@@ -6,15 +6,13 @@ import {
   CheckCircle,
   XCircle,
   Code,
-  Brain,
-  Server,
-  Cloud,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { useMCP } from "@/atoms";
+import { useSetAtom } from "jotai";
+import { aiConnectionsAtom } from "@/atoms/chat-atoms";
 import {
   Sheet,
   SheetContent,
@@ -22,12 +20,6 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger,
-} from "@/components/ui/accordion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -44,17 +36,21 @@ import {
   FormLabel,
   FormMessage,
 } from "@/components/ui/form";
+import type { AIConnection } from "@/types/chat.types";
+import OpenAi from "@/assets/openai.svg";
+import Anthropic from "@/assets/anthropic.svg";
+import Ollama from "@/assets/ollama.svg";
+import DeepSeek from "@/assets/deepseek.svg";
 
-interface ConnectionSheetProps {
+interface AIConnectionSheetProps {
   isOpen: boolean;
-  onClose: () => void;
+  onOpenChange: (open: boolean) => void;
 }
 
 // Schema for basic form validation
 const connectionSchema = z.object({
   name: z.string().min(1, "Connection name is required"),
   baseUrl: z.string().url("Please enter a valid URL"),
-  model: z.string().min(1, "Model name is required"),
   headers: z
     .array(
       z.object({
@@ -77,7 +73,6 @@ const connectionSchema = z.object({
 const jsonConfigSchema = z.object({
   name: z.string().min(1, "Connection name is required"),
   baseUrl: z.string().url("Please enter a valid URL"),
-  model: z.string().min(1, "Model name is required"),
   headers: z.record(z.string()).optional(),
   params: z.record(z.string()).optional(),
 });
@@ -88,72 +83,81 @@ type ConnectionFormData = z.infer<typeof connectionSchema>;
 interface AITemplate {
   id: string;
   name: string;
-  description: string;
-  icon: React.ComponentType<any>;
+  logo: string;
   baseUrl: string;
-  model: string;
+  modelsUrl: string;
   headers?: Record<string, string>;
   params?: Record<string, string>;
   requiredFields: {
     apiKey?: boolean;
-    model?: boolean;
     baseUrl?: boolean;
   };
 }
 
 const AI_TEMPLATES: AITemplate[] = [
   {
+    id: "ollama",
+    name: "Ollama",
+    logo: Ollama,
+    baseUrl: "http://localhost:11434",
+    modelsUrl: "http://localhost:11434/v1/models",
+    headers: {},
+    params: {},
+    requiredFields: {},
+  },
+  {
     id: "openai",
     name: "OpenAI",
-    description: "ChatGPT, GPT-4o, GPT-4o-mini, and other OpenAI models",
-    icon: Brain,
+    logo: OpenAi,
     baseUrl: "https://api.openai.com/v1",
-    model: "gpt-4o",
+    modelsUrl: "https://api.openai.com/v1/models",
     headers: {},
     params: {},
-    requiredFields: { apiKey: true }
+    requiredFields: { apiKey: true },
   },
   {
-    id: "ollama",
-    name: "Ollama (Local)",
-    description: "Local AI models running on your machine (Llama, CodeLlama, etc.)",
-    icon: Server,
-    baseUrl: "http://localhost:11434",
-    model: "llama3.2:latest",
+    id: "deepseek",
+    name: "DeepSeek",
+    logo: DeepSeek,
+    baseUrl: "https://api.deepseek.com/v1",
+    modelsUrl: "https://api.deepseek.com/v1/models",
     headers: {},
     params: {},
-    requiredFields: { model: true }
+    requiredFields: { apiKey: true },
   },
+
   {
     id: "anthropic",
-    name: "Anthropic Claude",
-    description: "Claude 3.5 Sonnet, Haiku, and Opus models",
-    icon: Cloud,
+    name: "Anthropic",
+    logo: Anthropic,
     baseUrl: "https://api.anthropic.com/v1",
-    model: "claude-3-5-sonnet-20241022",
+    modelsUrl: "https://api.anthropic.com/v1/models",
     headers: { "anthropic-version": "2023-06-01" },
     params: {},
-    requiredFields: { apiKey: true }
-  }
+    requiredFields: { apiKey: true },
+  },
 ];
 
 // Schema for template form
 const templateFormSchema = z.object({
   apiKey: z.string().optional(),
-  model: z.string().min(1, "Model is required"),
   baseUrl: z.string().url("Please enter a valid URL").optional(),
 });
 
 type TemplateFormData = z.infer<typeof templateFormSchema>;
 
-export default function MCPConnectionSheet({
+export default function AIConnectionSheet({
   isOpen,
-  onClose,
-}: ConnectionSheetProps) {
-  const { addConnection } = useMCP();
+  onOpenChange,
+}: AIConnectionSheetProps) {
+  const setConnections = useSetAtom(aiConnectionsAtom);
 
-  const [mode, setMode] = useState<"templates" | "basic" | "advanced">("templates");
-  const [selectedTemplate, setSelectedTemplate] = useState<AITemplate | null>(null);
+  const [mode, setMode] = useState<"templates" | "basic" | "advanced">(
+    "templates"
+  );
+  const [selectedTemplate, setSelectedTemplate] = useState<AITemplate | null>(
+    null
+  );
   const [jsonConfig, setJsonConfig] = useState("");
   const [isTestingConnection, setIsTestingConnection] = useState(false);
   const [testResult, setTestResult] = useState<"success" | "error" | null>(
@@ -167,18 +171,26 @@ export default function MCPConnectionSheet({
     defaultValues: {
       name: "",
       baseUrl: "",
-      model: "",
       headers: [],
       params: [],
     },
   });
+
+  // Auto-select Ollama template on mount
+  useEffect(() => {
+    if (isOpen && mode === "templates" && !selectedTemplate) {
+      const ollamaTemplate = AI_TEMPLATES.find((t) => t.id === "ollama");
+      if (ollamaTemplate) {
+        handleTemplateSelect(ollamaTemplate);
+      }
+    }
+  }, [isOpen, mode]);
 
   // Template form setup
   const templateForm = useForm<TemplateFormData>({
     resolver: zodResolver(templateFormSchema),
     defaultValues: {
       apiKey: "",
-      model: "",
       baseUrl: "",
     },
   });
@@ -190,13 +202,11 @@ export default function MCPConnectionSheet({
       form.reset({
         name: "",
         baseUrl: "",
-        model: "",
         headers: [],
         params: [],
       });
       templateForm.reset({
         apiKey: "",
-        model: "",
         baseUrl: "",
       });
       setMode("templates");
@@ -204,9 +214,8 @@ export default function MCPConnectionSheet({
       setJsonConfig("");
       setTestResult(null);
       setTestError("");
-    } else {
-      onClose();
     }
+    onOpenChange(open);
   };
 
   // Handle template selection
@@ -214,9 +223,65 @@ export default function MCPConnectionSheet({
     setSelectedTemplate(template);
     templateForm.reset({
       apiKey: "",
-      model: template.model,
       baseUrl: template.baseUrl,
     });
+    
+    // Auto-add connection for Ollama (no API key needed)
+    if (template.id === "ollama") {
+      handleAddConnection();
+    }
+  };
+
+  // Handle adding connection
+  const handleAddConnection = () => {
+    if (!selectedTemplate) return;
+    
+    const templateData = templateForm.getValues();
+    
+    // Check if API key is required but not provided
+    if (selectedTemplate.requiredFields.apiKey && !templateData.apiKey?.trim()) {
+      toast.error("API key is required for this provider");
+      return;
+    }
+    
+    const connectionData = {
+      name: selectedTemplate.name,
+      baseUrl: templateData.baseUrl || selectedTemplate.baseUrl,
+      headers: { ...(selectedTemplate.headers || {}) },
+    };
+    
+    // Add API key to headers if provided
+    if (templateData.apiKey?.trim()) {
+      if (selectedTemplate.id === "openai" || selectedTemplate.id === "deepseek") {
+        connectionData.headers["Authorization"] = `Bearer ${templateData.apiKey}`;
+      } else if (selectedTemplate.id === "anthropic") {
+        connectionData.headers["x-api-key"] = templateData.apiKey;
+      }
+    }
+    
+    // Create new connection
+    const newConnection: AIConnection = {
+      id: `conn_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+      name: connectionData.name,
+      provider: selectedTemplate.id as AIConnection["provider"],
+      baseUrl: connectionData.baseUrl,
+      modelsUrl: selectedTemplate.modelsUrl,
+      headers: connectionData.headers,
+      isActive: false,
+    };
+    
+    // Add the connection
+    setConnections((prev) => {
+      // If this is the first connection, make it active
+      if (prev.length === 0) {
+        newConnection.isActive = true;
+      }
+      return [...prev, newConnection];
+    });
+    
+    // Reset and close
+    handleOpenChange(false);
+    toast.success(`${selectedTemplate.name} connection added successfully!`);
   };
 
   // Generate JSON config from current form values
@@ -239,7 +304,6 @@ export default function MCPConnectionSheet({
     const config = {
       name: formData.name.trim(),
       baseUrl: formData.baseUrl.trim(),
-      model: formData.model.trim(),
       ...(Object.keys(headersObj || {}).length > 0 && { headers: headersObj }),
       ...(Object.keys(paramsObj || {}).length > 0 && { params: paramsObj }),
     };
@@ -294,6 +358,7 @@ export default function MCPConnectionSheet({
     updated[index][field] = value;
     form.setValue("params", updated);
   };
+
   const validateForm = (): {
     isValid: boolean;
     error?: string;
@@ -306,21 +371,22 @@ export default function MCPConnectionSheet({
       }
 
       const templateData = templateForm.getValues();
-      
+
       // Check required fields based on template
-      if (selectedTemplate.requiredFields.apiKey && !templateData.apiKey?.trim()) {
-        return { isValid: false, error: "API key is required for this provider" };
-      }
-      
-      if (selectedTemplate.requiredFields.model && !templateData.model?.trim()) {
-        return { isValid: false, error: "Model name is required" };
+      if (
+        selectedTemplate.requiredFields.apiKey &&
+        !templateData.apiKey?.trim()
+      ) {
+        return {
+          isValid: false,
+          error: "API key is required for this provider",
+        };
       }
 
       // Build connection config from template
       const config = {
-        name: `${selectedTemplate.name} - ${templateData.model}`,
+        name: selectedTemplate.name,
         baseUrl: templateData.baseUrl || selectedTemplate.baseUrl,
-        model: templateData.model || selectedTemplate.model,
         headers: selectedTemplate.headers || {},
         params: selectedTemplate.params || {},
       };
@@ -328,9 +394,15 @@ export default function MCPConnectionSheet({
       // Add API key to headers if provided
       if (templateData.apiKey?.trim()) {
         if (selectedTemplate.id === "openai") {
-          config.headers = { ...config.headers, "Authorization": `Bearer ${templateData.apiKey}` };
+          config.headers = {
+            ...config.headers,
+            Authorization: `Bearer ${templateData.apiKey}`,
+          };
         } else if (selectedTemplate.id === "anthropic") {
-          config.headers = { ...config.headers, "x-api-key": templateData.apiKey };
+          config.headers = {
+            ...config.headers,
+            "x-api-key": templateData.apiKey,
+          };
         }
       }
 
@@ -396,7 +468,6 @@ export default function MCPConnectionSheet({
         connectionData = {
           name: formData.name.trim(),
           baseUrl: formData.baseUrl.trim(),
-          model: formData.model.trim(),
           headers:
             Object.keys(headersObj || {}).length > 0 ? headersObj : undefined,
           params:
@@ -415,38 +486,38 @@ export default function MCPConnectionSheet({
       };
 
       // Build endpoint - try to detect the correct endpoint based on base URL
-      let endpoint = connectionData.baseUrl;
+      let testEndpoint = connectionData.baseUrl;
 
       // If baseUrl doesn't already include the endpoint, add the appropriate one
       if (
-        !endpoint.includes("/chat") &&
-        !endpoint.includes("/api/chat") &&
-        !endpoint.includes("/v1/chat")
+        !testEndpoint.includes("/chat") &&
+        !testEndpoint.includes("/api/chat") &&
+        !testEndpoint.includes("/v1/chat")
       ) {
         // For OpenAI-compatible APIs
         if (
-          endpoint.includes("openai.com") ||
-          endpoint.includes("api.openai.com")
+          testEndpoint.includes("openai.com") ||
+          testEndpoint.includes("api.openai.com")
         ) {
-          endpoint = endpoint.endsWith("/")
-            ? endpoint + "chat/completions"
-            : endpoint + "/chat/completions";
+          testEndpoint = testEndpoint.endsWith("/")
+            ? testEndpoint + "chat/completions"
+            : testEndpoint + "/chat/completions";
         }
         // For Ollama
         else if (
-          endpoint.includes("localhost") ||
-          endpoint.includes("127.0.0.1") ||
-          endpoint.includes("ollama")
+          testEndpoint.includes("localhost") ||
+          testEndpoint.includes("127.0.0.1") ||
+          testEndpoint.includes("ollama")
         ) {
-          endpoint = endpoint.endsWith("/")
-            ? endpoint + "api/chat"
-            : endpoint + "/api/chat";
+          testEndpoint = testEndpoint.endsWith("/")
+            ? testEndpoint + "api/chat"
+            : testEndpoint + "/api/chat";
         }
         // Default to OpenAI-compatible format for other providers
         else {
-          endpoint = endpoint.endsWith("/")
-            ? endpoint + "chat/completions"
-            : endpoint + "/chat/completions";
+          testEndpoint = testEndpoint.endsWith("/")
+            ? testEndpoint + "chat/completions"
+            : testEndpoint + "/chat/completions";
         }
       }
 
@@ -455,15 +526,15 @@ export default function MCPConnectionSheet({
         connectionData.params &&
         Object.keys(connectionData.params).length > 0
       ) {
-        const url = new URL(endpoint);
+        const url = new URL(testEndpoint);
         Object.entries(connectionData.params).forEach(([key, value]) => {
           url.searchParams.append(key, String(value));
         });
-        endpoint = url.toString();
+        testEndpoint = url.toString();
       }
 
       const requestBody = {
-        model: connectionData.model,
+        model: "test-model", // Use a placeholder model for testing
         messages: [
           {
             role: "user",
@@ -476,7 +547,7 @@ export default function MCPConnectionSheet({
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
 
-      const response = await fetch(endpoint, {
+      const response = await fetch(testEndpoint, {
         method: "POST",
         headers: requestHeaders,
         body: JSON.stringify(requestBody),
@@ -545,6 +616,7 @@ export default function MCPConnectionSheet({
   };
 
   const handleSaveConnection = async () => {
+    let testEndpoint = ""; // Declare testEndpoint at the beginning of the function
     if (testResult !== "success") {
       toast.error("Please test the connection first");
       return;
@@ -582,7 +654,6 @@ export default function MCPConnectionSheet({
         connectionData = {
           name: formData.name.trim(),
           baseUrl: formData.baseUrl.trim(),
-          model: formData.model.trim(),
           headers:
             Object.keys(headersObj || {}).length > 0 ? headersObj : undefined,
           params:
@@ -590,8 +661,87 @@ export default function MCPConnectionSheet({
         };
       }
 
-      // Add the connection to the context
-      await addConnection(connectionData);
+      // Build endpoint - same logic as in test function
+      testEndpoint = connectionData.baseUrl;
+      if (
+        !testEndpoint.includes("/chat") &&
+        !testEndpoint.includes("/api/chat") &&
+        !testEndpoint.includes("/v1/chat")
+      ) {
+        // For OpenAI-compatible APIs
+        if (
+          testEndpoint.includes("openai.com") ||
+          testEndpoint.includes("api.openai.com")
+        ) {
+          testEndpoint = testEndpoint.endsWith("/")
+            ? testEndpoint + "chat/completions"
+            : testEndpoint + "/chat/completions";
+        }
+        // For Ollama
+        else if (
+          testEndpoint.includes("localhost") ||
+          testEndpoint.includes("127.0.0.1") ||
+          testEndpoint.includes("ollama")
+        ) {
+          testEndpoint = testEndpoint.endsWith("/")
+            ? testEndpoint + "api/chat"
+            : testEndpoint + "/api/chat";
+        }
+        // Default to OpenAI-compatible format for other providers
+        else {
+          testEndpoint = testEndpoint.endsWith("/")
+            ? testEndpoint + "chat/completions"
+            : testEndpoint + "/chat/completions";
+        }
+      }
+
+      // Determine provider from base URL or template
+      let provider: AIConnection["provider"] = "custom";
+      if (selectedTemplate) {
+        provider = selectedTemplate.id as AIConnection["provider"];
+      } else if (connectionData.baseUrl.includes("openai.com")) {
+        provider = "openai";
+      } else if (connectionData.baseUrl.includes("anthropic.com")) {
+        provider = "anthropic";
+      } else if (
+        connectionData.baseUrl.includes("localhost") ||
+        connectionData.baseUrl.includes("ollama")
+      ) {
+        provider = "ollama";
+      }
+
+      // Create new connection object
+      const newConnection: AIConnection = {
+        id: `conn_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+        name: connectionData.name,
+        provider,
+        baseUrl: connectionData.baseUrl,
+        modelsUrl: "", // Will be set based on provider
+        headers: connectionData.headers || {},
+        isActive: false,
+      };
+      
+      // Set modelsUrl based on provider
+      if (provider === "openai") {
+        newConnection.modelsUrl = "https://api.openai.com/v1/models";
+      } else if (provider === "anthropic") {
+        newConnection.modelsUrl = "https://api.anthropic.com/v1/models";
+      } else if (provider === "deepseek") {
+        newConnection.modelsUrl = "https://api.deepseek.com/v1/models";
+      } else if (provider === "ollama") {
+        newConnection.modelsUrl = connectionData.baseUrl.endsWith("/")
+          ? connectionData.baseUrl + "v1/models"
+          : connectionData.baseUrl + "/v1/models";
+      }
+
+      // Add the connection
+      setConnections((prev) => {
+        // If this is the first connection, make it active
+        if (prev.length === 0) {
+          newConnection.isActive = true;
+        }
+        return [...prev, newConnection];
+      });
 
       // Reset forms after successful save
       form.reset();
@@ -602,7 +752,7 @@ export default function MCPConnectionSheet({
       setTestResult(null);
       setTestError("");
 
-      onClose();
+      handleOpenChange(false);
       toast.success("AI connection added successfully!");
     } catch (error: any) {
       toast.error(`Failed to add connection: ${error.message}`);
@@ -615,8 +765,8 @@ export default function MCPConnectionSheet({
         <SheetHeader>
           <SheetTitle>Add AI Connection</SheetTitle>
           <SheetDescription>
-            Configure a connection to any AI provider. Specify the exact model
-            name and any required headers or parameters.
+            Configure a connection to any AI provider. Choose from templates or
+            create a custom connection.
           </SheetDescription>
         </SheetHeader>
 
@@ -625,7 +775,9 @@ export default function MCPConnectionSheet({
             {/* Mode Selection */}
             <Tabs
               value={mode}
-              onValueChange={(value) => setMode(value as "templates" | "basic" | "advanced")}
+              onValueChange={(value) =>
+                setMode(value as "templates" | "basic" | "advanced")
+              }
             >
               <TabsList className="grid w-full grid-cols-3">
                 <TabsTrigger value="templates">Templates</TabsTrigger>
@@ -636,16 +788,15 @@ export default function MCPConnectionSheet({
               <TabsContent value="templates" className="space-y-6 mt-6">
                 <div className="space-y-4">
                   <div>
-                    <Label className="text-base font-medium">Choose AI Provider</Label>
-                    <p className="text-sm text-muted-foreground mt-1">
+                    <Label className="text-base font-medium">Providers</Label>
+                    <p className="text-xs text-muted-foreground mt-1">
                       Select a template to quickly set up your AI connection
                     </p>
                   </div>
 
                   {/* Template Selection Grid */}
-                  <div className="grid grid-cols-1 gap-3">
+                  <div className="grid grid-cols-5 gap-3">
                     {AI_TEMPLATES.map((template) => {
-                      const IconComponent = template.icon;
                       return (
                         <div
                           key={template.id}
@@ -657,13 +808,10 @@ export default function MCPConnectionSheet({
                           }`}
                         >
                           <div className="flex items-start gap-3">
-                            <IconComponent className="w-8 h-8 text-primary flex-shrink-0 mt-1" />
-                            <div className="flex-1">
-                              <h3 className="font-medium">{template.name}</h3>
-                              <p className="text-sm text-muted-foreground mt-1">
-                                {template.description}
-                              </p>
-                            </div>
+                            <img
+                              src={template.logo}
+                              className="w-8 h-8 flex-shrink-0 mt-1 dark:invert"
+                            />
                           </div>
                         </div>
                       );
@@ -699,7 +847,8 @@ export default function MCPConnectionSheet({
                                     />
                                   </FormControl>
                                   <FormDescription>
-                                    Your API key will be stored securely and used for authentication
+                                    Your API key will be stored securely and
+                                    used for authentication
                                   </FormDescription>
                                   <FormMessage />
                                 </FormItem>
@@ -707,28 +856,19 @@ export default function MCPConnectionSheet({
                             />
                           )}
 
-                          <FormField
-                            control={templateForm.control}
-                            name="model"
-                            render={({ field }) => (
-                              <FormItem>
-                                <FormLabel>Model</FormLabel>
-                                <FormControl>
-                                  <Input
-                                    placeholder={selectedTemplate.model}
-                                    {...field}
-                                  />
-                                </FormControl>
-                                <FormDescription>
-                                  {selectedTemplate.id === "ollama" 
-                                    ? "Model name (e.g., llama3.2:latest, codellama:latest)"
-                                    : "Model name to use for this connection"
-                                  }
-                                </FormDescription>
-                                <FormMessage />
-                              </FormItem>
-                            )}
-                          />
+                          <Button
+                            type="button"
+                            variant="default"
+                            onClick={handleAddConnection}
+                            disabled={
+                              selectedTemplate.requiredFields.apiKey &&
+                              !templateForm.watch("apiKey")?.trim()
+                            }
+                            className="w-full"
+                          >
+                            <Plus className="h-4 w-4 mr-2" />
+                            Add Connection
+                          </Button>
 
                           {selectedTemplate.requiredFields.baseUrl && (
                             <FormField
@@ -793,23 +933,6 @@ export default function MCPConnectionSheet({
                       )}
                     />
 
-                    <FormField
-                      control={form.control}
-                      name="model"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Model Name</FormLabel>
-                          <FormControl>
-                            <Input placeholder="llama3:latest" {...field} />
-                          </FormControl>
-                          <FormDescription>
-                            Enter the exact model name as expected by your AI
-                            provider
-                          </FormDescription>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
                   </div>
 
                   <Separator />
@@ -955,124 +1078,85 @@ export default function MCPConnectionSheet({
                       value={jsonConfig}
                       onChange={(e) => setJsonConfig(e.target.value)}
                       placeholder={`{
-"name": "My AI Connection",
-"baseUrl": "http://localhost:11434",
-"model": "llama3:latest",
-"headers": {
-  "Authorization": "Bearer your-token-here"
-},
-"params": {
-  "api_version": "v1"
+  "name": "My AI Connection",
+  "baseUrl": "http://localhost:11434",
+  "model": "llama3:latest",
+  "headers": {
+    "Authorization": "Bearer your-token-here"
+  },
+  "params": {
+    "api_version": "v1"
   }
 }`}
                       className="min-h-[300px] max-w-[520px] m-auto overflow-y-auto font-mono text-sm"
                     />
                   </div>
-
-                  <Accordion type="single" collapsible>
-                    <AccordionItem value="examples">
-                      <AccordionTrigger>
-                        Configuration Examples
-                      </AccordionTrigger>
-                      <AccordionContent className="space-y-4">
-                        <div className="space-y-4">
-                          <div>
-                            <Label className="text-sm font-medium">
-                              Ollama (Local)
-                            </Label>
-                            <pre className="mt-1 p-3 bg-muted rounded-md text-xs overflow-x-auto">
-                              {`{
-"name": "Local Ollama",
-"baseUrl": "http://localhost:11434",
-"model": "llama3:latest",
-"headers": {},
-"params": {}
-}`}
-                            </pre>
-                          </div>
-
-                          <div>
-                            <Label className="text-sm font-medium">
-                              OpenAI
-                            </Label>
-                            <pre className="mt-1 p-3 bg-muted rounded-md text-xs overflow-x-auto">
-                              {`{
-"name": "OpenAI GPT-4",
-"baseUrl": "https://api.openai.com/v1",
-"model": "gpt-4",
-"headers": {
-  "Authorization": "Bearer your-api-key-here"
-},
-"params": {}
-}`}
-                            </pre>
-                          </div>
-                        </div>
-                      </AccordionContent>
-                    </AccordionItem>
-                  </Accordion>
                 </div>
               </TabsContent>
             </Tabs>
 
-            {/* Test Connection */}
-            <div className="space-y-4">
-              <Button
-                onClick={handleTestConnection}
-                disabled={isTestingConnection}
-                className="w-full"
-                variant="outline"
-              >
-                {isTestingConnection ? (
-                  <>
-                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-current mr-2" />
-                    Testing Connection...
-                  </>
-                ) : (
-                  <>
-                    <TestTube className="h-4 w-4 mr-2" />
-                    Test Connection
-                  </>
-                )}
-              </Button>
-
-              {testResult && (
-                <div
-                  className={`flex items-center gap-2 p-3 rounded-md ${
-                    testResult === "success"
-                      ? "bg-green-50 text-green-700 border border-green-200"
-                      : "bg-red-50 text-red-700 border border-red-200"
-                  }`}
+            {/* Test Connection - Only show for Basic and Advanced modes */}
+            {mode !== "templates" && (
+              <div className="space-y-4">
+                <Button
+                  onClick={handleTestConnection}
+                  disabled={isTestingConnection}
+                  className="w-full"
+                  variant="outline"
                 >
-                  {testResult === "success" ? (
-                    <CheckCircle className="h-4 w-4" />
+                  {isTestingConnection ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-current mr-2" />
+                      Testing Connection...
+                    </>
                   ) : (
-                    <XCircle className="h-4 w-4" />
+                    <>
+                      <TestTube className="h-4 w-4 mr-2" />
+                      Test Connection
+                    </>
                   )}
-                  <span className="text-sm font-medium">
-                    {testResult === "success"
-                      ? "Connection successful!"
-                      : "Connection failed"}
-                  </span>
-                  {testResult === "error" && testError && (
-                    <p className="text-sm mt-1">{testError}</p>
-                  )}
-                </div>
-              )}
-            </div>
+                </Button>
+
+                {testResult && (
+                  <div
+                    className={`flex items-center gap-2 p-3 rounded-md ${
+                      testResult === "success"
+                        ? "bg-green-50 text-green-700 border border-green-200"
+                        : "bg-red-50 text-red-700 border border-red-200"
+                    }`}
+                  >
+                    {testResult === "success" ? (
+                      <CheckCircle className="h-4 w-4" />
+                    ) : (
+                      <XCircle className="h-4 w-4" />
+                    )}
+                    <span className="text-sm font-medium">
+                      {testResult === "success"
+                        ? "Connection successful!"
+                        : "Connection failed"}
+                    </span>
+                    {testResult === "error" && testError && (
+                      <p className="text-sm mt-1">{testError}</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </ScrollArea>
 
         <div className="flex justify-end gap-2 pt-4 border-t">
-          <Button variant="outline" onClick={onClose}>
+          <Button variant="outline" onClick={() => handleOpenChange(false)}>
             Cancel
           </Button>
-          <Button
-            onClick={handleSaveConnection}
-            disabled={testResult !== "success"}
-          >
-            Add Connection
-          </Button>
+          {mode !== "templates" && (
+            <Button
+              onClick={handleSaveConnection}
+              disabled={testResult !== "success"}
+            >
+              Add Connection
+            </Button>
+          )}
         </div>
       </SheetContent>
     </Sheet>

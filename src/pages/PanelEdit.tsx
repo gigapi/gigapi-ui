@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useAtom, useSetAtom } from "jotai";
 import { useDashboardSafely } from "@/atoms";
-import { apiUrlAtom, availableDatabasesAtom, schemaAtom, loadSchemaForDbAtom, setSelectedDbAtom } from "@/atoms";
+import { apiUrlAtom, availableDatabasesAtom, schemaAtom, loadSchemaForDbAtom, setSelectedDbAtom, selectedTableAtom } from "@/atoms";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, Save, RefreshCw, Play } from "lucide-react";
 import { MonacoSqlEditor } from "@/components/query";
@@ -12,19 +12,18 @@ import {
   ResizablePanel,
   ResizableHandle,
 } from "@/components/ui/resizable";
-import DashboardPanel from "@/components/dashboard/DashboardPanel";
+import { EnhancedPanel, PanelDataProvider } from "@/components/dashboard/PanelDataProvider";
 import { DashboardTimeFilter } from "@/components/dashboard/DashboardTimeFilter";
 import { PanelConfigurationForm } from "@/components/dashboard/PanelConfigurationForm";
-import { UnifiedSelector } from "@/components/shared/DbTableTimeSelector";
+import { DashboardUnifiedSelector } from "@/components/dashboard/DashboardUnifiedSelector";
 import { type PanelConfig } from "@/types/dashboard.types";
 import { toast } from "sonner";
 import Loader from "@/components/Loader";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AlertCircle } from "lucide-react";
-import axios from "axios";
 import { SchemaAnalyzer } from "@/lib/dashboard/schema-analyzer";
 import { PanelFactory } from "@/lib/dashboard/panel-factory";
-import { QueryProcessor } from "@/lib/query-processor";
+import { usePanelQuery } from "@/hooks/usePanelQuery";
 
 interface PanelEditProps {
   dashboardId?: string;
@@ -70,7 +69,7 @@ export default function PanelEdit(props?: PanelEditProps) {
 
   const [apiUrl] = useAtom(apiUrlAtom);
   const [availableDatabases] = useAtom(availableDatabasesAtom);
-  // const [availableTables] = useAtom(availableTablesAtom);
+  const [selectedTable] = useAtom(selectedTableAtom);
   const [schema] = useAtom(schemaAtom);
   const loadSchemaForDb = useSetAtom(loadSchemaForDbAtom);
   const setSelectedDb = useSetAtom(setSelectedDbAtom);
@@ -84,6 +83,7 @@ export default function PanelEdit(props?: PanelEditProps) {
   const [previewData, setPreviewData] = useState<any[] | null>(null);
   const [availableFields, setAvailableFields] = useState<string[]>([]);
   const [queryError, setQueryError] = useState<string | null>(null);
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
 
   const isNewPanel = !panelId;
   
@@ -146,6 +146,7 @@ export default function PanelEdit(props?: PanelEditProps) {
         type: "timeseries",
         title: "New Panel",
         database: availableDatabases[0] || "",
+        table: selectedTable || undefined,
         dashboardId: dashboardId,
       });
 
@@ -211,6 +212,97 @@ export default function PanelEdit(props?: PanelEditProps) {
     [localConfig, queryError]
   );
 
+  // Create panel config for query execution
+  const queryConfig = localConfig ? {
+    ...localConfig,
+    id: panelId || 'preview',
+    title: localConfig.title || 'Preview Panel',
+    type: localConfig.type || 'timeseries',
+  } as PanelConfig : null;
+
+  // Use the centralized panel query hook
+  const { execute: executeQuery } = usePanelQuery({
+    panelId: panelId || 'preview',
+    config: queryConfig!,
+    dashboard: currentDashboard!,
+    onSuccess: (data) => {
+      setPreviewData(data);
+      setIsExecuting(false);
+      
+      // Extract available fields from the first result
+      if (data.length > 0) {
+        const fields = Object.keys(data[0]);
+        setAvailableFields(fields);
+        
+        // Auto-suggest field mappings if none are set
+        if (!localConfig?.fieldMapping?.yField && !localConfig?.fieldMapping?.xField) {
+          const firstRecord = data[0];
+          
+          // Find numeric fields for Y-axis
+          const numericFields = fields.filter((field) => {
+            const value = firstRecord[field];
+            return typeof value === "number" || (typeof value === "string" && !isNaN(Number(value)));
+          });
+          
+          // Find time fields for X-axis
+          const timeFields = fields.filter((field) => {
+            const lower = field.toLowerCase();
+            return lower.includes("time") || lower.includes("date") || lower.includes("timestamp") || field === "__timestamp";
+          });
+          
+          // Find string fields that could be categories or series
+          const stringFields = fields.filter((field) => {
+            const value = firstRecord[field];
+            const lower = field.toLowerCase();
+            const isTimeField = lower.includes("time") || lower.includes("date") || lower.includes("timestamp") || field === "__timestamp";
+            return typeof value === "string" && isNaN(Number(value)) && !isTimeField;
+          });
+          
+          // Auto-suggest mappings
+          const suggestedMapping: any = {};
+          
+          if (timeFields.length > 0) {
+            suggestedMapping.xField = timeFields[0];
+          } else if (stringFields.length > 0) {
+            suggestedMapping.xField = stringFields[0];
+          }
+          
+          if (numericFields.length > 0) {
+            suggestedMapping.yField = numericFields[0];
+          }
+          
+          // For series field, prefer non-time string fields
+          if (stringFields.length > 0) {
+            const seriesCandidate = stringFields.find((field) => {
+              const lower = field.toLowerCase();
+              return lower.includes("location") || lower.includes("region") || lower.includes("zone") || 
+                     lower.includes("name") || lower.includes("type") || lower.includes("category");
+            }) || stringFields[0];
+            
+            suggestedMapping.seriesField = seriesCandidate;
+          }
+          
+          if (Object.keys(suggestedMapping).length > 0) {
+            handleConfigChange({
+              fieldMapping: {
+                ...localConfig?.fieldMapping,
+                ...suggestedMapping,
+              },
+            });
+            toast.success(`Auto-detected field mappings: ${Object.entries(suggestedMapping).map(([k, v]) => `${k}: ${v}`).join(", ")}`);
+          }
+        }
+      }
+      
+      toast.success(`Query executed successfully - ${data.length} rows`);
+    },
+    onError: (error) => {
+      setQueryError(error.message);
+      setIsExecuting(false);
+      toast.error(`Failed to execute query: ${error.message}`);
+    }
+  });
+
   const handleRunQuery = useCallback(async () => {
     if (!localConfig?.query?.trim()) {
       toast.error("Please enter a query first");
@@ -228,166 +320,10 @@ export default function PanelEdit(props?: PanelEditProps) {
     }
 
     setIsExecuting(true);
-    setQueryError(null); // Clear previous errors
-    try {
-      // Process query with unified query processor
-      const processedResult = QueryProcessor.process({
-        database: localConfig.database,
-        query: localConfig.query,
-        timeRange: currentDashboard.timeRange,
-        timeZone: currentDashboard.timeZone || "UTC",
-        maxDataPoints: 2000,
-        timeField: localConfig.timeField,
-        table: localConfig.table,
-      });
-
-      let processedQuery = processedResult.query;
-
-      // Add LIMIT if not present
-      if (
-        processedQuery.trim().toUpperCase().startsWith("SELECT") &&
-        !processedQuery.toUpperCase().includes("LIMIT")
-      ) {
-        processedQuery += " LIMIT 2000";
-      }
-
-      const response = await axios.post(
-        `${apiUrl}?db=${encodeURIComponent(
-          localConfig.database
-        )}&format=ndjson`,
-        { query: processedQuery },
-        {
-          responseType: "text",
-          headers: {
-            "Content-Type": "application/x-ndjson",
-            Accept: "application/x-ndjson",
-          },
-        }
-      );
-
-      const textData = response.data;
-      const lines = textData.split("\n").filter((line: string) => line.trim());
-      const results: any[] = [];
-
-      for (const line of lines) {
-        if (!line.trim()) continue;
-        try {
-          results.push(JSON.parse(line));
-        } catch (e) {
-          console.error("Error parsing NDJSON line:", e);
-        }
-      }
-
-      toast.success(`Query executed successfully - ${results.length} rows`);
-      setPreviewData(results);
-
-      // Extract available fields from the first result
-      if (results.length > 0) {
-        const fields = Object.keys(results[0]);
-        setAvailableFields(fields);
-
-        // Auto-suggest field mappings if none are set
-        if (
-          !localConfig.fieldMapping?.yField &&
-          !localConfig.fieldMapping?.xField
-        ) {
-          const firstRecord = results[0];
-
-          // Find numeric fields for Y-axis
-          const numericFields = fields.filter((field) => {
-            const value = firstRecord[field];
-            return (
-              typeof value === "number" ||
-              (typeof value === "string" && !isNaN(Number(value)))
-            );
-          });
-
-          // Find time fields for X-axis
-          const timeFields = fields.filter((field) => {
-            const lower = field.toLowerCase();
-            return (
-              lower.includes("time") ||
-              lower.includes("date") ||
-              lower.includes("timestamp") ||
-              field === "__timestamp"
-            );
-          });
-
-          // Find string fields that could be categories or series (excluding time fields)
-          const stringFields = fields.filter((field) => {
-            const value = firstRecord[field];
-            const lower = field.toLowerCase();
-            const isTimeField =
-              lower.includes("time") ||
-              lower.includes("date") ||
-              lower.includes("timestamp") ||
-              field === "__timestamp";
-            return (
-              typeof value === "string" && isNaN(Number(value)) && !isTimeField
-            );
-          });
-
-          // Auto-suggest mappings
-          const suggestedMapping: any = {};
-
-          if (timeFields.length > 0) {
-            suggestedMapping.xField = timeFields[0];
-          } else if (stringFields.length > 0) {
-            suggestedMapping.xField = stringFields[0];
-          }
-
-          if (numericFields.length > 0) {
-            suggestedMapping.yField = numericFields[0];
-          }
-
-          // For series field, prefer non-time string fields like "location", "region", etc.
-          if (stringFields.length > 0) {
-            // Look for common series field names first
-            const seriesCandidate =
-              stringFields.find((field) => {
-                const lower = field.toLowerCase();
-                return (
-                  lower.includes("location") ||
-                  lower.includes("region") ||
-                  lower.includes("zone") ||
-                  lower.includes("name") ||
-                  lower.includes("type") ||
-                  lower.includes("category")
-                );
-              }) || stringFields[0]; // fallback to first string field
-
-            suggestedMapping.seriesField = seriesCandidate;
-          }
-
-          if (Object.keys(suggestedMapping).length > 0) {
-            handleConfigChange({
-              fieldMapping: {
-                ...localConfig.fieldMapping,
-                ...suggestedMapping,
-              },
-            });
-            toast.success(
-              `Auto-detected field mappings: ${Object.entries(suggestedMapping)
-                .map(([k, v]) => `${k}: ${v}`)
-                .join(", ")}`
-            );
-          }
-        }
-      } else {
-        setAvailableFields([]);
-      }
-    } catch (error: any) {
-      const errorMessage =
-        error.response?.data?.error ||
-        error.message ||
-        "Query execution failed";
-      setQueryError(errorMessage);
-      toast.error(`Failed to execute query: ${errorMessage}`);
-      console.error("Query execution error:", error);
-    } finally {
-      setIsExecuting(false);
-    }
-  }, [localConfig, apiUrl, currentDashboard]);
+    setQueryError(null);
+    setRefreshTrigger(Date.now()); // Trigger refresh in preview panel
+    await executeQuery({ force: true });
+  }, [localConfig, currentDashboard, executeQuery]);
 
   // Load tables when database changes
   useEffect(() => {
@@ -595,19 +531,30 @@ export default function PanelEdit(props?: PanelEditProps) {
                   <div className="flex-1 p-6 overflow-auto bg-muted/20">
                     <div className="h-full rounded-lg border bg-background shadow-sm overflow-hidden">
                       {localConfig.type &&
-                      currentData?.data &&
-                      currentData.data.length > 0 ? (
-                        <DashboardPanel
-                          config={
-                            {
+                      currentDashboard &&
+                      previewData &&
+                      previewData.length > 0 ? (
+                        <PanelDataProvider
+                          panelId={panelId || "preview"}
+                          config={{
+                            ...localConfig,
+                            id: panelId || "preview",
+                          } as PanelConfig}
+                          dashboard={currentDashboard}
+                          autoRefresh={false}
+                          refreshTrigger={refreshTrigger}
+                        >
+                          <EnhancedPanel
+                            panelId={panelId || "preview"}
+                            config={{
                               ...localConfig,
                               id: panelId || "preview",
-                            } as PanelConfig
-                          }
-                          data={currentData.data}
-                          isEditMode={false}
-                          onEditPanel={() => {}}
-                        />
+                            } as PanelConfig}
+                            dashboard={currentDashboard}
+                            className="w-full h-full"
+                            isEditMode={false}
+                          />
+                        </PanelDataProvider>
                       ) : (
                         <div className="flex items-center justify-center h-full">
                           <div className="text-center max-w-md">
@@ -698,10 +645,8 @@ export default function PanelEdit(props?: PanelEditProps) {
                           <Label className="text-sm font-medium text-muted-foreground whitespace-nowrap">
                             Database:
                           </Label>
-                          <UnifiedSelector
+                          <DashboardUnifiedSelector
                             type="database"
-                            context="dashboard"
-                            style="select"
                             value={localConfig?.database || ""}
                             onChange={(value) =>
                               handleConfigChange({
@@ -722,10 +667,9 @@ export default function PanelEdit(props?: PanelEditProps) {
                             <Label className="text-sm font-medium text-muted-foreground whitespace-nowrap">
                               Table:
                             </Label>
-                            <UnifiedSelector
+                            <DashboardUnifiedSelector
                               type="table"
-                              context="dashboard"
-                              style="select"
+                              database={localConfig?.database}
                               value={localConfig?.table || ""}
                               onChange={(value) => {
                                 const updates: Partial<PanelConfig> = {
@@ -779,7 +723,6 @@ export default function PanelEdit(props?: PanelEditProps) {
 
                                 handleConfigChange(updates);
                               }}
-                              database={localConfig?.database}
                               className="w-[180px] h-8 text-sm"
                               showIcon={false}
                               label={null}
@@ -793,18 +736,16 @@ export default function PanelEdit(props?: PanelEditProps) {
                             <Label className="text-sm font-medium text-muted-foreground whitespace-nowrap">
                               Time Field:
                             </Label>
-                            <UnifiedSelector
+                            <DashboardUnifiedSelector
                               type="timeField"
-                              context="dashboard"
-                              style="select"
+                              database={localConfig?.database}
+                              table={localConfig?.table}
                               value={localConfig?.timeField || ""}
                               onChange={(value) =>
                                 handleConfigChange({
                                   timeField: value === "" ? "" : value,
                                 })
                               }
-                              database={localConfig?.database}
-                              table={localConfig?.table}
                               className="w-[180px] h-8 text-sm"
                               showIcon={false}
                               label={null}

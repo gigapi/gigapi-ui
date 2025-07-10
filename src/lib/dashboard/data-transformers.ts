@@ -30,6 +30,7 @@ export function transformDataForPanel(
   records: NDJSONRecord[],
   config: PanelConfig
 ): TransformedData {
+  
   if (!records || records.length === 0) {
     return {
       data: [],
@@ -47,7 +48,10 @@ export function transformDataForPanel(
       return transformForTimeSeries(records, config);
 
     case "bar":
+      return transformForBar(records, config);
+    
     case "scatter":
+      return transformForTimeSeries(records, config);
 
     case "pie":
     case "donut":
@@ -68,12 +72,140 @@ export function transformDataForPanel(
 }
 
 /**
+ * Transform data for bar charts
+ */
+function transformForBar(
+  records: NDJSONRecord[],
+  config: PanelConfig
+): TransformedData {
+  const data: ChartDataPoint[] = [];
+  const seriesSet = new Set<string>();
+
+  let minValue = Infinity;
+  let maxValue = -Infinity;
+
+  // Use field mapping if available
+  const fieldMapping = config.fieldMapping;
+  const firstRecord = records[0];
+
+  if (!firstRecord) {
+    return {
+      data: [],
+      series: [],
+      metadata: { totalRecords: 0 },
+    };
+  }
+
+  const fields = Object.keys(firstRecord);
+
+  let xField: string | null;
+  let yField: string | null;
+  let seriesField: string | undefined;
+
+  if (fieldMapping?.xField && fieldMapping?.yField) {
+    xField = fieldMapping.xField;
+    yField = fieldMapping.yField;
+    seriesField = fieldMapping.seriesField;
+  } else {
+    // Auto-detect fields
+    const timeField = SchemaAnalyzer.findTimeField(fields);
+    const numericFields = SchemaAnalyzer.findNumericFields(firstRecord, fields);
+    const stringFields = SchemaAnalyzer.findStringFields(firstRecord, fields);
+
+    // For bar charts, prefer categorical data on x-axis
+    xField = stringFields.length > 0 ? stringFields[0] : timeField;
+    yField = numericFields.length > 0 ? numericFields[0] : null;
+  }
+
+  if (!xField || !yField) {
+    return { data: [], series: [], metadata: { totalRecords: 0 } };
+  }
+
+  // Check if x-axis is time-based
+  const isTimeBasedX = xField === "__timestamp" || 
+    xField?.toLowerCase().includes("time") || 
+    xField?.toLowerCase().includes("date");
+
+  // Group data by x value for aggregation
+  const groupedData = new Map<string, { sum: number; count: number; series?: string }>();
+
+  for (const record of records) {
+    let xValue: string | number;
+    
+    if (isTimeBasedX) {
+      const timeValue = parseTimeValue(record[xField]);
+      if (!timeValue) continue;
+      
+      // For time-based bar charts, keep as timestamp for proper sorting
+      // The chart component will handle formatting
+      xValue = timeValue.getTime();
+    } else {
+      xValue = String(record[xField] || "Unknown");
+    }
+
+    const yValue = parseNumericValue(record[yField]);
+    if (yValue === null) continue;
+
+    const seriesName = seriesField && record[seriesField] 
+      ? String(record[seriesField]) 
+      : "default";
+
+    const key = seriesField ? `${xValue}|${seriesName}` : String(xValue);
+
+    if (groupedData.has(key)) {
+      const existing = groupedData.get(key)!;
+      existing.sum += yValue;
+      existing.count += 1;
+    } else {
+      groupedData.set(String(key), { sum: yValue, count: 1, series: seriesName });
+    }
+
+    seriesSet.add(seriesName);
+  }
+
+  // Convert grouped data to chart points
+  for (const [key, { sum, count, series }] of groupedData.entries()) {
+    const avgValue = sum / count;
+    const xValue = seriesField ? key.split("|")[0] : key;
+
+    data.push({
+      x: xValue,
+      y: avgValue,
+      series: series || "default",
+    });
+
+    if (avgValue < minValue) minValue = avgValue;
+    if (avgValue > maxValue) maxValue = avgValue;
+  }
+
+  // Sort data by x value if not time-based
+  if (!isTimeBasedX) {
+    data.sort((a, b) => {
+      const aStr = String(a.x);
+      const bStr = String(b.x);
+      return aStr.localeCompare(bStr);
+    });
+  }
+
+  return {
+    data,
+    series: Array.from(seriesSet),
+    metadata: {
+      totalRecords: records.length,
+      valueRange:
+        minValue !== Infinity ? { min: minValue, max: maxValue } : undefined,
+    },
+  };
+}
+
+/**
  * Transform data for time series charts (line, area, timeseries)
  */
 function transformForTimeSeries(
   records: NDJSONRecord[],
   config: PanelConfig
 ): TransformedData {
+  
   const data: ChartDataPoint[] = [];
   const seriesSet = new Set<string>();
 
@@ -85,6 +217,18 @@ function transformForTimeSeries(
   // Use field mapping if available, otherwise auto-detect
   const fieldMapping = config.fieldMapping;
   const firstRecord = records[0];
+  
+  // Handle case where we have no data - this is normal during loading
+  if (!firstRecord) {
+    return {
+      data: [],
+      series: [],
+      metadata: {
+        totalRecords: 0,
+      },
+    };
+  }
+  
   const fields = Object.keys(firstRecord);
 
   let timeField: string | null;
@@ -105,7 +249,6 @@ function transformForTimeSeries(
 
   // If no value fields found, skip
   if (valueFields.length === 0) {
-    console.warn("No value fields found for time series");
     return { data: [], series: [], metadata: { totalRecords: 0 } };
   }
 

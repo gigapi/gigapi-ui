@@ -1,6 +1,5 @@
 import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import ReactMarkdown from "react-markdown";
@@ -19,25 +18,32 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
-  Send,
   Bot,
   Copy,
-  Zap,
-  TerminalSquare,
   User,
   X,
-  Settings,
   MessageSquare,
   Plus,
   ChevronDown,
   Check,
+  CheckCircle,
+  AlertCircle,
+  Settings,
 } from "lucide-react";
 import { toast } from "sonner";
 import Loader from "@/components/Loader";
-import type { ChatMessage } from "@/types";
+import type { ChatMessage } from "@/types/chat.types";
 import ChatArtifact from "./ChatArtifact";
-import MCPConnectionSheet from "./MCPConnectionSheet";
-import { useMCP, useQuery, useDashboardSafely } from "@/atoms";
+import AIConnectionSheet from "./AIConnectionSheet";
+import ChatContextSheet from "./ChatContextSheet";
+import ChatInput from "./ChatInput";
+import {
+  useMCP,
+  updateSessionContextAtom,
+  updateSessionConnectionAtom,
+} from "@/atoms";
+import { useSetAtom, useAtom } from "jotai";
+import { aiConnectionsAtom } from "@/atoms/chat-atoms";
 
 interface ChatPanelCompactProps {
   isOpen: boolean;
@@ -55,18 +61,18 @@ export default function ChatPanelCompact({
     error,
     sendMessage,
     createChatSession,
-    connections,
     activeConnection,
     chatSessions,
     switchChatSession,
   } = useMCP();
 
-  const { setQuery } = useQuery();
-  const dashboardContext = useDashboardSafely();
-  const currentDashboard = dashboardContext?.currentDashboard || null;
 
   const [inputMessage, setInputMessage] = useState("");
   const [showConnectionDialog, setShowConnectionDialog] = useState(false);
+  const [showContextDialog, setShowContextDialog] = useState(false);
+  const updateSessionContext = useSetAtom(updateSessionContextAtom);
+  const updateSessionConnection = useSetAtom(updateSessionConnectionAtom);
+  const [aiConnections] = useAtom(aiConnectionsAtom);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -79,6 +85,17 @@ export default function ChatPanelCompact({
       textareaRef.current.focus();
     }
   }, [isOpen]);
+
+  // Listen for event to open AI connection sheet
+  useEffect(() => {
+    const handleOpenAIConnectionSheet = () => {
+      setShowConnectionDialog(true);
+    };
+    window.addEventListener('openAIConnectionSheet', handleOpenAIConnectionSheet);
+    return () => {
+      window.removeEventListener('openAIConnectionSheet', handleOpenAIConnectionSheet);
+    };
+  }, []);
 
   const handleSendMessage = async () => {
     if (!inputMessage.trim() || isLoading || !isConnected) return;
@@ -99,38 +116,11 @@ export default function ChatPanelCompact({
     }
   };
 
-  const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSendMessage();
-    }
-  };
 
   const copyToClipboard = (text: string) => {
     if (!text) return;
     navigator.clipboard.writeText(text);
     toast.success("Copied to clipboard");
-  };
-
-  const useQueryFromMessage = (query: string) => {
-    if (!query) return;
-    setQuery(query);
-    toast.success("Query added to editor");
-  };
-
-  const handleAddChartToDashboard = async (chartArtifact: any) => {
-    try {
-      if (!currentDashboard) {
-        toast.error("No dashboard loaded. Please load a dashboard first.");
-        return;
-      }
-      toast.success(
-        `Chart "${chartArtifact.title}" added to dashboard "${currentDashboard.name}"`
-      );
-    } catch (error) {
-      console.error("Failed to add chart to dashboard:", error);
-      toast.error("Failed to add chart to dashboard");
-    }
   };
 
   const formatTimestamp = (timestamp: string) => {
@@ -197,12 +187,12 @@ export default function ChatPanelCompact({
         ) : (
           chatSessions
             .sort(
-              (a, b) =>
+              (a: any, b: any) =>
                 new Date(b.updatedAt).getTime() -
                 new Date(a.updatedAt).getTime()
             )
             .slice(0, 8) // Show max 8 recent chats
-            .map((session) => (
+            .map((session: any) => (
               <DropdownMenuItem
                 key={session.id}
                 onClick={() => switchChatSession(session.id)}
@@ -239,8 +229,7 @@ export default function ChatPanelCompact({
 
   const renderMessage = (message: ChatMessage) => {
     const isUser = message.role === "user";
-    const queryContent = message.metadata?.queryGenerated as string | undefined;
-    const chartArtifact = message.metadata?.chartArtifact;
+    const artifacts = message.metadata?.artifacts || [];
 
     return (
       <div key={message.id}>
@@ -321,60 +310,16 @@ export default function ChatPanelCompact({
               )}
             </div>
 
-            {queryContent && (
-              <div className="bg-muted/50 rounded p-2 border text-xs">
-                <div className="flex items-center justify-between mb-2">
-                  <Badge variant="secondary" className="text-xs h-4">
-                    <Zap className="w-2 h-2 mr-1" />
-                    Query
-                  </Badge>
-                  <div className="flex gap-1">
-                    <TooltipProvider>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-5 w-5"
-                            onClick={() => copyToClipboard(queryContent)}
-                          >
-                            <Copy className="w-2 h-2" />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>Copy</TooltipContent>
-                      </Tooltip>
-                    </TooltipProvider>
-
-                    <TooltipProvider>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-5 w-5"
-                            onClick={() => useQueryFromMessage(queryContent)}
-                          >
-                            <TerminalSquare className="w-2 h-2" />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>Use in editor</TooltipContent>
-                      </Tooltip>
-                    </TooltipProvider>
-                  </div>
-                </div>
-                <pre className="text-xs font-mono bg-background/50 p-2 rounded overflow-x-auto">
-                  <code>{queryContent}</code>
-                </pre>
-              </div>
-            )}
-
-            {chartArtifact && (
-              <div className="mt-2">
-                <ChatArtifact
-                  chartArtifact={chartArtifact}
-                  onAddToDashboard={handleAddChartToDashboard}
-                  currentDashboard={currentDashboard}
-                />
+            {/* Render all artifacts */}
+            {artifacts.length > 0 && activeSession && (
+              <div className="mt-2 space-y-2">
+                {artifacts.map((artifact) => (
+                  <ChatArtifact
+                    key={artifact.id}
+                    artifact={artifact}
+                    session={activeSession}
+                  />
+                ))}
               </div>
             )}
 
@@ -406,25 +351,135 @@ export default function ChatPanelCompact({
               Offline
             </Badge>
           )}
-        </div>
-        <div className="flex items-center gap-1">
-          {!isConnected && (
+
+          {/* Model Selector */}
+          {activeSession &&
+            activeSession.aiConnectionId &&
+            (() => {
+              const connection = aiConnections.find(
+                (c) => c.id === activeSession.aiConnectionId
+              );
+              
+              if (!activeSession.model && !connection) return null;
+              
+              return (
+                <Badge variant="outline" className="text-xs h-7">
+                  <Bot className="w-3 h-3 mr-1" />
+                  {activeSession.model ? (
+                    <span className="font-mono">{activeSession.model}</span>
+                  ) : (
+                    <span>{connection?.name || "No AI"}</span>
+                  )}
+                </Badge>
+              );
+            })()}
+
+          {/* Context Status Indicator */}
+          {activeSession && (
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7"
-                    onClick={() => setShowConnectionDialog(true)}
+                    variant="outline"
+                    size="sm"
+                    className="gap-1 h-7 px-2"
+                    onClick={() => {
+                      setShowContextDialog(true);
+                    }}
                   >
                     <Settings className="w-3 h-3" />
+                    <span className="text-xs">Context</span>
+                    {(() => {
+                      const dbCount =
+                        activeSession.context.databases.selected.length;
+                      const tableCount = Object.values(
+                        activeSession.context.tables
+                      ).reduce(
+                        (acc, db) => acc + (db.selected?.length || 0),
+                        0
+                      );
+                      const schemaCount = Object.values(
+                        activeSession.context.schemas || {}
+                      ).reduce((acc, db) => acc + Object.keys(db).length, 0);
+                      const hasSchemas = schemaCount > 0;
+
+                      if (dbCount === 0) {
+                        return (
+                          <AlertCircle className="w-3 h-3 text-red-500 ml-1" />
+                        );
+                      } else if (hasSchemas) {
+                        return (
+                          <CheckCircle className="w-3 h-3 text-green-500 ml-1" />
+                        );
+                      } else if (tableCount > 0) {
+                        return (
+                          <AlertCircle className="w-3 h-3 text-orange-500 ml-1" />
+                        );
+                      }
+                      return null;
+                    })()}
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent>Configure AI</TooltipContent>
+                <TooltipContent>
+                  <div className="text-xs space-y-1">
+                    {(() => {
+                      const dbCount =
+                        activeSession.context.databases.selected.length;
+                      const tableCount = Object.values(
+                        activeSession.context.tables
+                      ).reduce(
+                        (acc, db) => acc + (db.selected?.length || 0),
+                        0
+                      );
+                      const schemaCount = Object.values(
+                        activeSession.context.schemas || {}
+                      ).reduce((acc, db) => acc + Object.keys(db).length, 0);
+
+                      if (dbCount === 0) {
+                        return (
+                          <div className="text-red-500">
+                            No databases selected - click to configure
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <>
+                          <div>
+                            {dbCount} database{dbCount !== 1 ? "s" : ""}{" "}
+                            selected
+                          </div>
+                          <div>
+                            {tableCount} table{tableCount !== 1 ? "s" : ""}{" "}
+                            selected
+                          </div>
+                          <div className="flex items-center gap-1">
+                            {schemaCount > 0 ? (
+                              <>
+                                <CheckCircle className="w-3 h-3 text-green-500" />{" "}
+                                Schemas loaded for {schemaCount} tables
+                              </>
+                            ) : tableCount > 0 ? (
+                              <>
+                                <AlertCircle className="w-3 h-3 text-orange-500" />{" "}
+                                No schemas loaded - click to fetch
+                              </>
+                            ) : (
+                              <span className="text-muted-foreground">
+                                No tables selected
+                              </span>
+                            )}
+                          </div>
+                        </>
+                      );
+                    })()}
+                  </div>
+                </TooltipContent>
               </Tooltip>
             </TooltipProvider>
           )}
+        </div>
+        <div className="flex items-center gap-1">
           {onClose && (
             <Button
               variant="ghost"
@@ -444,19 +499,6 @@ export default function ChatPanelCompact({
           <div className="flex-1 flex flex-col items-center justify-center p-4 text-center">
             <Bot className="w-8 h-8 mb-3 text-muted-foreground/50" />
             <h3 className="font-medium mb-1">No connections configured </h3>
-            <p className="text-xs text-muted-foreground mb-3">
-              {connections.length === 0
-                ? "Configure a model provider to start using the assistant."
-                : "Activate a model connection to start chatting."}
-            </p>
-            <Button
-              onClick={() => setShowConnectionDialog(true)}
-              size="sm"
-              variant="outline"
-            >
-              <Settings className="w-3 h-3 mr-2" />
-              Setup AI
-            </Button>
           </div>
         ) : !activeSession || activeSession.messages.length === 0 ? (
           <div className="flex-1 flex flex-col items-center justify-center p-4 text-center">
@@ -490,7 +532,7 @@ export default function ChatPanelCompact({
       </div>
 
       {/* Input */}
-      {isConnected && (
+      {isConnected && activeSession && (
         <div className="border-t p-3">
           {error && (
             <div className="mb-2 p-2 bg-destructive/10 text-destructive text-xs rounded">
@@ -498,34 +540,33 @@ export default function ChatPanelCompact({
             </div>
           )}
 
-          <div className="flex gap-2">
-            <Textarea
-              ref={textareaRef}
-              value={inputMessage}
-              onChange={(e) => setInputMessage(e.target.value)}
-              onKeyDown={handleKeyPress}
-              placeholder="Ask about your data..."
-              disabled={isLoading}
-              className="flex-1 resize-none text-sm min-h-[32px] max-h-20"
-              rows={1}
-            />
-            <Button
-              onClick={handleSendMessage}
-              disabled={isLoading || !inputMessage.trim()}
-              size="icon"
-              className="h-8 w-8 flex-shrink-0"
-            >
-              <Send className="w-3 h-3" />
-            </Button>
-          </div>
+          <ChatInput
+            value={inputMessage}
+            onChange={setInputMessage}
+            onSend={handleSendMessage}
+            disabled={isLoading}
+            context={activeSession.context}
+          />
         </div>
       )}
 
       {/* Connection Dialog */}
-      <MCPConnectionSheet
+      <AIConnectionSheet
         isOpen={showConnectionDialog}
-        onClose={() => setShowConnectionDialog(false)}
+        onOpenChange={setShowConnectionDialog}
       />
+
+      {/* Context Sheet */}
+      {activeSession && (
+        <ChatContextSheet
+          isOpen={showContextDialog}
+          onClose={() => setShowContextDialog(false)}
+          session={activeSession}
+          onUpdate={(context) => {
+            updateSessionContext(activeSession.id, context);
+          }}
+        />
+      )}
     </div>
   );
 }

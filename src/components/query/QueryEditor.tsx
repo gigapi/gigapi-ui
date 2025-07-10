@@ -16,10 +16,10 @@ import {
   setTimeRangeAtom,
   setSelectedTimeFieldAtom,
   setHasTimeVariablesAtom,
+  useMCP,
 } from "@/atoms";
-import { useMCP } from "@/atoms/mcp-atoms";
 import { toast } from "sonner";
-import ChatPanelCompact from "@/components/MCP/ChatPanelCompact";
+import ChatPanelCompact from "@/components/chat/ChatPanelCompact";
 import { QueryEditorToolbar, QueryEditorSelectors, MonacoSqlEditor } from "./";
 import { checkForTimeVariables, detectTimeFieldsFromSchema } from "@/lib/";
 
@@ -38,8 +38,14 @@ export default function QueryEditor() {
   const setSelectedTableAction = useSetAtom(setSelectedTableAtom);
   const setSelectedTimeField = useSetAtom(setSelectedTimeFieldAtom);
   const setHasTimeVariables = useSetAtom(setHasTimeVariablesAtom);
-  
-  console.log("🔥 QUERY EDITOR RENDER:", { query, isLoading, selectedDb, selectedTable, timestamp: new Date().toISOString() });
+
+  console.log("🔥 QUERY EDITOR RENDER:", {
+    query,
+    isLoading,
+    selectedDb,
+    selectedTable,
+    timestamp: new Date().toISOString(),
+  });
 
   // Use schema to get columns for table
   const getColumnsForTable = (tableName: string) => getColumns(tableName);
@@ -48,7 +54,7 @@ export default function QueryEditor() {
 
   // Load chat panel state from localStorage
   const [showChatPanel, setShowChatPanel] = useState(() => {
-    const saved = localStorage.getItem("queryEditor.showChatPanel");
+    const saved = localStorage.getItem("gigaapi_show_chat_panel");
     return saved !== null ? saved === "true" : false; // Default to closed
   });
 
@@ -86,13 +92,21 @@ export default function QueryEditor() {
 
   // Handle running query with timeout protection - NOT using useCallback to avoid stale closures
   const handleRunQuery = async () => {
-    console.log("🔥 RUN QUERY CALLED:", { selectedDb, query, timestamp: new Date().toISOString() });
-    
+    console.log("🔥 RUN QUERY CALLED:", {
+      selectedDb,
+      query,
+      timestamp: new Date().toISOString(),
+    });
+
     // Force sync the editor content before running
     let finalQuery = query;
     if (editorRef.current) {
       const currentEditorContent = editorRef.current.getValue() || "";
-      console.log("🔥 FORCE SYNC EDITOR:", { currentEditorContent, query, different: currentEditorContent !== query });
+      console.log("🔥 FORCE SYNC EDITOR:", {
+        currentEditorContent,
+        query,
+        different: currentEditorContent !== query,
+      });
       if (currentEditorContent !== query) {
         console.log("🔥 FORCE SYNC setQuery:", { currentEditorContent });
         setQuery(currentEditorContent);
@@ -129,20 +143,30 @@ export default function QueryEditor() {
     (value: string | undefined) => {
       const newQuery = value || "";
 
-      console.log("🔥 EDITOR CHANGE:", { newQuery, length: newQuery.length, timestamp: new Date().toISOString() });
+      console.log("🔥 EDITOR CHANGE:", {
+        newQuery,
+        length: newQuery.length,
+        timestamp: new Date().toISOString(),
+      });
 
       // Update immediately - the editor is the source of truth
       setQuery(newQuery);
-      
+
       // Check for time variables and update immediately
       const hasTimeVars = checkForTimeVariables(newQuery);
-      console.log("🔥 TIME VARIABLES CHECK:", { hasTimeVars, currentHasTimeVars: hasTimeVariables });
-      
+      console.log("🔥 TIME VARIABLES CHECK:", {
+        hasTimeVars,
+        currentHasTimeVars: hasTimeVariables,
+      });
+
       if (hasTimeVars !== hasTimeVariables) {
-        console.log("🔥 UPDATING hasTimeVariables:", { from: hasTimeVariables, to: hasTimeVars });
+        console.log("🔥 UPDATING hasTimeVariables:", {
+          from: hasTimeVariables,
+          to: hasTimeVars,
+        });
         setHasTimeVariables(hasTimeVars);
       }
-      
+
       // Auto-select first time field if time variables are detected and no field is selected
       if (hasTimeVars && !selectedTimeField && timeFieldOptions.length > 0) {
         console.log("🔥 AUTO-SELECTING TIME FIELD:", timeFieldOptions[0]);
@@ -187,33 +211,23 @@ export default function QueryEditor() {
 
   // Save chat panel state to localStorage when it changes
   useEffect(() => {
-    localStorage.setItem("queryEditor.showChatPanel", showChatPanel.toString());
+    localStorage.setItem("gigaapi_show_chat_panel", showChatPanel.toString());
   }, [showChatPanel]);
-
-  // Auto-show chat panel when chat sessions are available (only once per session)
-  // Removed since we now persist user preference
-  /*
-  useEffect(() => {
-    if (
-      mcpInitialized &&
-      !hasAutoShownChat &&
-      chatSessions &&
-      chatSessions.length > 0 &&
-      !showChatPanel
-    ) {
-      setShowChatPanel(true);
-      setHasAutoShownChat(true);
-    }
-  }, [mcpInitialized, chatSessions, hasAutoShownChat, showChatPanel]);
-  */
 
   // Check for time variables on initial mount and when query changes from outside
   useEffect(() => {
     const hasTimeVars = checkForTimeVariables(query);
-    console.log("🔥 INITIAL TIME VARIABLES CHECK:", { query, hasTimeVars, currentHasTimeVars: hasTimeVariables });
-    
+    console.log("🔥 INITIAL TIME VARIABLES CHECK:", {
+      query,
+      hasTimeVars,
+      currentHasTimeVars: hasTimeVariables,
+    });
+
     if (hasTimeVars !== hasTimeVariables) {
-      console.log("🔥 INITIAL TIME VARIABLES UPDATE:", { from: hasTimeVariables, to: hasTimeVars });
+      console.log("🔥 INITIAL TIME VARIABLES UPDATE:", {
+        from: hasTimeVariables,
+        to: hasTimeVars,
+      });
       setHasTimeVariables(hasTimeVars);
     }
   }, [query, hasTimeVariables, setHasTimeVariables]);

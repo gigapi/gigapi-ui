@@ -2,48 +2,40 @@ import { atom } from "jotai";
 import { useAtom, useSetAtom } from "jotai";
 import { atomWithStorage } from "jotai/utils";
 import type { Dashboard, DashboardListItem, PanelConfig, PanelLayout } from "@/types/dashboard.types";
-import { apiUrlAtom } from "@/atoms/connection";
+
+// Re-export types that other modules need
+export type { Dashboard, PanelConfig } from "@/types/dashboard.types";
 
 // Dashboard state atoms - now using localStorage with embedded panels
 export const currentDashboardAtom = atom<Dashboard | null>(null);
 
 // Panel data loading states
-export const panelDataAtom = atom<Map<string, { data: any[]; error?: string }>>(new Map());
+export const panelDataAtom = atom<Map<string, { data: any[]; error?: string; _refreshRequested?: number }>>(new Map());
 export const panelLoadingStatesAtom = atom<Map<string, boolean>>(new Map());
 
 // Internal atom for raw dashboard data
 const dashboardListBaseAtom = atomWithStorage<Dashboard[]>("gigapi_dashboards", [], {
   getItem: (key) => {
+    console.log('[Dashboard Atoms] Getting dashboards from localStorage');
     const stored = localStorage.getItem(key);
-    if (!stored) return [];
-    
-    const dashboards = JSON.parse(stored);
-    
-    // Migration: If dashboards don't have panels, try to load from old structure
-    const panelsData = localStorage.getItem("gigapi_dashboard_panels");
-    if (panelsData && dashboards.some((d: any) => !d.panels)) {
-      const allPanels = JSON.parse(panelsData);
-      return dashboards.map((dashboard: any) => ({
-        ...dashboard,
-        panels: allPanels[dashboard.id] || [],
-        metadata: {
-          ...dashboard.metadata,
-          createdAt: new Date(dashboard.metadata.createdAt),
-          updatedAt: new Date(dashboard.metadata.updatedAt),
-        },
-      }));
+    if (!stored) {
+      console.log('[Dashboard Atoms] No dashboards found in localStorage');
+      return [];
     }
     
-    // Normal case: parse dates
-    return dashboards.map((d: any) => ({
+    const parsed = JSON.parse(stored);
+    console.log('[Dashboard Atoms] Parsed dashboards:', parsed.length, 'dashboards');
+    // Convert date strings back to Date objects
+    const dashboards = parsed.map((d: any) => ({
       ...d,
-      panels: d.panels || [],
       metadata: {
         ...d.metadata,
         createdAt: new Date(d.metadata.createdAt),
         updatedAt: new Date(d.metadata.updatedAt),
       },
     }));
+    console.log('[Dashboard Atoms] Converted dashboards with proper dates');
+    return dashboards;
   },
   setItem: (key, value) => {
     const serialized = value.map(d => ({
@@ -66,9 +58,12 @@ export const dashboardListAtom = atom(
   (get) => {
     const dashboards = get(dashboardListBaseAtom);
     // If it's a Promise (during initial load), return empty array
-    return Array.isArray(dashboards) ? dashboards : [];
+    const result = Array.isArray(dashboards) ? dashboards : [];
+    console.log('[Dashboard Atoms] dashboardListAtom returning', result.length, 'dashboards');
+    return result;
   },
   (_get, set, newValue: Dashboard[]) => {
+    console.log('[Dashboard Atoms] Setting dashboard list with', newValue.length, 'dashboards');
     set(dashboardListBaseAtom, newValue);
   }
 );
@@ -92,20 +87,56 @@ export const clearCurrentDashboardAtom = atom(
 export const loadDashboardAtom = atom(
   null,
   async (get, set, dashboardId: string) => {
+    console.log('[Dashboard Atoms] Loading dashboard:', dashboardId);
     set(dashboardLoadingAtom, true);
     set(dashboardErrorAtom, null);
 
     try {
+      // Wait a bit for localStorage to be ready on page reload
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
       const dashboards = get(dashboardListAtom);
+      console.log('[Dashboard Atoms] Available dashboards:', dashboards.map(d => ({ id: d.id, name: d.name })));
+      
+      // If no dashboards loaded yet, try to get from localStorage directly
+      if (dashboards.length === 0) {
+        console.log('[Dashboard Atoms] No dashboards in atom, checking localStorage directly');
+        const stored = localStorage.getItem('gigapi_dashboards');
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          console.log('[Dashboard Atoms] Found', parsed.length, 'dashboards in localStorage');
+          // Convert dates and set the atom
+          const convertedDashboards = parsed.map((d: any) => ({
+            ...d,
+            metadata: {
+              ...d.metadata,
+              createdAt: new Date(d.metadata.createdAt),
+              updatedAt: new Date(d.metadata.updatedAt),
+            },
+          }));
+          set(dashboardListAtom, convertedDashboards);
+          // Try to find the dashboard again
+          const dashboard = convertedDashboards.find((d: Dashboard) => d.id === dashboardId);
+          if (dashboard) {
+            console.log('[Dashboard Atoms] Found dashboard after localStorage load:', dashboard.name);
+            set(currentDashboardAtom, dashboard);
+            return;
+          }
+        }
+      }
+      
       const dashboard = dashboards.find((d: Dashboard) => d.id === dashboardId);
 
       if (dashboard) {
+        console.log('[Dashboard Atoms] Found dashboard:', dashboard.name, 'with', dashboard.panels?.length || 0, 'panels');
+        console.log('[Dashboard Atoms] Dashboard time range:', dashboard.timeRange);
         set(currentDashboardAtom, dashboard);
-        console.log(`[Dashboard] Loaded dashboard: ${dashboard.name}`);
       } else {
+        console.error('[Dashboard Atoms] Dashboard not found:', dashboardId);
         set(dashboardErrorAtom, "Dashboard not found");
       }
     } catch (error) {
+      console.error('[Dashboard Atoms] Error loading dashboard:', error);
       const errorMessage =
         error instanceof Error ? error.message : "Failed to load dashboard";
       set(dashboardErrorAtom, errorMessage);
@@ -117,15 +148,20 @@ export const loadDashboardAtom = atom(
 
 export const saveDashboardAtom = atom(
   null,
-  async (get, set, dashboard: Dashboard) => {
+  async (get, set, dashboard?: Dashboard) => {
     try {
+      const dashboardToSave = dashboard || get(currentDashboardAtom);
+      if (!dashboardToSave) {
+        throw new Error("No dashboard to save");
+      }
+      
       const dashboards = get(dashboardListAtom);
-      const existingIndex = dashboards.findIndex(d => d.id === dashboard.id);
+      const existingIndex = dashboards.findIndex(d => d.id === dashboardToSave.id);
       
       const updatedDashboard = {
-        ...dashboard,
+        ...dashboardToSave,
         metadata: {
-          ...dashboard.metadata,
+          ...dashboardToSave.metadata,
           updatedAt: new Date()
         }
       };
@@ -142,10 +178,50 @@ export const saveDashboardAtom = atom(
       
       set(dashboardListAtom, updatedDashboards);
       set(currentDashboardAtom, updatedDashboard);
-      console.log(`[Dashboard] Saved dashboard: ${dashboard.name}`);
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : "Failed to save dashboard";
+      set(dashboardErrorAtom, errorMessage);
+      throw error;
+    }
+  }
+);
+
+// Action atom to update dashboard
+export const updateDashboardAtom = atom(
+  null,
+  async (get, set, { dashboardId, updates }: { dashboardId: string; updates: Partial<Dashboard> }) => {
+    try {
+      const dashboards = get(dashboardListAtom);
+      const dashboardIndex = dashboards.findIndex(d => d.id === dashboardId);
+      
+      if (dashboardIndex === -1) {
+        throw new Error("Dashboard not found");
+      }
+      
+      const currentDashboard = dashboards[dashboardIndex];
+      const updatedDashboard = {
+        ...currentDashboard,
+        ...updates,
+        metadata: {
+          ...currentDashboard.metadata,
+          ...updates.metadata,
+          updatedAt: new Date(),
+        }
+      };
+      
+      // Update in list
+      const updatedDashboards = [...dashboards];
+      updatedDashboards[dashboardIndex] = updatedDashboard;
+      set(dashboardListAtom, updatedDashboards);
+      
+      // Update current dashboard if it's the one being modified
+      const current = get(currentDashboardAtom);
+      if (current?.id === dashboardId) {
+        set(currentDashboardAtom, updatedDashboard);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Failed to update dashboard";
       set(dashboardErrorAtom, errorMessage);
       throw error;
     }
@@ -166,8 +242,6 @@ export const deleteDashboardAtom = atom(
       if (current?.id === dashboardId) {
         set(currentDashboardAtom, null);
       }
-
-      console.log(`[Dashboard] Deleted dashboard: ${dashboardId}`);
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : "Failed to delete dashboard";
@@ -195,8 +269,6 @@ export const createDashboardAtom = atom(
       // Add to list
       const currentList = get(dashboardListAtom);
       set(dashboardListAtom, [newDashboard, ...currentList]);
-
-      console.log(`[Dashboard] Created dashboard: ${newDashboard.name}`);
       return newDashboard;
     } catch (error) {
       const errorMessage =
@@ -266,8 +338,6 @@ export const addPanelAtom = atom(
       if (currentDashboard?.id === dashboardId) {
         set(currentDashboardAtom, updatedDashboards[dashboardIndex]);
       }
-
-      console.log(`[Dashboard] Added panel to dashboard ${dashboardId}: ${panelWithId.title}`);
       return panelWithId;
     } catch (error) {
       const errorMessage =
@@ -315,7 +385,22 @@ export const removePanelAtom = atom(
         set(currentDashboardAtom, updatedDashboards[dashboardIndex]);
       }
 
-      console.log(`[Dashboard] Removed panel ${panelId} from dashboard ${dashboardId}`);
+      // Clean up panel data for deleted panel
+      const panelData = get(panelDataAtom);
+      const loadingStates = get(panelLoadingStatesAtom);
+      const newPanelData = new Map(panelData);
+      const newLoadingStates = new Map(loadingStates);
+      
+      // Remove all entries for this panel ID
+      for (const [key] of newPanelData) {
+        if (key === panelId || key.startsWith(panelId + '-')) {
+          newPanelData.delete(key);
+          newLoadingStates.delete(key);
+        }
+      }
+      
+      set(panelDataAtom, newPanelData);
+      set(panelLoadingStatesAtom, newLoadingStates);
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : "Failed to remove panel";
@@ -354,104 +439,44 @@ export function useDashboardSafely() {
 }
 
 // Action atom to refresh panel data
+// This now acts as a trigger - actual query execution happens in components via usePanelQuery hook
 export const refreshPanelDataAtom = atom(
   null,
-  async (get, set, { panelId, config }: { panelId: string; config: PanelConfig }) => {
-    const apiUrl = get(apiUrlAtom);
-    const currentDashboard = get(currentDashboardAtom);
+  async (get, set, { panelId }: { panelId: string; config?: PanelConfig }) => {
+    // Mark panel data as stale to trigger refresh in components
+    const panelData = new Map(get(panelDataAtom));
+    const currentData = panelData.get(panelId);
     
-    console.log('🔥 [Panel] Refreshing panel data for:', panelId);
-    console.log('🔥 [Panel] Config:', config);
-    console.log('🔥 [Panel] API URL:', apiUrl);
-    console.log('🔥 [Panel] Current dashboard:', !!currentDashboard);
-    
-    if (!apiUrl || !currentDashboard) {
-      console.error('🔥 [Panel] No API URL or dashboard available', { apiUrl, currentDashboard: !!currentDashboard });
-      return;
-    }
-    
-    // Update loading state
-    const loadingStates = new Map(get(panelLoadingStatesAtom));
-    loadingStates.set(panelId, true);
-    set(panelLoadingStatesAtom, loadingStates);
-    
-    try {
-      // Import here to avoid circular dependency
-      const { QueryProcessor } = await import('@/lib/query-processor');
-      const axios = (await import('axios')).default;
-      
-      // Process the query with time variables
-      const processedResult = QueryProcessor.process({
-        database: config.database || '',
-        query: config.query || '',
-        timeRange: currentDashboard.timeRange,
-        timeZone: currentDashboard.timeZone || 'UTC',
-        maxDataPoints: config.maxDataPoints || 1000,
-        timeField: config.timeField,
-        table: config.table,
-      });
-      
-      const response = await axios.post(
-        `${apiUrl}?db=${encodeURIComponent(config.database || '')}&format=ndjson`,
-        { query: processedResult.query },
-        {
-          responseType: 'text',
-          headers: {
-            'Content-Type': 'application/x-ndjson',
-            Accept: 'application/x-ndjson',
-          },
-        }
-      );
-      
-      // Parse NDJSON response
-      const lines = response.data.split('\n').filter((line: string) => line.trim());
-      const results: any[] = [];
-      
-      for (const line of lines) {
-        try {
-          results.push(JSON.parse(line));
-        } catch (e) {
-          console.error('Error parsing NDJSON line:', e);
-        }
-      }
-      
-      // Update panel data
-      const panelData = new Map(get(panelDataAtom));
-      panelData.set(panelId, { data: results });
-      set(panelDataAtom, panelData);
-      
-    } catch (error: any) {
-      console.error('🔥 [Panel] Failed to refresh panel', panelId, ':', error);
-      
-      // Update panel data with error
-      const panelData = new Map(get(panelDataAtom));
-      panelData.set(panelId, { 
-        data: [], 
-        error: error.message || 'Failed to load panel data' 
-      });
-      set(panelDataAtom, panelData);
-    } finally {
-      // Update loading state
-      const loadingStates = new Map(get(panelLoadingStatesAtom));
-      loadingStates.set(panelId, false);
-      set(panelLoadingStatesAtom, loadingStates);
-    }
+    // Add a refresh timestamp to trigger re-render in components watching this data
+    panelData.set(panelId, { 
+      ...(currentData || { data: [] }),
+      _refreshRequested: Date.now() 
+    });
+    set(panelDataAtom, panelData);
   }
 );
 
-// Action atom to refresh all panels
+// Action atom to refresh all panels - triggers refresh in components
 export const refreshAllPanelsAtom = atom(
   null,
   async (get, set) => {
     const currentDashboard = get(currentDashboardAtom);
-    if (!currentDashboard || !currentDashboard.panels) return;
+    if (!currentDashboard || !currentDashboard.panels) {
+      console.log('[Dashboard Atoms] No dashboard or panels to refresh');
+      return;
+    }
     
-    // Refresh all panels in parallel
-    const refreshPromises = currentDashboard.panels.map(panel => 
-      set(refreshPanelDataAtom, { panelId: panel.id, config: panel })
-    );
-    
-    await Promise.all(refreshPromises);
+    console.log('[Dashboard Atoms] Refreshing all', currentDashboard.panels.length, 'panels');
+    // Simply mark all panels as needing refresh
+    const panelData = new Map(get(panelDataAtom));
+    currentDashboard.panels.forEach(panel => {
+      const current = panelData.get(panel.id);
+      panelData.set(panel.id, {
+        ...(current || { data: [] }),
+        _refreshRequested: Date.now()
+      });
+    });
+    set(panelDataAtom, panelData);
   }
 );
 
@@ -543,13 +568,8 @@ export function useDashboard() {
   };
   
   const refreshPanelData = async (panelId: string) => {
-    if (!currentDashboard) return;
-    const panel = currentDashboard.panels.find(p => p.id === panelId);
-    if (!panel) {
-      console.error(`Panel ${panelId} not found`);
-      return;
-    }
-    await refreshPanelDataAction({ panelId, config: panel });
+    // Just trigger refresh - actual execution happens in components
+    await refreshPanelDataAction({ panelId });
   };
   
   const deletePanel = async (panelId: string) => {
@@ -572,12 +592,23 @@ export function useDashboard() {
   };
   
   const isPanelLoading = (panelId: string) => panelLoadingStates.get(panelId) || false;
-  const panelData = panelDataMap;
   
   // Layout management
-  const updateLayout = (layouts: any) => {
-    console.log("Updating layout", layouts);
-    // Implementation would update panel layouts
+  const updateLayout = async (layouts: PanelLayout[]) => {
+    console.log('[Dashboard] Updating layout with', layouts.length, 'panels');
+    if (!currentDashboard) return;
+    
+    // Update the layout in the current dashboard
+    const updatedDashboard = {
+      ...currentDashboard,
+      layout: {
+        ...currentDashboard.layout,
+        panels: layouts,
+      },
+    };
+    
+    // Save the updated dashboard
+    await saveDashboard(updatedDashboard);
   };
   
   return {
@@ -589,7 +620,7 @@ export function useDashboard() {
     error,
     isEditMode,
     selectedPanelId,
-    panelData,
+    panelData: panelDataMap,
     
     // Actions
     loadDashboard,

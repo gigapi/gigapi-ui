@@ -187,7 +187,7 @@ export default function App() {
         ) : (
           <>
             <AppWithRouter />
-            <Toaster position="bottom-right" richColors expand />
+            <Toaster position="top-right" richColors expand />
           </>
         )}
       </ThemeProvider>

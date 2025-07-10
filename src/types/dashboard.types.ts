@@ -79,6 +79,8 @@ export interface FieldMapping {
   seriesField?: string;
   labelField?: string;
   valueField?: string;
+  timeField?: string;
+  timeUnit?: 'ns' | 'us' | 'μs' | 'ms' | 's';
 }
 
 export interface FieldConfig {
@@ -239,10 +241,12 @@ export interface PanelProps {
   isEditMode?: boolean;
   isSelected?: boolean;
   onConfigChange?: (panelId: string, newConfig: Partial<PanelConfig>) => void;
-  onSelect?: (panelId: string) => void;
+  onSelect?: () => void;
+  onEdit?: () => void;
   onDelete?: (panelId: string) => void;
   onDuplicate?: (panelId: string) => void;
   onTimeRangeUpdate?: (timeRange: TimeRange) => void;
+  className?: string;
 }
 
 export interface DashboardContextType {

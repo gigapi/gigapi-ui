@@ -4,9 +4,9 @@ import "react-grid-layout/css/styles.css";
 import "react-resizable/css/styles.css";
 import { useDashboard } from "@/atoms";
 import { type PanelLayout, type GridLayoutItem } from "@/types/dashboard.types";
-import DashboardPanel from "./DashboardPanel";
+import { PanelWithData } from "./PanelDataProvider";
+import { PanelContainer } from "./PanelContainer";
 import { cn } from "@/lib/utils/class-utils";
-import type { PanelConfig } from "@/types/dashboard.types"; // Import PanelConfig
 
 const ResponsiveGridLayout = WidthProvider(Responsive);
 
@@ -18,12 +18,10 @@ interface DashboardGridProps {
 export default function DashboardGrid({ className, onEditPanel }: DashboardGridProps) {
   const {
     currentDashboard,
-    panelData,
     isEditMode,
     selectedPanelId,
     updateLayout,
     setSelectedPanel,
-    isPanelLoading,
   } = useDashboard();
 
   // Convert panel layouts to grid layout format
@@ -132,30 +130,33 @@ export default function DashboardGrid({ className, onEditPanel }: DashboardGridP
             {currentDashboard.layout.panels.map(panelLayout => {
               // Find the panel from the embedded panels array
               const panel = currentDashboard.panels.find(p => p.id === panelLayout.panelId);
-              const data = panelData.get(panelLayout.panelId);
-              
               
               if (!panel) {
-                console.warn(`Panel with id ${panelLayout.panelId} not found in dashboard panels`);
                 return null;
               }
 
               return (
-                <div key={panelLayout.panelId} className="panel-container w-full h-full">
-                  <DashboardPanel
+                <div key={panelLayout.panelId} className="w-full h-full">
+                  <PanelContainer
+                    panelId={panel.id}
                     config={panel}
-                    data={data?.data || []}
-                    error={data?.error}
-                    isLoading={isPanelLoading(panel.id)}
+                    dashboard={currentDashboard}
                     isEditMode={isEditMode}
                     isSelected={selectedPanelId === panel.id}
+                    onEdit={() => onEditPanel(panel.id)}
                     onSelect={() => setSelectedPanel(panel.id)}
-                    onConfigChange={(_updates: Partial<PanelConfig>) => {
-                      // Will be handled by the panel internally
-                    }}
-                    className="w-full h-full"
-                    onEditPanel={() => onEditPanel(panel.id)} // Use prop callback
-                  />
+                  >
+                    <PanelWithData
+                      panelId={panel.id}
+                      config={panel}
+                      dashboard={currentDashboard}
+                      className="w-full h-full"
+                      onEdit={() => onEditPanel(panel.id)}
+                      isEditMode={isEditMode}
+                      isSelected={selectedPanelId === panel.id}
+                      onSelect={() => setSelectedPanel(panel.id)}
+                    />
+                  </PanelContainer>
                 </div>
               );
             })}

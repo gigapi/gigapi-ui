@@ -1,53 +1,57 @@
-import { useState, useEffect } from "react";
+import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 
-import ChatSidebar from "@/components/MCP/ChatSidebar";
-import ChatInterface from "@/components/MCP/ChatInterface";
+import ChatSidebar from "@/components/chat/ChatSidebar";
+import ChatInterface from "@/components/chat/ChatInterface";
 import AppLayout from "@/components/navigation/AppLayout";
-import { useMCP } from "@/atoms";
+import { useChat } from "@/hooks/useChat";
 
 interface ChatPageProps {
   chatId?: string;
 }
 
 export default function ChatPage({ chatId }: ChatPageProps) {
-  const { switchChatSession, activeSession, createChatSession } = useMCP();
   const navigate = useNavigate();
-  const [activeSessionId, setActiveSessionId] = useState<string | null>(
-    chatId || "welcome"
-  );
+  const {
+    activeSession,
+    activeSessionId,
+    setActiveSessionId,
+    createSession,
+    connections,
+    sendMessage,
+    updateSessionContext,
+  } = useChat();
 
-  // Handle URL-based chat routing - only when chatId changes
+  // Handle URL-based chat routing
   useEffect(() => {
     if (chatId && chatId !== "welcome") {
-      // Switch to the chat session from URL
       setActiveSessionId(chatId);
-      switchChatSession(chatId);
     } else if (!chatId) {
-      // No chatId in URL, show welcome
-      setActiveSessionId("welcome");
+      setActiveSessionId(null);
     }
-  }, [chatId]); // Remove switchChatSession from deps to avoid loops
+  }, [chatId, setActiveSessionId]);
 
   const handleSessionSelect = (sessionId: string) => {
     if (sessionId === "welcome") {
-      // Navigate to base chat route for welcome
       navigate("/chat");
     } else {
-      // Navigate to specific chat route
       navigate(`/chat/${sessionId}`);
     }
   };
 
   const handleNewChat = async () => {
     try {
-      // Create a new chat session
-      const newSessionId = await createChatSession();
-      // Navigate to the new chat
+      if (connections.length === 0) {
+        return;
+      }
+
+      const newSessionId = createSession({
+        connectionId: connections[0].id,
+        title: "New Chat",
+      });
       navigate(`/chat/${newSessionId}`);
     } catch (error) {
       console.error("Failed to create new chat:", error);
-      // Fallback to welcome
       navigate("/chat");
     }
   };
@@ -56,10 +60,14 @@ export default function ChatPage({ chatId }: ChatPageProps) {
   // Create breadcrumbs with current chat name
   const breadcrumbs = [
     { label: "Assistant", href: "/chat" },
-    ...(activeSession && activeSessionId !== "welcome" 
-      ? [{ label: activeSession.title || "Chat", href: `/chat/${activeSession.id}` }]
-      : []
-    )
+    ...(activeSession
+      ? [
+          {
+            label: activeSession.title || "Chat",
+            href: `/chat/${activeSession.id}`,
+          },
+        ]
+      : []),
   ];
 
   return (
@@ -70,10 +78,23 @@ export default function ChatPage({ chatId }: ChatPageProps) {
           onSessionSelect={handleSessionSelect}
           onNewChat={handleNewChat}
         />
-        <ChatInterface
-          activeSessionId={activeSessionId}
-          onNewChat={handleNewChat}
-        />
+        {activeSession ? (
+          <ChatInterface
+            session={activeSession}
+            onSendMessage={(message) =>
+              sendMessage({ sessionId: activeSession.id, message })
+            }
+            onUpdateContext={(context) =>
+              updateSessionContext(activeSession.id, context)
+            }
+          />
+        ) : (
+          <div className="flex-1 flex items-center justify-center">
+            <p className="text-muted-foreground">
+              Select or create a chat to begin
+            </p>
+          </div>
+        )}
       </div>
     </AppLayout>
   );

@@ -228,7 +228,6 @@ export default function QueryResults() {
         // Exclude other fields starting with _ (like _processed_query)
         return !key.startsWith("_");
       });
-      console.log("Query results fields:", fields);
       setAvailableFields(fields);
     } else {
       setAvailableFields([]);
@@ -242,13 +241,7 @@ export default function QueryResults() {
 
       // Use enhanced analyzer if we have actual results data
       if (results && results.length > 0) {
-        console.log(
-          "Using enhanced schema analysis for",
-          results.length,
-          "records"
-        );
         const enhancedAnalysis = SchemaAnalyzer.analyzeDataset(results, 500);
-        console.log("Enhanced field analysis:", enhancedAnalysis);
 
         smartMapping = SchemaAnalyzer.getEnhancedSmartDefaults(
           enhancedAnalysis,
@@ -266,7 +259,6 @@ export default function QueryResults() {
         );
       }
 
-      console.log("Smart field mapping:", smartMapping);
 
       // Update panel config with smart defaults
       setPanelConfig((prev) => ({
@@ -316,7 +308,6 @@ export default function QueryResults() {
           setDashboards([]);
         }
       } catch (error) {
-        console.error("Failed to load dashboards:", error);
         setDashboards([]);
       }
     };
@@ -337,12 +328,10 @@ export default function QueryResults() {
     }
 
     if (error) {
-      // Use queryErrorDetail if available, otherwise fallback to simpler error handling
       const detailedError = queryErrorDetail || error;
+      alert(`Query failed: ${error}`);
 
-      // Format SQL errors by preserving newlines and formatting code parts
       const formattedError = detailedError.split("\n").map((line, i) => {
-        // Highlight SQL code snippets that often appear after "LINE X:"
         if (line.includes("LINE") && line.includes("^")) {
           const parts = line.split("^");
           return (
@@ -549,8 +538,7 @@ export default function QueryResults() {
       if (typeof rawJson === "string") {
         const parsed = parseNDJSON(rawJson);
         if (parsed.errors.length > 0) {
-          console.warn("NDJSON parsing errors:", parsed.errors);
-        }
+          }
         records = parsed.records;
       } else if (Array.isArray(results)) {
         records = results;
@@ -633,7 +621,7 @@ export default function QueryResults() {
         const newDashboard = await createDashboard({
           name: newDashboardName,
           description: `Dashboard created from query: ${query.slice(0, 50)}...`,
-          timeRange: { type: "relative", from: "1h", to: "now" },
+          timeRange: { type: "relative", from: "now-1h", to: "now" },
           timeZone: "UTC",
           layout: { panels: [] },
         });
@@ -665,8 +653,6 @@ export default function QueryResults() {
         },
       };
 
-      console.log("Saving panel config:", finalConfig);
-      console.log("Target dashboard ID:", dashboardId);
 
       // Add panel to the specified dashboard (no need to load it first)
       await addPanel({ panelData: finalConfig, dashboardId });

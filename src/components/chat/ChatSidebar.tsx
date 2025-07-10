@@ -31,7 +31,7 @@ import {
   CheckCheckIcon,
 } from "lucide-react";
 import { toast } from "sonner";
-import MCPConnectionSheet from "./MCPConnectionSheet";
+import AIConnectionSheet from "./AIConnectionSheet";
 import CustomInstructionsSheet from "./CustomInstructionsSheet";
 import ConfirmAction from "@/components/shared/ConfirmAction";
 import {
@@ -445,7 +445,7 @@ export default function ChatSidebar({
                                 {connection.name}
                               </div>
                               <div className="text-xs text-muted-foreground truncate">
-                                {connection.model}
+                                {connection.provider}
                               </div>
                             </div>
                           </div>
@@ -639,9 +639,9 @@ export default function ChatSidebar({
       </div>
 
       {/* Connection Dialog */}
-      <MCPConnectionSheet
+      <AIConnectionSheet
         isOpen={showConnectionDialog}
-        onClose={() => setShowConnectionDialog(false)}
+        onOpenChange={setShowConnectionDialog}
       />
 
       {/* Custom Instructions Dialog */}

@@ -5,7 +5,18 @@ import {
   useSearchParams,
   useNavigate,
 } from "react-router-dom";
-import { useDashboard } from "@/atoms";
+import { useAtom, useAtomValue, useSetAtom } from "jotai";
+import {
+  currentDashboardAtom,
+  dashboardLoadingAtom,
+  dashboardErrorAtom,
+  isEditModeAtom,
+  loadDashboardAtom,
+  updateDashboardAtom,
+  saveDashboardAtom,
+  refreshAllPanelsAtom,
+  clearCurrentDashboardAtom,
+} from "@/atoms/dashboard-atoms";
 import DashboardGrid from "@/components/dashboard/DashboardGrid";
 import { Button } from "@/components/ui/button";
 import {
@@ -15,6 +26,8 @@ import {
   RefreshCw,
   Settings,
   Download,
+  Upload,
+  Share,
   MoreVertical,
   Info,
 } from "lucide-react";
@@ -62,22 +75,17 @@ export default function DashboardView() {
   const { dashboardId } = useParams<{ dashboardId: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
-  const {
-    currentDashboard,
-    panels,
-    loadDashboard,
-    loading,
-    error,
-    setEditMode,
-    isEditMode,
-    clearCurrentDashboard,
-    updateDashboard,
-    refreshAllPanels,
-    saveDashboard,
-    updateDashboardTimeRange,
-    resetDashboardTimeRange,
-    updateDashboardTimeZone,
-  } = useDashboard();
+  
+  // Atoms
+  const [currentDashboard] = useAtom(currentDashboardAtom);
+  const loading = useAtomValue(dashboardLoadingAtom);
+  const error = useAtomValue(dashboardErrorAtom);
+  const [isEditMode, setIsEditMode] = useAtom(isEditModeAtom);
+  const loadDashboard = useSetAtom(loadDashboardAtom);
+  const updateDashboard = useSetAtom(updateDashboardAtom);
+  const saveDashboard = useSetAtom(saveDashboardAtom);
+  const refreshAllPanels = useSetAtom(refreshAllPanelsAtom);
+  const clearCurrentDashboard = useSetAtom(clearCurrentDashboardAtom);
 
   const [isSettingsSheetOpen, setIsSettingsSheetOpen] = useState(false);
 
@@ -86,25 +94,26 @@ export default function DashboardView() {
   }, [navigate]);
 
   useEffect(() => {
+    console.log('[DashboardView] Dashboard ID changed:', dashboardId);
     if (dashboardId) {
+      console.log('[DashboardView] Loading dashboard...');
       loadDashboard(dashboardId);
     }
     return () => {
+      console.log('[DashboardView] Clearing current dashboard on unmount');
       clearCurrentDashboard();
     };
   }, [dashboardId, loadDashboard, clearCurrentDashboard]);
 
-  // Refresh all panels when dashboard is loaded
+  // Log dashboard changes for debugging
   useEffect(() => {
-    if (currentDashboard && currentDashboard.panels.length > 0) {
-      refreshAllPanels();
-    }
-  }, [currentDashboard?.id]); // Only refresh when dashboard ID changes
+    console.log('[DashboardView] Current dashboard changed:', currentDashboard?.name, 'with', currentDashboard?.panels?.length || 0, 'panels');
+  }, [currentDashboard?.id]); // Only log when dashboard ID changes
 
   useEffect(() => {
     const edit = searchParams.get("edit");
-    setEditMode(edit === "true");
-  }, [searchParams, setEditMode]);
+    setIsEditMode(edit === "true");
+  }, [searchParams, setIsEditMode]);
 
   const handleOpenPanelEdit = (panelId?: string) => {
     if (!dashboardId) return;
@@ -122,8 +131,9 @@ export default function DashboardView() {
     async (interval: number) => {
       if (!currentDashboard) return;
       try {
-        await updateDashboard(currentDashboard.id, {
-          refreshInterval: interval,
+        await updateDashboard({
+          dashboardId: currentDashboard.id,
+          updates: { refreshInterval: interval },
         });
         toast.success(
           `Auto-refresh ${
@@ -153,14 +163,14 @@ export default function DashboardView() {
   const handleSave = useCallback(async () => {
     if (!currentDashboard) return;
     try {
-      await saveDashboard(currentDashboard);
-      setEditMode(false);
+      await saveDashboard();
+      setIsEditMode(false);
       setSearchParams({}, { replace: true });
       toast.success("Dashboard saved");
     } catch (err) {
       toast.error("Failed to save dashboard");
     }
-  }, [currentDashboard, saveDashboard, setEditMode, setSearchParams]);
+  }, [currentDashboard, saveDashboard, setIsEditMode, setSearchParams]);
 
   const handleExport = useCallback(() => {
     if (!currentDashboard) return;
@@ -169,7 +179,7 @@ export default function DashboardView() {
       // Create export data
       const exportData = {
         dashboard: currentDashboard,
-        panels: panels,
+        panels: currentDashboard.panels,
         exportedAt: new Date().toISOString(),
         version: "1.0",
       };
@@ -197,13 +207,67 @@ export default function DashboardView() {
 
   const handleToggleEditMode = () => {
     const newEditMode = !isEditMode;
-    setEditMode(newEditMode);
+    setIsEditMode(newEditMode);
     if (newEditMode) {
       setSearchParams({ edit: "true" }, { replace: true });
     } else {
       setSearchParams({}, { replace: true });
     }
   };
+
+  const handleTimeRangeChange = useCallback(
+    async (timeRange: any) => {
+      console.log('[DashboardView] Time range change requested:', timeRange);
+      if (!currentDashboard) {
+        console.log('[DashboardView] No current dashboard, skipping time range update');
+        return;
+      }
+      try {
+        console.log('[DashboardView] Updating dashboard time range');
+        await updateDashboard({
+          dashboardId: currentDashboard.id,
+          updates: { timeRange },
+        });
+        console.log('[DashboardView] Time range updated, refreshing panels');
+        await refreshAllPanels();
+        toast.success("Time range updated");
+      } catch (err) {
+        console.error('[DashboardView] Failed to update time range:', err);
+        toast.error("Failed to update time range");
+      }
+    },
+    [currentDashboard, updateDashboard, refreshAllPanels]
+  );
+
+  const handleTimeZoneChange = useCallback(
+    async (timeZone: string) => {
+      if (!currentDashboard) return;
+      try {
+        await updateDashboard({
+          dashboardId: currentDashboard.id,
+          updates: { timeZone },
+        });
+        await refreshAllPanels();
+        toast.success("Timezone updated");
+      } catch (err) {
+        toast.error("Failed to update timezone");
+      }
+    },
+    [currentDashboard, updateDashboard, refreshAllPanels]
+  );
+
+  // Auto-refresh effect
+  useEffect(() => {
+    if (!currentDashboard?.refreshInterval || currentDashboard.refreshInterval <= 0) {
+      return;
+    }
+    
+    const interval = setInterval(() => {
+      refreshAllPanels();
+    }, currentDashboard.refreshInterval * 1000);
+    
+    return () => clearInterval(interval);
+  }, [currentDashboard?.refreshInterval, refreshAllPanels]);
 
   if (loading) {
     return (
@@ -320,9 +384,8 @@ export default function DashboardView() {
           }
         }
         timeZone={currentDashboard.timeZone || "UTC"}
-        onTimeRangeChange={updateDashboardTimeRange}
-        onTimeZoneChange={updateDashboardTimeZone}
-        onReset={resetDashboardTimeRange}
+        onTimeRangeChange={handleTimeRangeChange}
+        onTimeZoneChange={handleTimeZoneChange}
         disabled={isEditMode}
         showTimeZone={false}
       />
@@ -419,9 +482,17 @@ export default function DashboardView() {
             Dashboard Settings
           </DropdownMenuItem>
           <DropdownMenuSeparator />
+          <DropdownMenuItem disabled={isEditMode}>
+            <Share className="w-4 h-4 mr-2" />
+            Share Dashboard
+          </DropdownMenuItem>
           <DropdownMenuItem onSelect={handleExport} disabled={isEditMode}>
             <Download className="w-4 h-4 mr-2" />
             Export
+          </DropdownMenuItem>
+          <DropdownMenuItem disabled={isEditMode}>
+            <Upload className="w-4 h-4 mr-2" />
+            Import
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

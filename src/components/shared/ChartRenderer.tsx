@@ -43,6 +43,7 @@ export function ChartRenderer({
 }: ChartRendererProps) {
   const chartRef = useRef<HTMLDivElement>(null);
   const chartInstance = useRef<echarts.ECharts | null>(null);
+  const [hiddenSeries, setHiddenSeries] = useState<Set<string>>(new Set());
 
   // Detect current theme
   const [isDarkMode, setIsDarkMode] = useState(() =>
@@ -63,8 +64,20 @@ export function ChartRenderer({
   }, []);
 
   const transformedData = useMemo(() => {
-    if (!data || data.length === 0) return null;
-    return transformDataForPanel(data, config);
+    if (!data || data.length === 0) {
+      return null;
+    }
+    const transformed = transformDataForPanel(data, config);
+    if (transformed && transformed.data.length > 0) {
+      console.log('[ChartRenderer] Data transformation result:', {
+        panelId: config.id,
+        inputRecords: data.length,
+        outputPoints: transformed.data.length,
+        series: transformed.series,
+        fieldMapping: config.fieldMapping,
+      });
+    }
+    return transformed;
   }, [data, config]);
 
   // Unified Grafana-style time formatter
@@ -80,7 +93,9 @@ export function ChartRenderer({
   };
 
   const chartOption = useMemo(() => {
-    if (!transformedData || transformedData.data.length === 0) return null;
+    if (!transformedData || transformedData.data.length === 0) {
+      return null;
+    }
 
     const { data: chartData } = transformedData;
     const { type } = config;
@@ -197,8 +212,11 @@ export function ChartRenderer({
           });
 
           orderedParams.forEach((param: any) => {
-            const value = param.value[1];
             const seriesName = param.seriesName;
+            // Skip hidden series
+            if (hiddenSeries.has(seriesName)) return;
+            
+            const value = param.value[1];
             const color = param.color;
             const unit = fieldConfig?.unit || "";
             const decimals = fieldConfig?.decimals ?? 2;
@@ -450,26 +468,71 @@ export function ChartRenderer({
       default:
         return null;
     }
-  }, [transformedData, config, isDarkMode, isEditMode]);
+  }, [transformedData, config, isDarkMode, isEditMode, hiddenSeries, onTimeRangeUpdate]);
 
   // Initialize chart
   useEffect(() => {
     if (!chartRef.current) return;
 
-    chartInstance.current = echarts.init(chartRef.current, undefined, {
-      renderer: "canvas",
-    });
+    // Dispose existing instance if any
+    if (chartInstance.current) {
+      chartInstance.current.dispose();
+    }
+
+    try {
+      chartInstance.current = echarts.init(chartRef.current, undefined, {
+        renderer: "canvas",
+      });
+      console.log('[ChartRenderer] Chart instance initialized');
+    } catch (error) {
+      console.error('[ChartRenderer] Failed to initialize chart:', error);
+    }
 
     return () => {
-      chartInstance.current?.dispose();
+      if (chartInstance.current) {
+        chartInstance.current.dispose();
+        chartInstance.current = null;
+      }
     };
   }, []);
 
   // Update chart option
   useEffect(() => {
-    if (!chartInstance.current || !chartOption) return;
-    chartInstance.current.setOption(chartOption, true);
+    if (!chartInstance.current || !chartOption) {
+      if (!chartInstance.current) {
+        console.warn('[ChartRenderer] Chart instance not available');
+      }
+      return;
+    }
+    
+    try {
+      chartInstance.current.setOption(chartOption, true);
+      console.log('[ChartRenderer] Chart option set successfully');
+    } catch (error) {
+      console.error('[ChartRenderer] Failed to set chart option:', error);
+    }
   }, [chartOption]);
+
+  // Handle legend selection events
+  useEffect(() => {
+    if (!chartInstance.current) return;
+
+    const handleLegendSelectChanged = (params: any) => {
+      const newHiddenSeries = new Set<string>();
+      Object.entries(params.selected).forEach(([name, isSelected]) => {
+        if (!isSelected) {
+          newHiddenSeries.add(name);
+        }
+      });
+      setHiddenSeries(newHiddenSeries);
+    };
+
+    chartInstance.current.on('legendselectchanged', handleLegendSelectChanged);
+
+    return () => {
+      chartInstance.current?.off('legendselectchanged', handleLegendSelectChanged);
+    };
+  }, []);
 
   // Handle resize
   useEffect(() => {
@@ -482,7 +545,13 @@ export function ChartRenderer({
       resizeObserver.observe(chartRef.current);
     }
 
-    return () => resizeObserver.disconnect();
+    // Also resize on mount after a delay to ensure proper sizing
+    const timeoutId = setTimeout(resizeChart, 100);
+
+    return () => {
+      resizeObserver.disconnect();
+      clearTimeout(timeoutId);
+    };
   }, []);
 
   // Handle brush selection for time range updates
@@ -535,14 +604,14 @@ export function ChartRenderer({
   }
 
   return (
-    <div style={{ width, height }} className="w-full h-full overflow-hidden">
+    <div className="w-full h-full overflow-hidden" style={{ width, height }}>
       <div
         ref={chartRef}
         className="w-full h-full"
         style={{
           minHeight: typeof height === "string" ? height : `${height}px`,
-          maxHeight: "100%",
-          maxWidth: "100%",
+          height: "100%",
+          width: "100%",
         }}
       />
     </div>

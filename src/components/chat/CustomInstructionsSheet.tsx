@@ -53,7 +53,7 @@ export default function CustomInstructionsSheet({
   onClose,
   instruction,
 }: CustomInstructionsSheetProps) {
-  const { addCustomInstruction, updateCustomInstruction } = useMCP();
+  const { addCustomInstruction, updateCustomInstruction, toggleCustomInstruction } = useMCP();
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const isEditing = !!instruction;
@@ -91,18 +91,13 @@ export default function CustomInstructionsSheet({
 
     try {
       if (isEditing && instruction) {
-        await updateCustomInstruction({
-          ...instruction,
-          name: data.name.trim(),
-          content: data.content.trim(),
-          isActive: data.isActive,
-        });
+        await updateCustomInstruction(instruction.id, data.content.trim());
+        // Toggle active state if needed
+        if (instruction.isActive !== data.isActive) {
+          await toggleCustomInstruction(instruction.id);
+        }
       } else {
-        await addCustomInstruction({
-          name: data.name.trim(),
-          content: data.content.trim(),
-          isActive: data.isActive,
-        });
+        await addCustomInstruction(data.content.trim());
       }
 
       form.reset();
