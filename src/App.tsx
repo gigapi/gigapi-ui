@@ -9,6 +9,7 @@ import { RefreshCw } from "lucide-react";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
 import { useAtom, useSetAtom } from "jotai";
+import "@/components/ui/toast-fixes.css";
 
 // New clean atoms
 import { connectionStateAtom, isConnectedAtom, connectAtom, apiUrlAtom } from "@/atoms";
@@ -25,6 +26,7 @@ import ChatPage from "@/pages/ChatPage";
 import { AppSidebar } from "@/components/navigation/app-sidebar";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { CommandPalette } from "@/components/shared/CommandPalette";
+import { ArtifactProvider } from "@/contexts/ArtifactContext";
 
 // const VERSION = import.meta.env.PACKAGE_VERSION;
 
@@ -51,10 +53,17 @@ function AppInitializer() {
       return;
     }
 
+    console.log("🔥 [AppInitializer] API URL loaded:", apiUrl);
+    console.log("🔥 [AppInitializer] localStorage status:", {
+      hasSchemaCache: !!localStorage.getItem('gigapi_schema_cache'),
+      selectedDb: localStorage.getItem('gigapi_selected_db'),
+      selectedTable: localStorage.getItem('gigapi_selected_table')
+    });
+
     // Try to connect on app start
-    console.log("🔥 [AppInitializer] Starting initial connection");
-    connect().catch(() => {
-      // Connection failure is handled by the atom
+    console.log("🔥 [AppInitializer] Starting initial connection at", new Date().toISOString());
+    connect().catch((error) => {
+      console.error("🔥 [AppInitializer] Connection failed:", error);
     });
   }, [connect, apiUrl]);
 
@@ -167,7 +176,8 @@ export default function App() {
   return (
     <ErrorBoundary>
       <ThemeProvider defaultTheme="dark" storageKey="gigapi-theme">
-        <AppInitializer />
+        <ArtifactProvider>
+          <AppInitializer />
 
         {/* Show connection page for non-connected states */}
         {!isConnected ? (
@@ -187,9 +197,10 @@ export default function App() {
         ) : (
           <>
             <AppWithRouter />
-            <Toaster position="top-right" richColors expand />
+            <Toaster position="top-right" richColors expand closeButton duration={3000} />
           </>
         )}
+        </ArtifactProvider>
       </ThemeProvider>
     </ErrorBoundary>
   );

@@ -10,29 +10,45 @@ import {
 import AppLayout from "@/components/navigation/AppLayout";
 import { initializeDatabaseAtom, isConnectedAtom } from "@/atoms";
 
-export function Home() {
+function Home() {
   const initializeDatabase = useSetAtom(initializeDatabaseAtom);
   const isConnected = useAtomValue(isConnectedAtom);
   const initializedRef = useRef(false);
-  
-  console.log("🔥 HOME RENDER:", { isConnected, initializedRef: initializedRef.current, timestamp: new Date().toISOString() });
+
+  console.log("🔥 HOME RENDER:", {
+    isConnected,
+    initializedRef: initializedRef.current,
+    timestamp: new Date().toISOString(),
+  });
 
   // Initialize database and tables when connected (only once)
   useEffect(() => {
+    console.log("🔥 [Home] useEffect triggered:", {
+      isConnected,
+      initializedRef: initializedRef.current,
+      timestamp: new Date().toISOString(),
+    });
+
     if (isConnected && !initializedRef.current) {
-      console.log("[Home] Initializing database for the first time");
+      console.log(
+        "🔥 [Home] Initializing database for the first time at",
+        new Date().toISOString()
+      );
       initializedRef.current = true;
       initializeDatabase();
     } else if (!isConnected) {
       // Reset initialization flag when disconnected
+      console.log("🔥 [Home] Not connected, resetting initialization flag");
       initializedRef.current = false;
+    } else {
+      console.log("🔥 [Home] Skipping initialization:", {
+        reason: isConnected ? "already initialized" : "not connected",
+      });
     }
   }, [isConnected, initializeDatabase]);
 
   // Memoize breadcrumbs to prevent unnecessary re-renders
-  const breadcrumbs = useMemo(() => [
-    { label: "Query Interface" }
-  ], []);
+  const breadcrumbs = useMemo(() => [{ label: "Query Interface" }], []);
 
   return (
     <AppLayout breadcrumbs={breadcrumbs} showDatabaseControls={true}>

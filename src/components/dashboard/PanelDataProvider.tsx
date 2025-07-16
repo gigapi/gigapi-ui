@@ -1,16 +1,21 @@
-/**
- * PanelDataProvider Component
- * Wraps dashboard panels to provide centralized data fetching and transformation
- */
-
-import React, { createContext, useContext, useEffect, useRef, useCallback } from "react";
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useRef,
+  useCallback,
+} from "react";
 import { useAtomValue } from "jotai";
 import { panelDataAtom, useDashboard } from "@/atoms/dashboard-atoms";
 import { usePanelQuery } from "@/hooks/usePanelQuery";
-import { type PanelConfig, type Dashboard, type NDJSONRecord } from "@/types/dashboard.types";
+import {
+  type PanelConfig,
+  type Dashboard,
+  type NDJSONRecord,
+} from "@/types/dashboard.types";
 import { type TransformedData } from "@/lib/dashboard/data-transformers";
 import { getPanelComponent } from "./panels";
-import { Loader } from "lucide-react";
+import Loader from "@/components/shared/Loader";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { PanelErrorBoundary } from "./PanelErrorBoundary";
 
@@ -57,34 +62,35 @@ export function PanelDataProvider({
 
   const lastExecutionRef = useRef<string>("");
   const executeRef = useRef(execute);
-  
+
   // Update execute ref when it changes
   useEffect(() => {
     executeRef.current = execute;
   }, [execute]);
-  
+
   // Single effect to handle all execution triggers
   useEffect(() => {
     if (!autoRefresh) return;
-    
+
     const shouldExecute = config.query && config.query.trim();
-    
+
     if (shouldExecute) {
       // Create a unique key for this execution
-      const executionKey = `${panelId}-${config.query}-${JSON.stringify(dashboard.timeRange)}-${refreshTrigger}`;
-      
+      const executionKey = `${panelId}-${config.query}-${JSON.stringify(
+        dashboard.timeRange
+      )}-${refreshTrigger}`;
+
       // Skip if this exact execution already happened
       if (executionKey === lastExecutionRef.current) {
         return;
       }
-      
+
       lastExecutionRef.current = executionKey;
-      
+
       // Use ref to avoid dependency on execute
       executeRef.current({ force: !!refreshTrigger });
     }
   }, [panelId, config.query, dashboard.timeRange, refreshTrigger, autoRefresh]);
-
 
   const contextValue: PanelDataContextValue = {
     data,
@@ -129,13 +135,16 @@ export function EnhancedPanel({
   const { data, loading, error } = usePanelData();
   const PanelComponent = getPanelComponent(config.type);
   const { updateDashboardTimeRange } = useDashboard();
-  
-  const handleTimeRangeUpdate = useCallback((timeRange: any) => {
-    console.log('[EnhancedPanel] Time range selected from chart:', timeRange);
-    if (updateDashboardTimeRange) {
-      updateDashboardTimeRange(timeRange);
-    }
-  }, [updateDashboardTimeRange]);
+
+  const handleTimeRangeUpdate = useCallback(
+    (timeRange: any) => {
+      console.log("[EnhancedPanel] Time range selected from chart:", timeRange);
+      if (updateDashboardTimeRange) {
+        updateDashboardTimeRange(timeRange);
+      }
+    },
+    [updateDashboardTimeRange]
+  );
 
   // Log panel state changes for debugging (only when data changes)
   useEffect(() => {
@@ -153,7 +162,7 @@ export function EnhancedPanel({
   if (loading || (!data && !error)) {
     return (
       <div className={`flex items-center justify-center h-full ${className}`}>
-        <Loader className="h-8 w-8 animate-spin text-gray-400" />
+        <Loader className="w-8 h-8" />
       </div>
     );
   }
@@ -175,9 +184,7 @@ export function EnhancedPanel({
     return (
       <div className={`p-4 ${className}`}>
         <Alert variant="destructive">
-          <AlertDescription>
-            Unknown panel type: {config.type}
-          </AlertDescription>
+          <AlertDescription>Unknown panel type: {config.type}</AlertDescription>
         </Alert>
       </div>
     );
@@ -204,7 +211,7 @@ export function PanelWithData(props: EnhancedPanelProps) {
   // Watch for refresh requests from the dashboard
   const panelData = useAtomValue(panelDataAtom);
   const refreshTrigger = panelData.get(props.panelId)?._refreshRequested;
-  
+
   return (
     <PanelDataProvider
       panelId={props.panelId}
@@ -215,17 +222,4 @@ export function PanelWithData(props: EnhancedPanelProps) {
       <EnhancedPanel {...props} />
     </PanelDataProvider>
   );
-}
-
-/**
- * Hook to refresh panel data from outside the provider
- */
-export function usePanelRefresh(_panelId: string) {
-  const [refreshTrigger, setRefreshTrigger] = React.useState(0);
-  
-  const refresh = React.useCallback(() => {
-    setRefreshTrigger(Date.now());
-  }, []);
-  
-  return { refreshTrigger, refresh };
 }

@@ -15,7 +15,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import Loader from "@/components/Loader";
+import Loader from "@/components/shared/Loader";
 import { HashQueryUtils } from "@/lib/";
 import { toast } from "sonner";
 import type { TimeRange } from "@/types/utils.types";
@@ -95,24 +95,33 @@ export default function QueryEditorToolbar({
       {/* Desktop Layout */}
       <div className="hidden lg:flex items-center p-2">
         <div className="flex items-center gap-2">
-          <Button
-            onClick={onRunQuery}
-            disabled={isLoading || !selectedDb}
-            className="h-8 px-3"
-            variant="default"
-          >
-            {isLoading ? (
-              <>
-                <Loader className="h-4 w-4" />
-                <span className="ml-1">Running...</span>
-              </>
-            ) : (
-              <>
-                <Play className="mr-1.5 h-3.5 w-3.5" />
-                Run Query
-              </>
-            )}
-          </Button>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  onClick={onRunQuery}
+                  disabled={isLoading || !selectedDb}
+                  className="h-8 px-3"
+                  variant="default"
+                >
+                  {isLoading ? (
+                    <>
+                      <Loader className="h-4 w-4" />
+                      <span className="ml-1">Running...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Play className="mr-1.5 h-3.5 w-3.5" />
+                      Run Query
+                    </>
+                  )}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                <p className="text-xs">⌘R or ⌘Enter</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
 
           <div className="flex items-center gap-1">
             <TooltipProvider>

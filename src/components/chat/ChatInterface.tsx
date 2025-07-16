@@ -1,50 +1,46 @@
 import { useState, useRef, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
+import rehypeHighlight from "rehype-highlight";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import {
   Bot,
-  ChevronDown,
-  Check,
-  Settings,
-  Database,
-  Table,
-  FileText,
-  Zap,
   Copy,
+  User,
+  Brain,
+  ChevronDown,
+  ChevronUp,
+  Check,
 } from "lucide-react";
 import { toast } from "sonner";
-import { useAtom, useSetAtom } from "jotai";
-import { aiConnectionsAtom, updateSessionConnectionAtom } from "@/atoms/chat-atoms";
-import ChatArtifact from "./ChatArtifact";
-import ChatContextSheet from "./ChatContextSheet";
-import ChatInput from "./ChatInput";
+import { useSetAtom } from "jotai";
+import { updateSessionConnectionAtom } from "@/atoms/chat-atoms";
+import ArtifactRendererWrapper from "./artifacts/ArtifactRendererWrapper";
+import ChatInputWithMentions from "./ChatInputWithMentions";
 import type { ChatSession, ChatMessage } from "@/types/chat.types";
+import "katex/dist/katex.min.css";
+import "highlight.js/styles/github-dark.css";
+import Logo from "/logo.svg";
 
 interface ChatInterfaceProps {
   session: ChatSession;
-  onSendMessage: (message: string) => Promise<void>;
-  onUpdateContext: (context: ChatSession["context"]) => void;
+  onSendMessage: (message: string, isAgentic?: boolean) => Promise<void>;
 }
 
 export default function ChatInterface({
   session,
   onSendMessage,
-  onUpdateContext,
 }: ChatInterfaceProps) {
   const [inputMessage, setInputMessage] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [isContextDialogOpen, setIsContextDialogOpen] = useState(false);
-  const [aiConnections] = useAtom(aiConnectionsAtom);
+  const [isAgentic, setIsAgentic] = useState(false);
+  const [expandedThinking, setExpandedThinking] = useState<Set<string>>(
+    new Set()
+  );
   const updateSessionConnection = useSetAtom(updateSessionConnectionAtom);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -52,13 +48,6 @@ export default function ChatInterface({
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [session.messages]);
-
-  // Open context sheet for new chats without configuration
-  useEffect(() => {
-    if (session && (!session.model || !session.aiConnectionId || session.context.databases.selected.length === 0)) {
-      setIsContextDialogOpen(true);
-    }
-  }, [session.id]); // Only run when session ID changes
 
   const handleSendMessage = async () => {
     if (!inputMessage.trim() || isLoading) return;
@@ -68,7 +57,7 @@ export default function ChatInterface({
     setIsLoading(true);
 
     try {
-      await onSendMessage(messageToSend);
+      await onSendMessage(messageToSend, isAgentic);
     } catch (err) {
       setInputMessage(messageToSend); // Restore message on error
       toast.error("Failed to send message");
@@ -78,142 +67,270 @@ export default function ChatInterface({
     }
   };
 
+  const [copiedCode, setCopiedCode] = useState<string>("");
 
-  // Calculate context summary
-  const getContextSummary = () => {
-    const { context } = session;
-    const dbCount = context.databases.selected.length;
-    const tableCount = Object.values(context.tables).reduce(
-      (sum, db) => sum + db.selected.length,
-      0
-    );
-
-    if (context.databases.includeAll) {
-      return "All databases";
-    } else if (dbCount === 0) {
-      return "No context configured";
-    } else {
-      return `${dbCount} DB${dbCount !== 1 ? "s" : ""}, ${tableCount} table${
-        tableCount !== 1 ? "s" : ""
-      }`;
+  const copyToClipboard = async (text: string, id: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedCode(id);
+      toast.success("Copied to clipboard");
+      setTimeout(() => setCopiedCode(""), 2000);
+    } catch (err) {
+      toast.error("Failed to copy");
     }
   };
 
   const renderMessage = (message: ChatMessage) => {
     const isUser = message.role === "user";
+    const isStreaming = message.metadata?.isStreaming === true;
 
     return (
-      <div key={message.id} className="group relative mb-6">
-        <div className="flex gap-4">
+      <div
+        key={message.id}
+        className={`group relative mb-6 ${isUser ? "" : ""}`}
+      >
+        <div className={`flex gap-3 ${isUser ? "" : ""}`}>
           {/* Avatar */}
           <div className="flex-shrink-0">
             <div
-              className={`w-8 h-8 rounded-full flex items-center justify-center ${
-                isUser ? "bg-primary text-primary-foreground" : "bg-muted"
+              className={`w-8 h-8 rounded-sm flex items-center justify-center ${
+                isUser
+                  ? "bg-gradient-to-br from-indigo-500 to-purple-600 text-white shadow-sm"
+                  : "bg-black text-white"
               }`}
             >
               {isUser ? (
-                <span className="text-sm font-medium">U</span>
+                <User className="w-4 h-4" strokeWidth={2.5} />
               ) : (
-                <Bot className="w-4 h-4" />
+                <Bot className="w-4 h-4" strokeWidth={2.5} />
               )}
             </div>
           </div>
 
           {/* Message content */}
-          <div className="flex-1 space-y-2">
-            <div className="prose prose-sm dark:prose-invert max-w-none text-sm">
-              {isUser ? (
-                <p className="whitespace-pre-wrap bg-foreground/5 p-2 rounded-md">{message.content}</p>
-              ) : (
-                <ReactMarkdown
-                  components={{
-                    p: ({ children }) => (
-                      <p className="mb-3 last:mb-0">{children}</p>
-                    ),
-                    code: ({ className, children, ...props }: any) => {
-                      const match = /language-(\w+)/.exec(className || "");
-                      const isInline = !className || !match;
-                      return !isInline ? (
-                        <div className="my-3 relative group">
-                          <pre className="bg-muted rounded-lg p-4 overflow-x-auto">
-                            <code className={`language-${match[1]}`} {...props}>
-                              {children}
-                            </code>
-                          </pre>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="absolute top-2 right-2 h-8 w-8 opacity-0 group-hover:opacity-100"
-                            onClick={() => {
-                              navigator.clipboard.writeText(String(children));
-                              toast.success("Code copied");
+          <div className="flex-1 min-w-0">
+            <div>
+              {/* Role label */}
+              <div className="text-xs font-semibold text-foreground/70 mb-1">
+                {isUser ? "You" : "Assistant"}
+              </div>
+
+              {/* Message content */}
+              <div className="">
+                <div className="text-[15px] leading-[1.8]">
+                  {isUser ? (
+                    <p className="whitespace-pre-wrap text-foreground/90">
+                      {message.content}
+                    </p>
+                  ) : (
+                    <div className="prose prose-sm dark:prose-invert max-w-none prose-p:text-[15px] prose-p:leading-[1.8] prose-p:text-foreground/90 prose-headings:text-foreground prose-strong:text-foreground prose-code:text-foreground prose-pre:bg-transparent prose-pre:p-0 prose-table:text-sm prose-td:p-2 prose-th:p-2 prose-th:text-left prose-th:font-semibold relative">
+                      {message.content ? (
+                        <>
+                          <ReactMarkdown
+                            remarkPlugins={[remarkGfm, remarkMath]}
+                            rehypePlugins={[rehypeKatex, rehypeHighlight]}
+                            components={{
+                              p: ({ children }) => (
+                                <p className="mb-4 last:mb-0">{children}</p>
+                              ),
+                              h1: ({ children }) => (
+                                <h1 className="text-2xl font-bold mb-4 mt-6 first:mt-0">
+                                  {children}
+                                </h1>
+                              ),
+                              h2: ({ children }) => (
+                                <h2 className="text-xl font-bold mb-3 mt-5 first:mt-0">
+                                  {children}
+                                </h2>
+                              ),
+                              h3: ({ children }) => (
+                                <h3 className="text-lg font-semibold mb-2 mt-4 first:mt-0">
+                                  {children}
+                                </h3>
+                              ),
+                              code: ({
+                                className,
+                                children,
+                                ...props
+                              }: any) => {
+                                const match = /language-(\w+)/.exec(
+                                  className || ""
+                                );
+                                const isInline = !className || !match;
+                                const codeString = String(children).replace(
+                                  /\n$/,
+                                  ""
+                                );
+                                const codeId = `code-${
+                                  message.id
+                                }-${Math.random().toString(36).substr(2, 9)}`;
+
+                                return !isInline ? (
+                                  <div className="my-4 relative group">
+                                    <div className="relative bg-zinc-900 rounded-lg overflow-hidden">
+                                      <div className="flex items-center justify-between px-4 py-2 bg-zinc-800 text-zinc-400 text-xs">
+                                        <span className="font-mono">
+                                          {match?.[1] || "plaintext"}
+                                        </span>
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          className="h-7 px-2 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-100"
+                                          onClick={() =>
+                                            copyToClipboard(codeString, codeId)
+                                          }
+                                        >
+                                          {copiedCode === codeId ? (
+                                            <Check className="w-3.5 h-3.5" />
+                                          ) : (
+                                            <Copy className="w-3.5 h-3.5" />
+                                          )}
+                                          <span className="ml-1.5">
+                                            {copiedCode === codeId
+                                              ? "Copied!"
+                                              : "Copy"}
+                                          </span>
+                                        </Button>
+                                      </div>
+                                      <pre className="p-4 overflow-x-auto">
+                                        <code
+                                          className={`text-[13px] leading-[1.6] ${
+                                            className || ""
+                                          }`}
+                                          {...props}
+                                        >
+                                          {children}
+                                        </code>
+                                      </pre>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <code
+                                    className="bg-zinc-100 dark:bg-zinc-800 text-orange-600 dark:text-orange-400 px-1.5 py-0.5 rounded text-[13px] font-mono"
+                                    {...props}
+                                  >
+                                    {children}
+                                  </code>
+                                );
+                              },
+                              pre: ({ children }) => <>{children}</>,
+                              ul: ({ children }) => (
+                                <ul className="list-disc pl-6 mb-4 space-y-2">
+                                  {children}
+                                </ul>
+                              ),
+                              ol: ({ children }) => (
+                                <ol className="list-decimal pl-6 mb-4 space-y-2">
+                                  {children}
+                                </ol>
+                              ),
+                              li: ({ children }) => (
+                                <li className="leading-[1.8] pl-1">
+                                  {children}
+                                </li>
+                              ),
+                              blockquote: ({ children }) => (
+                                <blockquote className="border-l-4 border-zinc-300 dark:border-zinc-600 pl-4 my-4 italic text-foreground/80">
+                                  {children}
+                                </blockquote>
+                              ),
+                              table: ({ children }) => (
+                                <div className="my-4 overflow-x-auto">
+                                  <table className="min-w-full divide-y divide-border">
+                                    {children}
+                                  </table>
+                                </div>
+                              ),
+                              th: ({ children }) => (
+                                <th className="px-3 py-2 text-left text-sm font-semibold bg-muted/50">
+                                  {children}
+                                </th>
+                              ),
+                              td: ({ children }) => (
+                                <td className="px-3 py-2 text-sm border-t">
+                                  {children}
+                                </td>
+                              ),
+                              hr: () => <hr className="my-6 border-border" />,
+                              a: ({ href, children }) => (
+                                <a
+                                  href={href}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-blue-600 dark:text-blue-400 hover:underline"
+                                >
+                                  {children}
+                                </a>
+                              ),
                             }}
                           >
-                            <Copy className="w-4 h-4" />
-                          </Button>
-                        </div>
+                            {message.content}
+                          </ReactMarkdown>
+                          {isStreaming && (
+                            <span className="inline-block w-1 h-4 bg-foreground/70 animate-pulse ml-0.5" />
+                          )}
+                        </>
                       ) : (
-                        <code
-                          className="bg-muted px-1.5 py-0.5 rounded text-sm"
-                          {...props}
-                        >
-                          {children}
-                        </code>
-                      );
-                    },
-                    pre: ({ children }) => <>{children}</>,
-                    ul: ({ children }) => (
-                      <ul className="list-disc pl-6 mb-3">{children}</ul>
-                    ),
-                    ol: ({ children }) => (
-                      <ol className="list-decimal pl-6 mb-3">{children}</ol>
-                    ),
-                    li: ({ children }) => <li className="mb-1">{children}</li>,
-                  }}
-                >
-                  {message.content}
-                </ReactMarkdown>
-              )}
-            </div>
-
-            {/* Artifacts */}
-            {message.metadata?.artifacts?.map((artifact) => (
-              <div key={artifact.id} className="mt-4">
-                {artifact.type === "chart" && (
-                  <ChatArtifact artifact={artifact} session={session} />
-                )}
-                {artifact.type === "query" && (
-                  <div className="bg-muted rounded-lg p-4">
-                    <div className="flex items-center justify-between mb-2">
-                      <Badge variant="secondary">
-                        <Zap className="w-3 h-3 mr-1" />
-                        SQL Query
-                      </Badge>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => {
-                          navigator.clipboard.writeText(
-                            (artifact.data as any).query
-                          );
-                          toast.success("Query copied");
-                        }}
-                      >
-                        Copy
-                      </Button>
+                        isStreaming && (
+                          <span className="inline-block w-1 h-4 bg-foreground/70 animate-pulse" />
+                        )
+                      )}
                     </div>
-                    <pre className="text-xs font-mono">
-                      <code>{(artifact.data as any).query}</code>
-                    </pre>
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
-            ))}
 
-            {/* Metadata */}
-            <div className="text-xs text-muted-foreground">
-              <span>{new Date(message.timestamp).toLocaleTimeString()}</span>
+              {/* Thinking toggle */}
+              {message.metadata?.thinking && (
+                <div className="mt-4">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-md"
+                    onClick={() => {
+                      const newExpanded = new Set(expandedThinking);
+                      if (newExpanded.has(message.id)) {
+                        newExpanded.delete(message.id);
+                      } else {
+                        newExpanded.add(message.id);
+                      }
+                      setExpandedThinking(newExpanded);
+                    }}
+                  >
+                    <Brain className="w-3 h-3 mr-1.5" />
+                    {expandedThinking.has(message.id) ? "Hide" : "View"}{" "}
+                    thinking process
+                    {expandedThinking.has(message.id) ? (
+                      <ChevronUp className="w-3 h-3 ml-1" />
+                    ) : (
+                      <ChevronDown className="w-3 h-3 ml-1" />
+                    )}
+                  </Button>
+
+                  {expandedThinking.has(message.id) && (
+                    <div className="mt-2 p-3 bg-amber-50/50 dark:bg-amber-950/20 rounded-lg border border-amber-200 dark:border-amber-900/50">
+                      <p className="text-xs text-amber-700 dark:text-amber-400 mb-2 font-semibold">
+                        Thinking Process
+                      </p>
+                      <pre className="text-xs text-amber-600 dark:text-amber-500 whitespace-pre-wrap font-mono leading-relaxed">
+                        {message.metadata.thinking}
+                      </pre>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Artifacts */}
+              {message.metadata?.artifacts?.map((artifact) => (
+                <div key={artifact.id} className="mt-4">
+                  <ArtifactRendererWrapper
+                    artifact={artifact}
+                    session={session}
+                  />
+                </div>
+              ))}
+
+              {/* Timestamp - removed for cleaner look */}
             </div>
           </div>
         </div>
@@ -222,124 +339,66 @@ export default function ChatInterface({
   };
 
   return (
-    <div className="flex-1 flex flex-col h-full">
+    <div className="flex-1 flex flex-col h-full bg-background">
       {/* Header */}
-      <div className="border-b px-6 py-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold">{session.title}</h2>
+      <div className="border-b bg-background px-4 py-3">
+        <div className="max-w-5xl mx-auto">
+          <div className="flex items-center justify-between">
+            <h2 className="text-base font-semibold truncate">
+              {session.title}
+            </h2>
 
-          <div className="flex items-center gap-2">
-            {/* Context Summary */}
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setIsContextDialogOpen(true)}
-              className="gap-2"
-            >
-              <Settings className="w-4 h-4" />
-              <span className="text-sm">{getContextSummary()}</span>
-            </Button>
-
-            {/* Model Selector */}
-            {session.aiConnectionId && (() => {
-              const connection = aiConnections.find(
-                (c) => c.id === session.aiConnectionId
-              );
-              
-              return (
-                <Badge variant="outline" className="text-xs h-5">
-                  <Bot className="w-3 h-3 mr-1" />
-                  {session.model ? (
-                    <span className="font-mono">{session.model}</span>
-                  ) : (
-                    <span>{connection?.name || "No AI"}</span>
-                  )}
+            {session.connection && (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Badge variant="outline" className="text-xs px-2 py-0.5">
+                  {session.connection.model}
                 </Badge>
-              );
-            })()}
+              </div>
+            )}
           </div>
         </div>
       </div>
 
       {/* Messages */}
-      <ScrollArea className="flex-1 px-6 py-4">
-        {session.messages.length === 0 ? (
-          <div className="text-center py-16">
-            <Bot className="w-12 h-12 mx-auto mb-4 text-muted-foreground" />
-            <h3 className="text-lg font-medium mb-2">Start a conversation</h3>
-            <p className="text-sm text-muted-foreground mb-4">
-              Ask me about your data, and I'll help with queries and
-              visualizations.
-            </p>
-
-            {/* Quick context summary */}
-            <div className="inline-flex items-center gap-4 text-xs text-muted-foreground">
-              <div className="flex items-center gap-1">
-                <Database className="w-3 h-3" />
-                <span>
-                  {session.context.databases.selected.length} databases
-                </span>
+      <ScrollArea className="flex-1">
+        <div className="max-w-5xl mx-auto px-4 py-6">
+          {session.messages.length === 0 ? (
+            <div className="text-center py-20">
+              <div className="inline-flex items-center justify-center w-16 mb-6">
+                <img src={Logo} />
               </div>
-              <div className="flex items-center gap-1">
-                <Table className="w-3 h-3" />
-                <span>
-                  {Object.values(session.context.tables).reduce(
-                    (sum, db) => sum + db.selected.length,
-                    0
-                  )}{" "}
-                  tables
-                </span>
-              </div>
-              <div className="flex items-center gap-1">
-                <FileText className="w-3 h-3" />
-                <span>
-                  {session.context.instructions.user.length} instructions
-                </span>
-              </div>
+              <h3 className="text-xl font-semibold mb-2">
+                How can I help you today?
+              </h3>
+              <p className="text-sm text-muted-foreground max-w-md mx-auto">
+                Ask me about your data, and I'll help with queries and
+                visualizations.
+              </p>
             </div>
-          </div>
-        ) : (
-          <>
-            {session.messages.map(renderMessage)}
-            {isLoading && (
-              <div className="flex gap-4 mb-6">
-                <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center">
-                  <Bot className="w-4 h-4" />
-                </div>
-                <div className="flex-1">
-                  <div className="inline-flex items-center gap-2 px-4 py-2 bg-muted rounded-lg">
-                    <div className="w-2 h-2 bg-primary rounded-full animate-pulse" />
-                    <div className="w-2 h-2 bg-primary rounded-full animate-pulse delay-75" />
-                    <div className="w-2 h-2 bg-primary rounded-full animate-pulse delay-150" />
-                  </div>
-                </div>
-              </div>
-            )}
-          </>
-        )}
-        <div ref={messagesEndRef} />
+          ) : (
+            <>{session.messages.map(renderMessage)}</>
+          )}
+          <div ref={messagesEndRef} />
+        </div>
       </ScrollArea>
 
       {/* Input */}
-      <div className="border-t p-4">
-        <div className="max-w-4xl mx-auto">
-          <ChatInput
+      <div>
+        <div className="max-w-3xl mx-auto p-4">
+          <ChatInputWithMentions
             value={inputMessage}
             onChange={setInputMessage}
             onSend={handleSendMessage}
             disabled={isLoading}
-            context={session.context}
+            session={session}
+            onConnectionChange={(connectionId) =>
+              updateSessionConnection(session.id, connectionId)
+            }
+            isAgentic={isAgentic}
+            onAgenticToggle={setIsAgentic}
           />
         </div>
       </div>
-
-      {/* Context Configuration Dialog */}
-      <ChatContextSheet
-        isOpen={isContextDialogOpen}
-        onClose={() => setIsContextDialogOpen(false)}
-        session={session}
-        onUpdate={onUpdateContext}
-      />
     </div>
   );
 }

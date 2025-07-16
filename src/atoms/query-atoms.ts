@@ -3,9 +3,8 @@ import { atomWithStorage } from "jotai/utils";
 import axios from "axios";
 import { QueryProcessor } from "@/lib/query-processor";
 import { toast } from "sonner";
-import { parseNDJSON } from "@/lib/parsers/ndjson";
+import parseNDJSON from "@/lib/parsers/ndjson";
 
-// Query state atoms - FIX: Make sure atom and localStorage stay in sync
 export const queryAtom = atomWithStorage<string>("gigapi_current_query", "", {
   getItem: (key) => {
     const stored = localStorage.getItem(key);
@@ -25,7 +24,7 @@ export const queryAtom = atomWithStorage<string>("gigapi_current_query", "", {
     localStorage.removeItem(key);
   },
 });
-export const queryResultsAtom = atom<any[]>([]);
+export const queryResultsAtom = atom<any[] | null>(null);
 export const queryErrorAtom = atom<string | null>(null);
 export const queryLoadingAtom = atom<boolean>(false);
 export const queryExecutionTimeAtom = atom<number>(0);
@@ -54,12 +53,6 @@ export const setQueryAtom = atom(null, (_get, set, query: string) => {
   set(queryAtom, query);
 });
 
-export const clearQueryAtom = atom(null, (_get, set) => {
-  set(queryAtom, "");
-  set(queryResultsAtom, []);
-  set(queryErrorAtom, null);
-});
-
 export const executeQueryAtom = atom(null, async (get, set) => {
   const query = get(queryAtom);
   const selectedDb = get(selectedDbAtom);
@@ -81,6 +74,7 @@ export const executeQueryAtom = atom(null, async (get, set) => {
 
   set(queryLoadingAtom, true);
   set(queryErrorAtom, null);
+  set(queryResultsAtom, null); // Clear previous results
 
   const startTime = Date.now();
 
@@ -139,21 +133,76 @@ export const executeQueryAtom = atom(null, async (get, set) => {
 
     const result = response.data;
 
+    // Check if result is already parsed JSON or NDJSON string
+    let parsedResults: any[];
+    let rawResponse: string;
+
+    console.log("API Response type:", typeof result);
+    console.log("API Response sample:", typeof result === 'string' ? result.substring(0, 200) : result);
+
+    if (typeof result === 'string') {
+      rawResponse = result;
+      
+      // First, try to parse as JSON array
+      try {
+        const jsonParsed = JSON.parse(result);
+        if (Array.isArray(jsonParsed)) {
+          parsedResults = jsonParsed;
+          console.log("Parsed as JSON array:", parsedResults.length, "records");
+        } else if (jsonParsed && typeof jsonParsed === 'object') {
+          // Single JSON object
+          parsedResults = [jsonParsed];
+          console.log("Parsed as single JSON object");
+        } else {
+          // Try NDJSON parsing
+          const { records } = parseNDJSON(result);
+          parsedResults = records;
+          console.log("Parsed as NDJSON:", records.length, "records");
+        }
+      } catch (e) {
+        // Not valid JSON, try NDJSON
+        const { records } = parseNDJSON(result);
+        parsedResults = records;
+        console.log("Parsed as NDJSON after JSON parse failed:", records.length, "records");
+      }
+    } else if (Array.isArray(result)) {
+      // Result is already an array of records
+      parsedResults = result;
+      rawResponse = JSON.stringify(result, null, 2);
+      console.log("Result is already an array:", result.length, "records");
+    } else {
+      // Result is a single object or wrapped response
+      if (result.data && Array.isArray(result.data)) {
+        parsedResults = result.data;
+        rawResponse = JSON.stringify(result.data, null, 2);
+      } else if (result.records && Array.isArray(result.records)) {
+        parsedResults = result.records;
+        rawResponse = JSON.stringify(result.records, null, 2);
+      } else {
+        // Treat as single record
+        parsedResults = [result];
+        rawResponse = JSON.stringify(result, null, 2);
+      }
+      console.log("Result is an object, parsed to:", parsedResults.length, "records");
+    }
+
     // Store raw response for Raw tab
-    set(rawQueryResponseAtom, result);
+    set(rawQueryResponseAtom, rawResponse);
 
-    const { records: parsedResults } = parseNDJSON(result);
     const executionTime = Date.now() - startTime;
-
-    console.log("Raw NDJSON result:", result.substring(0, 500));
     console.log("Parsed results sample:", parsedResults.slice(0, 2));
 
+    console.log("Setting queryResultsAtom with:", parsedResults);
     set(queryResultsAtom, parsedResults);
     set(queryExecutionTimeAtom, executionTime);
+    
+    // Calculate size properly based on the raw response
+    const responseSize = typeof result === 'string' ? result.length : JSON.stringify(result).length;
+    
     set(queryMetricsAtom, {
       executionTime,
       rowCount: parsedResults.length,
-      size: result.length,
+      size: responseSize,
       processedRows: parsedResults.length,
     });
 
@@ -171,11 +220,40 @@ export const executeQueryAtom = atom(null, async (get, set) => {
 
     const currentHistory = get(queryHistoryAtom);
     set(queryHistoryAtom, [historyItem, ...currentHistory.slice(0, 49)]);
-  } catch (error) {
-    const errorMessage =
-      error instanceof Error ? error.message : "Query failed";
+  } catch (error: any) {
+    let errorMessage = "Query failed";
+
+    // Extract detailed error message from axios response
+    if (error.response) {
+      // Handle HTTP error responses
+      if (error.response.data) {
+        // If the response has an error field, use it
+        if (
+          typeof error.response.data === "object" &&
+          error.response.data.error
+        ) {
+          errorMessage = error.response.data.error;
+        } else if (typeof error.response.data === "string") {
+          // Try to parse JSON error response
+          try {
+            const parsed = JSON.parse(error.response.data);
+            if (parsed.error) {
+              errorMessage = parsed.error;
+            }
+          } catch {
+            // If not JSON, use as is
+            errorMessage = error.response.data;
+          }
+        }
+      } else if (error.response.statusText) {
+        errorMessage = `${error.response.status}: ${error.response.statusText}`;
+      }
+    } else if (error.message) {
+      errorMessage = error.message;
+    }
+
     set(queryErrorAtom, errorMessage);
-    toast.error(`Query failed: ${errorMessage}`);
+    set(queryResultsAtom, null); // Clear results on error
 
     // Add failed query to history
     const historyItem = {
@@ -207,41 +285,3 @@ import {
 } from "./database-atoms";
 import { selectedTimeFieldAtom, timeRangeAtom } from "./time-atoms";
 import { apiUrlAtom } from "./connection-atoms";
-import { useAtom, useSetAtom } from "jotai";
-
-// useQuery hook
-export function useQuery() {
-  const [query] = useAtom(queryAtom);
-  const [results] = useAtom(queryResultsAtom);
-  const [error] = useAtom(queryErrorAtom);
-  const [loading] = useAtom(queryLoadingAtom);
-  const [executionTime] = useAtom(queryExecutionTimeAtom);
-  const [metrics] = useAtom(queryMetricsAtom);
-  const [history] = useAtom(queryHistoryAtom);
-  const [rawResponse] = useAtom(rawQueryResponseAtom);
-  const [processedQuery] = useAtom(processedQueryAtom);
-
-  const setQuery = useSetAtom(setQueryAtom);
-  const clearQuery = useSetAtom(clearQueryAtom);
-  const executeQuery = useSetAtom(executeQueryAtom);
-  const clearHistory = useSetAtom(clearQueryHistoryAtom);
-
-  return {
-    // State
-    query,
-    results,
-    error,
-    loading,
-    executionTime,
-    metrics,
-    history,
-    rawResponse,
-    processedQuery,
-
-    // Actions
-    setQuery,
-    clearQuery,
-    executeQuery,
-    clearHistory,
-  };
-}

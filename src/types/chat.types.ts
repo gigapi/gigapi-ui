@@ -1,55 +1,34 @@
+// ============================================================================
+// AI Connection Types
+// ============================================================================
+
+export interface AIConnection {
+  id: string;
+  name: string;
+  provider: "openai" | "ollama" | "deepseek" | "custom";
+  baseUrl: string;
+  model: string; // The specific model for this connection
+  headers?: Record<string, string>;
+  params?: Record<string, string>;
+  isActive?: boolean;
+}
+
+// ============================================================================
+// Chat Types (Simplified - NO CONTEXT!)
+// ============================================================================
+
 export interface ChatSession {
   id: string;
   title: string;
   createdAt: string;
   updatedAt: string;
 
-  // AI Provider Configuration
-  connection: AIConnection;
-  aiConnectionId: string; // ID of the AI connection used
-  model: string; // Selected model
+  // AI Configuration
+  aiConnectionId: string;
+  connection?: AIConnection; // The full connection object
 
-  // Data Context Configuration
-  context: ChatContext;
-
-  // Chat Messages
+  // Messages
   messages: ChatMessage[];
-}
-
-export interface AIConnection {
-  id: string;
-  name: string;
-  provider: "openai" | "anthropic" | "ollama" | "deepseek" | "custom";
-  baseUrl: string;
-  modelsUrl?: string;
-  headers: Record<string, string>;
-  isActive?: boolean;
-}
-
-export interface ChatContext {
-  databases: {
-    selected: string[]; // List of selected database names
-    includeAll: boolean; // Flag to include all databases
-  };
-
-  // Table Configuration (per database)
-  tables: Record<
-    string,
-    {
-      selected: string[]; // List of selected table names
-      includeAll: boolean; // Flag to include all tables in this database
-    }
-  >;
-
-  // Schema Information (per database -> per table)
-  schemas: Record<string, Record<string, ColumnSchema[]>>;
-
-  // Custom Instructions
-  instructions: {
-    system: string; // System-level instructions (not editable by user)
-    user: string[]; // Chat-specific user instructions
-    active: boolean[]; // Which user instructions are active
-  };
 }
 
 export interface ChatMessage {
@@ -57,171 +36,80 @@ export interface ChatMessage {
   role: "user" | "assistant" | "system";
   content: string;
   timestamp: string;
-
-  // Optional metadata
   metadata?: {
-    // Query/Chart artifacts
     artifacts?: ChatArtifact[];
-
-    // Context snapshot at time of message
-    contextSnapshot?: {
-      database?: string;
-      table?: string;
-      timeRange?: TimeRange;
-    };
-
-    // Execution metadata
-    executionTime?: number;
     error?: string;
+    isStreaming?: boolean;
+    thinking?: string; // Hidden thinking/reasoning content
+    isAgentic?: boolean; // Whether this message was sent in agentic mode
   };
 }
 
 export interface ChatArtifact {
   id: string;
-  type: "query" | "chart" | "dashboard" | "insight";
-
-  // Common fields
-  title?: string;
-  description?: string;
-
-  // Type-specific data
-  data: QueryArtifact | ChartArtifact | DashboardArtifact | InsightArtifact;
+  type: "query" | "chart" | "table" | "metric" | "proposal";
+  title: string;
+  data: QueryArtifact | ChartArtifact | ProposalArtifact;
 }
-
-// ============================================================================
-// Artifact Types
-// ============================================================================
 
 export interface QueryArtifact {
   query: string;
   database?: string;
-  table?: string;
-  executionTime?: number;
-  rowCount?: number;
-  error?: string;
+  timeField?: string; // The timestamp column to use for time filtering
+  metadata?: any;
 }
 
 export interface ChartArtifact {
-  type: "timeseries" | "bar" | "pie" | "scatter" | "gauge" | "stat";
+  query: string;
+  database?: string;
+  type?: string; // Chart type (bar, line, etc)
+  chartType?: string; // Alternative property name
+  chartConfig?: any;
+  fieldMapping?: any;
+  fieldConfig?: any;
+  options?: any;
+  timeField?: string; // The timestamp column to use for time filtering
+  metadata?: any;
+}
+
+export interface ProposalArtifact {
+  type: "query_proposal" | "chart_proposal";
+  title: string;
+  description: string;
   query: string;
   database: string;
-
-  // Chart configuration
-  fieldMapping?: {
-    xField?: string;
-    yField?: string;
-    seriesField?: string;
-  };
-
-  fieldConfig?: {
-    defaults: {
-      unit?: string;
-      decimals?: number;
-      min?: number;
-      max?: number;
-    };
-  };
-
-  options?: Record<string, any>;
-}
-
-export interface DashboardArtifact {
-  name: string;
-  panels: ChartArtifact[];
-}
-
-export interface InsightArtifact {
-  type: "summary" | "anomaly" | "trend" | "recommendation";
-  content: string;
-  confidence?: number;
-  relatedQueries?: string[];
+  rationale: string;
+  next_steps: string[];
+  approved?: boolean;
+  executed?: boolean;
+  results?: any[];
+  
+  // Chart-related fields (optional)
+  chart_type?: string; // e.g., "bar", "line", "pie", etc.
+  x_axis?: string; // Column name for x-axis
+  y_axes?: string[]; // Column names for y-axis
+  
+  // Auto-execution fields
+  auto_execute?: boolean; // Whether to auto-execute after approval
+  execution_status?: "pending" | "executing" | "completed" | "failed"; // Current execution status
+  execution_error?: string; // Error message if execution failed
+  execution_time?: number; // Time taken to execute (ms)
+  execution_timestamp?: string; // When execution completed
+  retry_count?: number; // Number of execution retries
+  result_summary?: string; // AI-generated summary of results
 }
 
 // ============================================================================
-// Supporting Types
-// ============================================================================
-
-export interface TableSchema {
-  tableName: string;
-  columns: ColumnSchema[];
-  rowCount?: number;
-  sizeBytes?: number;
-  lastModified?: string;
-}
-
-export interface ColumnSchema {
-  column_name: string;
-  column_type: string;
-  null: string; // "YES" or "NO"
-  default: any;
-  key: string | null; // "PRI", "UNI", etc.
-  extra: string | null;
-}
-
-export interface TimeRange {
-  from: string;
-  to: string;
-  display?: string;
-}
-
-// ============================================================================
-// Store Action Types
+// Action Types
 // ============================================================================
 
 export interface CreateSessionOptions {
-  title?: string;
   connectionId: string;
-  context?: Partial<ChatContext>;
-}
-
-export interface UpdateContextOptions {
-  sessionId: string;
-  context: ChatContext;
+  title?: string;
 }
 
 export interface SendMessageOptions {
   sessionId: string;
   message: string;
-  stream?: boolean;
+  isAgentic?: boolean;
 }
-
-// ============================================================================
-// UI State Types
-// ============================================================================
-
-export interface ChatUIState {
-  activeSessionId: string | null;
-  isContextDialogOpen: boolean;
-  isSidebarOpen: boolean;
-  messageInput: string;
-  isLoading: boolean;
-  error: string | null;
-}
-
-// ============================================================================
-// AI Provider Constants
-// ============================================================================
-
-export const AI_PROVIDERS = [
-  {
-    id: "openai",
-    name: "OpenAI",
-    type: "openai" as const,
-    model_list_url: "https://api.openai.com/v1/models",
-    apiKeyRequired: true,
-  },
-  {
-    id: "anthropic",
-    name: "Anthropic",
-    type: "anthropic" as const,
-    model_list_url: "https://api.anthropic.com/v1/models",
-    apiKeyRequired: true,
-  },
-  {
-    id: "ollama",
-    name: "Ollama",
-    type: "ollama" as const,
-    model_list_url: "http://localhost:11434/v1/models",
-    apiKeyRequired: false,
-  },
-];

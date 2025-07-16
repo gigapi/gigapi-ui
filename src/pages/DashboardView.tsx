@@ -32,7 +32,7 @@ import {
   Info,
 } from "lucide-react";
 import AppLayout from "@/components/navigation/AppLayout";
-import Loader from "@/components/Loader";
+import Loader from "@/components/shared/Loader";
 import {
   Select,
   SelectContent,
@@ -75,7 +75,7 @@ export default function DashboardView() {
   const { dashboardId } = useParams<{ dashboardId: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
-  
+
   // Atoms
   const [currentDashboard] = useAtom(currentDashboardAtom);
   const loading = useAtomValue(dashboardLoadingAtom);
@@ -94,20 +94,26 @@ export default function DashboardView() {
   }, [navigate]);
 
   useEffect(() => {
-    console.log('[DashboardView] Dashboard ID changed:', dashboardId);
+    console.log("[DashboardView] Dashboard ID changed:", dashboardId);
     if (dashboardId) {
-      console.log('[DashboardView] Loading dashboard...');
+      console.log("[DashboardView] Loading dashboard...");
       loadDashboard(dashboardId);
     }
     return () => {
-      console.log('[DashboardView] Clearing current dashboard on unmount');
+      console.log("[DashboardView] Clearing current dashboard on unmount");
       clearCurrentDashboard();
     };
   }, [dashboardId, loadDashboard, clearCurrentDashboard]);
 
   // Log dashboard changes for debugging
   useEffect(() => {
-    console.log('[DashboardView] Current dashboard changed:', currentDashboard?.name, 'with', currentDashboard?.panels?.length || 0, 'panels');
+    console.log(
+      "[DashboardView] Current dashboard changed:",
+      currentDashboard?.name,
+      "with",
+      currentDashboard?.panels?.length || 0,
+      "panels"
+    );
   }, [currentDashboard?.id]); // Only log when dashboard ID changes
 
   useEffect(() => {
@@ -186,7 +192,7 @@ export default function DashboardView() {
 
       // Create and download file
       const dataStr = JSON.stringify(exportData, null, 2);
-      const dataBlob = new Blob([dataStr], { type: "application/json" });
+      const dataBlob = new Blob([dataStr], { type: "application/x-ndjson" });
       const url = URL.createObjectURL(dataBlob);
       const link = document.createElement("a");
       link.href = url;
@@ -217,22 +223,24 @@ export default function DashboardView() {
 
   const handleTimeRangeChange = useCallback(
     async (timeRange: any) => {
-      console.log('[DashboardView] Time range change requested:', timeRange);
+      console.log("[DashboardView] Time range change requested:", timeRange);
       if (!currentDashboard) {
-        console.log('[DashboardView] No current dashboard, skipping time range update');
+        console.log(
+          "[DashboardView] No current dashboard, skipping time range update"
+        );
         return;
       }
       try {
-        console.log('[DashboardView] Updating dashboard time range');
+        console.log("[DashboardView] Updating dashboard time range");
         await updateDashboard({
           dashboardId: currentDashboard.id,
           updates: { timeRange },
         });
-        console.log('[DashboardView] Time range updated, refreshing panels');
+        console.log("[DashboardView] Time range updated, refreshing panels");
         await refreshAllPanels();
         toast.success("Time range updated");
       } catch (err) {
-        console.error('[DashboardView] Failed to update time range:', err);
+        console.error("[DashboardView] Failed to update time range:", err);
         toast.error("Failed to update time range");
       }
     },
@@ -258,14 +266,17 @@ export default function DashboardView() {
 
   // Auto-refresh effect
   useEffect(() => {
-    if (!currentDashboard?.refreshInterval || currentDashboard.refreshInterval <= 0) {
+    if (
+      !currentDashboard?.refreshInterval ||
+      currentDashboard.refreshInterval <= 0
+    ) {
       return;
     }
-    
+
     const interval = setInterval(() => {
       refreshAllPanels();
     }, currentDashboard.refreshInterval * 1000);
-    
+
     return () => clearInterval(interval);
   }, [currentDashboard?.refreshInterval, refreshAllPanels]);
 
@@ -279,7 +290,7 @@ export default function DashboardView() {
         showDatabaseControls={false}
       >
         <div className="flex items-center justify-center h-full">
-          <Loader />
+          <Loader className="w-56 h-56" />
         </div>
       </AppLayout>
     );

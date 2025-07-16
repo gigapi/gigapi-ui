@@ -3,12 +3,12 @@
  */
 
 import { v4 as uuidv4 } from "uuid";
-import { 
-  type PanelConfig, 
-  type PanelType, 
+import {
+  type PanelConfig,
+  type PanelType,
   type FieldConfig,
   type PanelOptions,
-  type GridPosition
+  type GridPosition,
 } from "@/types/dashboard.types";
 
 export interface CreatePanelOptions {
@@ -26,8 +26,7 @@ export interface CreatePanelOptions {
 /**
  * Panel Factory class for creating properly structured panels
  */
-export class PanelFactory {
-  
+class PanelFactory {
   /**
    * Create a new panel with structure
    */
@@ -41,27 +40,27 @@ export class PanelFactory {
       timeField,
       query,
       gridPos = {},
-      dashboardId
+      dashboardId,
     } = options;
-    
+
     // Generate default query if not provided
     const defaultQuery = query || this.generateDefaultQuery(type, table);
-    
+
     // Create field configuration based on panel type
     const fieldConfig = this.createFieldConfigForType(type);
-    
+
     // Create panel options based on type
     const panelOptions = this.createOptionsForType(type);
-    
+
     // Create grid position with defaults
     const position: GridPosition = {
       x: 0,
       y: 0,
       w: 6,
       h: 8,
-      ...gridPos
+      ...gridPos,
     };
-    
+
     const panel: PanelConfig = {
       id: uuidv4(),
       type,
@@ -75,22 +74,22 @@ export class PanelFactory {
       options: panelOptions,
       gridPos: position,
       maxDataPoints: 1000,
-      useParentTimeFilter: true
+      useParentTimeFilter: true,
     };
-    
+
     // Add optional fields only if they have meaningful values
     if (description) {
       (panel as any).description = description;
     }
-    
+
     // Add dashboard ID if provided
     if (dashboardId) {
       (panel as any).dashboardId = dashboardId;
     }
-    
+
     return panel;
   }
-  
+
   /**
    * Create field configuration for different panel types
    */
@@ -98,88 +97,88 @@ export class PanelFactory {
     const baseConfig: FieldConfig = {
       defaults: {
         color: {
-          mode: 'palette-classic'
+          mode: "palette-classic",
         },
         custom: {
-          drawStyle: 'line',
-          lineInterpolation: 'smooth',
+          drawStyle: "line",
+          lineInterpolation: "smooth",
           lineWidth: 1,
           fillOpacity: 0,
-          gradientMode: 'none',
-          showPoints: 'auto',
+          gradientMode: "none",
+          showPoints: "auto",
           pointSize: 5,
-          axisPlacement: 'auto',
-          axisColorMode: 'text',
+          axisPlacement: "auto",
+          axisColorMode: "text",
           axisBorderShow: false,
           axisCenteredZero: false,
           stacking: {
-            mode: 'none',
-            group: 'A'
+            mode: "none",
+            group: "A",
           },
           thresholdsStyle: {
-            mode: 'off'
+            mode: "off",
           },
           hideFrom: {
             legend: false,
             tooltip: false,
-            viz: false
-          }
+            viz: false,
+          },
         },
         mappings: [],
         thresholds: {
-          mode: 'absolute',
+          mode: "absolute",
           steps: [
             {
-              color: 'green',
-              value: null
+              color: "green",
+              value: null,
             },
             {
-              color: 'red',
-              value: 80
-            }
-          ]
-        }
+              color: "red",
+              value: 80,
+            },
+          ],
+        },
       },
-      overrides: []
+      overrides: [],
     };
-    
+
     // Customize based on panel type
     switch (type) {
-      case 'timeseries':
-      case 'line':
-        baseConfig.defaults.custom!.drawStyle = 'line';
+      case "timeseries":
+      case "line":
+        baseConfig.defaults.custom!.drawStyle = "line";
         break;
-        
-      case 'area':
-        baseConfig.defaults.custom!.drawStyle = 'line';
+
+      case "area":
+        baseConfig.defaults.custom!.drawStyle = "line";
         baseConfig.defaults.custom!.fillOpacity = 0.1;
         break;
-        
-      case 'bar':
-        baseConfig.defaults.custom!.drawStyle = 'bars';
+
+      case "bar":
+        baseConfig.defaults.custom!.drawStyle = "bars";
         break;
-        
-      case 'scatter':
-        baseConfig.defaults.custom!.drawStyle = 'points';
-        baseConfig.defaults.custom!.showPoints = 'always';
+
+      case "scatter":
+        baseConfig.defaults.custom!.drawStyle = "points";
+        baseConfig.defaults.custom!.showPoints = "always";
         break;
-        
-      case 'stat':
+
+      case "stat":
         baseConfig.defaults.custom = {
           ...baseConfig.defaults.custom,
-          axisPlacement: 'hidden'
+          axisPlacement: "hidden",
         };
         break;
-        
-      case 'gauge':
+
+      case "gauge":
         baseConfig.defaults.min = 0;
         baseConfig.defaults.max = 100;
         break;
     }
-    
+
     return baseConfig;
   }
-  
+
   /**
    * Create panel options for different panel types
    */
@@ -187,66 +186,65 @@ export class PanelFactory {
     const baseOptions: PanelOptions = {
       legend: {
         showLegend: true,
-        displayMode: 'list',
-        placement: 'bottom',
-        calcs: []
+        displayMode: "list",
+        placement: "bottom",
+        calcs: [],
       },
       tooltip: {
-        mode: 'single',
-        sort: 'none',
-        hideZeros: false
-      }
+        mode: "single",
+        sort: "none",
+        hideZeros: false,
+      },
     };
-    
+
     // Customize based on panel type
     switch (type) {
-      case 'stat':
-      case 'gauge':
+      case "stat":
+      case "gauge":
         baseOptions.legend!.showLegend = false;
         break;
-        
-      case 'table':
-        baseOptions.tooltip!.mode = 'none';
+
+      case "table":
+        baseOptions.tooltip!.mode = "none";
         break;
     }
-    
+
     return baseOptions;
   }
-  
+
   /**
    * Generate default query for panel type - use actual table if available
    */
   private static generateDefaultQuery(type: PanelType, table?: string): string {
-    const tableName = table || 'your_table';
+    const tableName = table || "your_table";
     switch (type) {
-      case 'timeseries':
-      case 'line':
-      case 'area':
-      case 'scatter':
+      case "timeseries":
+      case "line":
+      case "area":
+      case "scatter":
         // Generic time series query - let user select fields via field mapping
         return `SELECT * FROM ${tableName} WHERE $__timeFilter`;
-        
-      case 'bar':
+
+      case "bar":
         // Generic bar chart query - user selects X and Y fields
         return `SELECT * FROM ${tableName} WHERE $__timeFilter`;
-        
-      case 'stat':
+
+      case "stat":
         // Generic stat query - user selects value field
         return `SELECT * FROM ${tableName} WHERE $__timeFilter`;
-        
-      case 'gauge':
+
+      case "gauge":
         // Generic gauge query - user selects value field
         return `SELECT * FROM ${tableName} WHERE $__timeFilter`;
-        
-      case 'table':
+
+      case "table":
         // Generic table query - shows all data
         return `SELECT * FROM ${tableName} WHERE $__timeFilter`;
-        
+
       default:
         return `SELECT * FROM ${tableName} WHERE $__timeFilter`;
     }
   }
-  
 }
 
 export default PanelFactory;

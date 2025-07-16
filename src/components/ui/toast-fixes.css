@@ -1,0 +1,24 @@
+/* Toast z-index fixes */
+.toaster {
+  z-index: 40 !important;
+}
+
+.toaster [data-sonner-toast] {
+  z-index: 40 !important;
+  pointer-events: auto !important;
+}
+
+/* Ensure toasts don't block interaction */
+.toaster [data-sonner-toast]:not(:hover) {
+  pointer-events: none;
+}
+
+.toaster [data-sonner-toast]:hover {
+  pointer-events: auto;
+}
+
+/* Make sure close button and actions are clickable */
+.toaster button,
+.toaster [data-close-button] {
+  pointer-events: auto !important;
+}

@@ -1,4 +1,4 @@
-import { useMemo, useRef, useEffect, useState } from "react";
+import { useMemo, useRef, useEffect, useState, memo } from "react";
 import * as echarts from "echarts";
 import { type PanelConfig, type NDJSONRecord } from "@/types/dashboard.types";
 import { transformDataForPanel } from "@/lib/dashboard/data-transformers";
@@ -33,7 +33,7 @@ interface ChartRendererProps {
   width?: string | number;
 }
 
-export function ChartRenderer({
+function ChartRendererComponent({
   config,
   data,
   isEditMode = false,
@@ -145,6 +145,38 @@ export function ChartRenderer({
       return {
         trigger: "axis" as const,
         confine: true,
+        appendToBody: true, // Render tooltip in body to avoid z-index issues
+        renderMode: 'html', // Use HTML mode for better positioning
+        position: function(point: number[], params: any, dom: HTMLElement, rect: any, size: any) {
+          // Smart positioning to avoid blocking content
+          const x = point[0];
+          const y = point[1];
+          const viewWidth = size.viewSize[0];
+          const viewHeight = size.viewSize[1];
+          const boxWidth = size.contentSize[0];
+          const boxHeight = size.contentSize[1];
+          
+          // Position tooltip to avoid edges and blocking interaction
+          let posX = x + 15;
+          let posY = y - boxHeight - 15;
+          
+          // Adjust if tooltip would go off right edge
+          if (posX + boxWidth > viewWidth) {
+            posX = x - boxWidth - 15;
+          }
+          
+          // Adjust if tooltip would go off top edge
+          if (posY < 0) {
+            posY = y + 15;
+          }
+          
+          // Adjust if tooltip would go off bottom edge
+          if (posY + boxHeight > viewHeight) {
+            posY = viewHeight - boxHeight - 5;
+          }
+          
+          return [posX, posY];
+        },
         backgroundColor: isDarkMode
           ? "rgba(30, 30, 30, 0.9)"
           : "rgba(255, 255, 255, 0.95)",
@@ -154,6 +186,7 @@ export function ChartRenderer({
           color: isDarkMode ? "#e0e0e0" : "#333333",
           fontSize: 12,
         },
+        extraCssText: 'z-index: 9999; pointer-events: none;', // High z-index and no pointer events
         axisPointer: {
           type: (type === "bar") ? "shadow" as const : "line" as const,
           snap: false,
@@ -252,6 +285,8 @@ export function ChartRenderer({
           tooltip: {
             trigger: "item",
             confine: true,
+            appendToBody: true, // Render tooltip in body for pie charts too
+            renderMode: 'html',
             backgroundColor: isDarkMode
               ? "rgba(30, 30, 30, 0.9)"
               : "rgba(255, 255, 255, 0.95)",
@@ -261,6 +296,7 @@ export function ChartRenderer({
               color: isDarkMode ? "#e0e0e0" : "#333333",
               fontSize: 12,
             },
+            extraCssText: 'z-index: 9999; pointer-events: none;', // High z-index and no pointer events
             formatter: (param: any) => {
               const unit = fieldConfig?.unit || "";
               const decimals = fieldConfig?.decimals ?? 2;
@@ -285,6 +321,9 @@ export function ChartRenderer({
               fontSize: 11,
               color: isDarkMode ? "#b0b0b0" : "#666666",
             },
+            selectedMode: "multiple", // Enable interactive legend selection
+            animation: true,
+            animationDuration: 100,
           },
           series: [
             {
@@ -333,7 +372,18 @@ export function ChartRenderer({
             lineStyle: { width: fieldConfig?.custom?.lineWidth || 2 },
             symbol: chartType === 'scatter' ? 'circle' : 'none',
             symbolSize: fieldConfig?.custom?.pointSize || 4,
-            emphasis: { focus: 'none' },
+            emphasis: { 
+              focus: 'series', // Highlight the entire series on hover
+              blurScope: 'coordinateSystem' // Blur other series in the same coordinate system
+            },
+            blur: {
+              lineStyle: {
+                opacity: 0.25 // Make non-hovered series more transparent
+              },
+              itemStyle: {
+                opacity: 0.25
+              }
+            },
             tooltip: { show: true }
           };
           
@@ -360,7 +410,10 @@ export function ChartRenderer({
             orient: options?.legend?.placement === 'right' ? 'vertical' : 'horizontal',
             bottom: options?.legend?.placement === 'bottom' ? 0 : undefined,
             right: options?.legend?.placement === 'right' ? 0 : undefined,
-            textStyle: { fontSize: 12, color: isDarkMode ? '#b0b0b0' : '#666666' }
+            textStyle: { fontSize: 12, color: isDarkMode ? '#b0b0b0' : '#666666' },
+            selectedMode: 'multiple', // Enable interactive legend selection
+            animation: true,
+            animationDuration: 100
           },
           grid: {
             left: '3%',
@@ -482,7 +535,14 @@ export function ChartRenderer({
     try {
       chartInstance.current = echarts.init(chartRef.current, undefined, {
         renderer: "canvas",
+        useDirtyRect: true, // Improve performance
       });
+      
+      // Ensure chart interactions are properly enabled
+      chartInstance.current.getZr().on('click', () => {
+        // This ensures click events propagate properly
+      });
+      
       console.log('[ChartRenderer] Chart instance initialized');
     } catch (error) {
       console.error('[ChartRenderer] Failed to initialize chart:', error);
@@ -506,7 +566,16 @@ export function ChartRenderer({
     }
     
     try {
-      chartInstance.current.setOption(chartOption, true);
+      // Use notMerge to ensure legend selection state is properly updated
+      chartInstance.current.setOption(chartOption, {
+        notMerge: false,
+        lazyUpdate: true,
+        replaceMerge: ['series'] // Replace series to avoid stale data
+      });
+      
+      // Force refresh to ensure interactive elements work
+      chartInstance.current.resize();
+      
       console.log('[ChartRenderer] Chart option set successfully');
     } catch (error) {
       console.error('[ChartRenderer] Failed to set chart option:', error);
@@ -617,3 +686,19 @@ export function ChartRenderer({
     </div>
   );
 }
+
+
+// Memoize the component to prevent unnecessary re-renders
+export const ChartRenderer = memo(ChartRendererComponent, (prevProps, nextProps) => {
+  // Custom comparison function to optimize re-renders
+  return (
+    prevProps.config.id === nextProps.config.id &&
+    prevProps.config.query === nextProps.config.query &&
+    prevProps.data === nextProps.data &&
+    prevProps.isEditMode === nextProps.isEditMode &&
+    prevProps.height === nextProps.height &&
+    prevProps.width === nextProps.width &&
+    JSON.stringify(prevProps.config.fieldMapping) === JSON.stringify(nextProps.config.fieldMapping) &&
+    JSON.stringify(prevProps.config.options) === JSON.stringify(nextProps.config.options)
+  );
+});

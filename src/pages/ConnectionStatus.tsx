@@ -19,7 +19,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import Loader from "@/components/Loader";
+import Loader from "@/components/shared/Loader";
 
 export default function ConnectionStatus() {
   const [connectionState] = useAtom(connectionStateAtom);

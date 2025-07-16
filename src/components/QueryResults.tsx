@@ -28,8 +28,8 @@ import {
 import { selectedDbAtom, selectedTableAtom } from "@/atoms";
 import { timeRangeAtom, selectedTimeFieldAtom } from "@/atoms";
 import { createDashboardAtom, addPanelAtom } from "@/atoms";
-import GigTable from "@/components/GigTable";
-import Loader from "@/components/Loader";
+import GigTable from "@/components/shared/GigTable";
+import Loader from "@/components/shared/Loader";
 import { Button } from "@/components/ui/button";
 import { HashQueryUtils } from "@/lib/";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -57,8 +57,8 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { PanelFactory } from "@/lib/dashboard/panel-factory";
-import { parseNDJSON } from "@/lib/parsers/ndjson";
+import PanelFactory from "@/lib/dashboard/panel-factory";
+import parseNDJSON from "@/lib/parsers/ndjson";
 import {
   type PanelConfig,
   type Dashboard,
@@ -95,6 +95,14 @@ export default function QueryResults() {
   const [processedQuery] = useAtom(processedQueryAtom);
   const createDashboard = useSetAtom(createDashboardAtom);
   const addPanel = useSetAtom(addPanelAtom);
+  
+  // Debug logging
+  useEffect(() => {
+    console.log("QueryResults - results:", results);
+    console.log("QueryResults - isLoading:", isLoading);
+    console.log("QueryResults - error:", error);
+    console.log("QueryResults - rawQueryResponse:", rawQueryResponse);
+  }, [results, isLoading, error, rawQueryResponse]);
 
   // Extract values from metrics
   const executionTime = queryMetrics?.executionTime || null;
@@ -259,7 +267,6 @@ export default function QueryResults() {
         );
       }
 
-
       // Update panel config with smart defaults
       setPanelConfig((prev) => ({
         ...prev,
@@ -329,7 +336,6 @@ export default function QueryResults() {
 
     if (error) {
       const detailedError = queryErrorDetail || error;
-      alert(`Query failed: ${error}`);
 
       const formattedError = detailedError.split("\n").map((line, i) => {
         if (line.includes("LINE") && line.includes("^")) {
@@ -384,7 +390,7 @@ export default function QueryResults() {
       );
     }
 
-    if (!results) {
+    if (results === null) {
       return (
         <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
           <Database className="h-12 w-12 mb-4 opacity-50" />
@@ -392,16 +398,22 @@ export default function QueryResults() {
         </div>
       );
     }
-    if (results.length === 0) {
-      return (
-        <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-          <CheckCircle2 className="h-12 w-12 mb-4 text-green-500" />
-          <p className="text-lg">Query executed successfully</p>
-          <p className="text-sm mt-2">No results returned</p>
-        </div>
-      );
+    
+    if (Array.isArray(results)) {
+      if (results.length === 0) {
+        return (
+          <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+            <CheckCircle2 className="h-12 w-12 mb-4 text-green-500" />
+            <p className="text-lg">Query executed successfully</p>
+            <p className="text-sm mt-2">No results returned</p>
+          </div>
+        );
+      }
+      return <GigTable data={results} initialPageSize={25} />;
     }
-    return <GigTable data={results} initialPageSize={25} />;
+    
+    // If results is not an array, wrap it in an array
+    return <GigTable data={[results]} initialPageSize={25} />;
   }
 
   function renderPanelContent() {
@@ -414,7 +426,7 @@ export default function QueryResults() {
       );
     }
 
-    if (error || !results || results.length === 0) {
+    if (error || !results || (Array.isArray(results) && results.length === 0)) {
       return (
         <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
           <BarChart3 className="h-12 w-12 mb-4 opacity-50" />
@@ -521,7 +533,7 @@ export default function QueryResults() {
   }
 
   function renderPanelPreview() {
-    if (!results || results.length === 0) {
+    if (!results || (Array.isArray(results) && results.length === 0)) {
       return (
         <div className="flex items-center justify-center h-full text-muted-foreground">
           <div className="text-center">
@@ -533,17 +545,20 @@ export default function QueryResults() {
     }
 
     try {
-      // Parse NDJSON if needed
+      // Use results directly as they're already parsed
       let records: NDJSONRecord[];
-      if (typeof rawJson === "string") {
-        const parsed = parseNDJSON(rawJson);
-        if (parsed.errors.length > 0) {
-          }
-        records = parsed.records;
-      } else if (Array.isArray(results)) {
+      if (Array.isArray(results)) {
         records = results;
-      } else {
+      } else if (results && typeof results === 'object') {
         records = [results];
+      } else {
+        // Fallback to parsing rawJson if results are not usable
+        if (typeof rawJson === "string" && rawJson.trim()) {
+          const parsed = parseNDJSON(rawJson);
+          records = parsed.records;
+        } else {
+          records = [];
+        }
       }
 
       const configWithMapping = panelConfig;
@@ -652,7 +667,6 @@ export default function QueryResults() {
           },
         },
       };
-
 
       // Add panel to the specified dashboard (no need to load it first)
       await addPanel({ panelData: finalConfig, dashboardId });
@@ -818,18 +832,16 @@ export default function QueryResults() {
                   </pre>
                 </div>
 
-                {transformedQuery &&
-                  transformedQuery !== currentExecutedQuery &&
-                  transformedQuery !== query && (
-                    <div>
-                      <h3 className="text-xs uppercase text-muted-foreground mb-1 font-bold">
-                        Processed Query (Variables Replaced)
-                      </h3>
-                      <pre className="bg-muted p-3 rounded-md overflow-x-auto text-sm break-words whitespace-pre-wrap">
-                        {transformedQuery}
-                      </pre>
-                    </div>
-                  )}
+                {processedQuery && processedQuery !== query && (
+                  <div>
+                    <h3 className="text-xs uppercase text-muted-foreground mb-1 font-bold">
+                      Processed Query (Variables Replaced)
+                    </h3>
+                    <pre className="bg-muted p-3 rounded-md overflow-x-auto text-sm break-words whitespace-pre-wrap">
+                      {processedQuery}
+                    </pre>
+                  </div>
+                )}
 
                 <div>
                   <h3 className="text-xs uppercase text-muted-foreground mb-1 font-bold">

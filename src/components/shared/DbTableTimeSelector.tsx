@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useMemo } from "react";
 import {
   Select,
   SelectContent,
@@ -81,7 +81,7 @@ export function UnifiedSelector({
 
       case "table":
         if (!database) return [];
-        
+
         // For artifact context, use schema override
         if (schemaOverride?.[database]) {
           const dbTables = schemaOverride[database];
@@ -91,17 +91,19 @@ export function UnifiedSelector({
                 .filter(Boolean)
             : [];
         }
-        
+
         // For query context, use availableTables directly (it's already loaded for the selected database)
         return availableTables || [];
 
       case "timeField":
         if (!database || !table) return [];
-        
+
         // For artifact context with schema override
         if (schemaOverride?.[database]) {
           const dbSchema = schemaOverride[database];
-          const tableSchemaOverride = dbSchema.find((t) => t.tableName === table);
+          const tableSchemaOverride = dbSchema.find(
+            (t) => t.tableName === table
+          );
           if (!tableSchemaOverride?.columns) return [];
 
           const timeFields: string[] = [];
@@ -125,22 +127,22 @@ export function UnifiedSelector({
               timeFields.push(column.columnName);
             }
           });
-          
+
           return timeFields.sort((a, b) =>
             a === "__timestamp" ? -1 : b === "__timestamp" ? 1 : 0
           );
         }
-        
+
         // For query context, use tableSchema atom (from DESCRIBE query)
         if (!tableSchema || !Array.isArray(tableSchema)) return [];
-        
+
         const timeFields: string[] = [];
         tableSchema.forEach((column: any) => {
           // Handle the API response format: {"column_name":"method","column_type":"VARCHAR",...}
           const columnName = column.column_name || column.columnName;
           const columnType = column.column_type || column.dataType;
-          
-          if (!columnName || typeof columnName !== 'string') return;
+
+          if (!columnName || typeof columnName !== "string") return;
 
           // Simple time field detection based on your API response
           if (
@@ -351,94 +353,6 @@ export function UnifiedSelector({
           </div>
         </PopoverContent>
       </Popover>
-    </div>
-  );
-}
-
-// Compound component for database + table + time field selection
-interface UnifiedDataSelectorsProps {
-  context: SelectorContext;
-  style?: SelectorStyle;
-  database?: string;
-  table?: string;
-  timeField?: string;
-  onDatabaseChange: (database: string) => void;
-  onTableChange: (table: string) => void;
-  onTimeFieldChange?: (timeField: string) => void;
-  showTimeField?: boolean;
-  className?: string;
-  schemaOverride?: Record<string, TableSchema[]>;
-  layout?: "horizontal" | "vertical";
-}
-
-export function UnifiedDataSelectors({
-  context,
-  style = "select",
-  database,
-  table,
-  timeField,
-  onDatabaseChange,
-  onTableChange,
-  onTimeFieldChange,
-  showTimeField = false,
-  className,
-  schemaOverride,
-  layout = "horizontal",
-}: UnifiedDataSelectorsProps) {
-  // Clear table when database changes
-  useEffect(() => {
-    if (!database) {
-      onTableChange("");
-      onTimeFieldChange?.("");
-    }
-  }, [database, onTableChange, onTimeFieldChange]);
-
-  // Clear time field when table changes
-  useEffect(() => {
-    if (!table) {
-      onTimeFieldChange?.("");
-    }
-  }, [table, onTimeFieldChange]);
-
-  const containerClass =
-    layout === "horizontal" ? "flex items-end gap-3 flex-wrap" : "space-y-3";
-
-  return (
-    <div className={cn(containerClass, className)}>
-      <UnifiedSelector
-        type="database"
-        context={context}
-        style={style}
-        value={database}
-        onChange={onDatabaseChange}
-        className={layout === "horizontal" ? "flex-1 min-w-[200px]" : ""}
-        schemaOverride={schemaOverride}
-      />
-
-      <UnifiedSelector
-        type="table"
-        context={context}
-        style={style}
-        value={table}
-        onChange={onTableChange}
-        database={database}
-        className={layout === "horizontal" ? "flex-1 min-w-[200px]" : ""}
-        schemaOverride={schemaOverride}
-      />
-
-      {showTimeField && (
-        <UnifiedSelector
-          type="timeField"
-          context={context}
-          style={style}
-          value={timeField}
-          onChange={onTimeFieldChange!}
-          database={database}
-          table={table}
-          className={layout === "horizontal" ? "flex-1 min-w-[200px]" : ""}
-          schemaOverride={schemaOverride}
-        />
-      )}
     </div>
   );
 }

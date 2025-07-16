@@ -1,6 +1,6 @@
 /**
- * Dashboard-specific UnifiedSelector that fetches its own data
- * Independent from the main query interface state
+ * Dashboard-specific UnifiedSelector that uses cached data when available
+ * Falls back to API calls only when cache is empty
  */
 import { useMemo } from "react";
 import {
@@ -13,6 +13,7 @@ import {
 import { Database, Table, Clock } from "lucide-react";
 import { cn } from "@/lib/utils/class-utils";
 import { useDatabaseData } from "@/hooks/useDatabaseData";
+import { useDatabaseCache } from "@/hooks/useDatabaseCache";
 import type { SelectorType } from "@/components/shared/DbTableTimeSelector";
 
 interface DashboardUnifiedSelectorProps {
@@ -40,27 +41,40 @@ export function DashboardUnifiedSelector({
   label,
   showIcon = true,
 }: DashboardUnifiedSelectorProps) {
-  // Fetch data based on selector type
-  const { databases } = useDatabaseData({
-    fetchDatabases: type === "database",
+  // Try to use cache first
+  const cache = useDatabaseCache();
+  
+  // Check if we need to fetch data based on cache availability
+  const shouldFetchDatabases = type === "database" && cache.databases.length === 0;
+  const shouldFetchTables = type === "table" && !!database && !cache.hasTables(database);
+  const shouldFetchSchema = type === "timeField" && !!database && !!table && !cache.hasSchema(database, table);
+  
+  // Fetch data only if not in cache
+  const { databases: fetchedDatabases } = useDatabaseData({
+    fetchDatabases: shouldFetchDatabases,
     fetchTables: false,
     fetchSchema: false,
   });
 
-  const { tables } = useDatabaseData({
+  const { tables: fetchedTables } = useDatabaseData({
     fetchDatabases: false,
-    fetchTables: type === "table" && !!database,
+    fetchTables: shouldFetchTables,
     fetchSchema: false,
     database,
   });
 
-  const { schema } = useDatabaseData({
+  const { schema: fetchedSchema } = useDatabaseData({
     fetchDatabases: false,
     fetchTables: false,
-    fetchSchema: type === "timeField" && !!database && !!table,
+    fetchSchema: shouldFetchSchema,
     database,
     table,
   });
+  
+  // Use cached data if available, otherwise use fetched data
+  const databases = cache.databases.length > 0 ? cache.databases : fetchedDatabases;
+  const tables = cache.hasTables(database || '') ? cache.getTables(database || '') : fetchedTables;
+  const schema = cache.hasSchema(database || '', table || '') ? cache.getSchema(database || '', table || '') : fetchedSchema;
 
   // Get options based on type
   const options = useMemo(() => {
@@ -88,7 +102,10 @@ export function DashboardUnifiedSelector({
               dataType.includes("datetime")
             );
           })
-          .map((col: any) => col.column_name || col.name);
+          .map((col: any) => col.column_name || col.name)
+          .sort((a: string, b: string) => 
+            a === "__timestamp" ? -1 : b === "__timestamp" ? 1 : 0
+          );
       
       default:
         return [];

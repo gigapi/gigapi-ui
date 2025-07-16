@@ -15,8 +15,7 @@ export {
   detectTimeFieldsFromSchema,
   processQueryWithTimeVariables,
   previewProcessedQuery,
-  QueryProcessor,
-  UnifiedQueryProcessor
+  QueryProcessor
 } from "./query-processor";
 
 // Dashboard utilities

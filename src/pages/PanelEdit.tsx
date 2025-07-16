@@ -2,7 +2,14 @@ import { useState, useEffect, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useAtom, useSetAtom } from "jotai";
 import { useDashboardSafely } from "@/atoms";
-import { apiUrlAtom, availableDatabasesAtom, schemaAtom, loadSchemaForDbAtom, setSelectedDbAtom, selectedTableAtom } from "@/atoms";
+import {
+  apiUrlAtom,
+  availableDatabasesAtom,
+  schemaAtom,
+  loadSchemaForDbAtom,
+  setSelectedDbAtom,
+  selectedTableAtom,
+} from "@/atoms";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, Save, RefreshCw, Play } from "lucide-react";
 import { MonacoSqlEditor } from "@/components/query";
@@ -12,17 +19,20 @@ import {
   ResizablePanel,
   ResizableHandle,
 } from "@/components/ui/resizable";
-import { EnhancedPanel, PanelDataProvider } from "@/components/dashboard/PanelDataProvider";
+import {
+  EnhancedPanel,
+  PanelDataProvider,
+} from "@/components/dashboard/PanelDataProvider";
 import { DashboardTimeFilter } from "@/components/dashboard/DashboardTimeFilter";
 import { PanelConfigurationForm } from "@/components/dashboard/PanelConfigurationForm";
 import { DashboardUnifiedSelector } from "@/components/dashboard/DashboardUnifiedSelector";
 import { type PanelConfig } from "@/types/dashboard.types";
 import { toast } from "sonner";
-import Loader from "@/components/Loader";
+import Loader from "@/components/shared/Loader";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AlertCircle } from "lucide-react";
 import { SchemaAnalyzer } from "@/lib/dashboard/schema-analyzer";
-import { PanelFactory } from "@/lib/dashboard/panel-factory";
+import PanelFactory from "@/lib/dashboard/panel-factory";
 import { usePanelQuery } from "@/hooks/usePanelQuery";
 
 interface PanelEditProps {
@@ -41,12 +51,20 @@ export default function PanelEdit(props?: PanelEditProps) {
 
   const dashboardId = props?.dashboardId || routeDashboardId;
   const panelId = props?.panelId || routePanelId;
-  
-  console.log("🔥 PANEL EDIT RENDER:", { dashboardId, panelId, props: !!props, timestamp: new Date().toISOString() });
+
+  console.log("🔥 PANEL EDIT RENDER:", {
+    dashboardId,
+    panelId,
+    props: !!props,
+    timestamp: new Date().toISOString(),
+  });
 
   const dashboardContext = useDashboardSafely();
-  
-  console.log("🔥 DASHBOARD CONTEXT:", { hasContext: !!dashboardContext, timestamp: new Date().toISOString() });
+
+  console.log("🔥 DASHBOARD CONTEXT:", {
+    hasContext: !!dashboardContext,
+    timestamp: new Date().toISOString(),
+  });
 
   if (!dashboardContext) {
     return (
@@ -86,18 +104,18 @@ export default function PanelEdit(props?: PanelEditProps) {
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
   const isNewPanel = !panelId;
-  
-  console.log("🔥 PANEL EDIT STATE:", { 
-    currentDashboard: !!currentDashboard, 
-    apiUrl, 
-    availableDatabases: availableDatabases.length, 
-    schema: Object.keys(schema).length, 
-    localConfig: !!localConfig, 
-    isLoadingPanel, 
-    isExecuting, 
-    queryError, 
+
+  console.log("🔥 PANEL EDIT STATE:", {
+    currentDashboard: !!currentDashboard,
+    apiUrl,
+    availableDatabases: availableDatabases.length,
+    schema: Object.keys(schema).length,
+    localConfig: !!localConfig,
+    isLoadingPanel,
+    isExecuting,
+    queryError,
     isNewPanel,
-    timestamp: new Date().toISOString() 
+    timestamp: new Date().toISOString(),
   });
 
   // Helper function to extract table name from SQL query
@@ -164,7 +182,7 @@ export default function PanelEdit(props?: PanelEditProps) {
 
         // Create a deep copy of the panel to avoid direct mutations
         const panelCopy = JSON.parse(JSON.stringify(panel));
-        
+
         setLocalConfig({
           ...panelCopy,
           table, // Set extracted or existing table
@@ -213,75 +231,101 @@ export default function PanelEdit(props?: PanelEditProps) {
   );
 
   // Create panel config for query execution
-  const queryConfig = localConfig ? {
-    ...localConfig,
-    id: panelId || 'preview',
-    title: localConfig.title || 'Preview Panel',
-    type: localConfig.type || 'timeseries',
-  } as PanelConfig : null;
+  const queryConfig = localConfig
+    ? ({
+        ...localConfig,
+        id: panelId || "preview",
+        title: localConfig.title || "Preview Panel",
+        type: localConfig.type || "timeseries",
+      } as PanelConfig)
+    : null;
 
   // Use the centralized panel query hook
   const { execute: executeQuery } = usePanelQuery({
-    panelId: panelId || 'preview',
+    panelId: panelId || "preview",
     config: queryConfig!,
     dashboard: currentDashboard!,
     onSuccess: (data) => {
       setPreviewData(data);
       setIsExecuting(false);
-      
+
       // Extract available fields from the first result
       if (data.length > 0) {
         const fields = Object.keys(data[0]);
         setAvailableFields(fields);
-        
+
         // Auto-suggest field mappings if none are set
-        if (!localConfig?.fieldMapping?.yField && !localConfig?.fieldMapping?.xField) {
+        if (
+          !localConfig?.fieldMapping?.yField &&
+          !localConfig?.fieldMapping?.xField
+        ) {
           const firstRecord = data[0];
-          
+
           // Find numeric fields for Y-axis
           const numericFields = fields.filter((field) => {
             const value = firstRecord[field];
-            return typeof value === "number" || (typeof value === "string" && !isNaN(Number(value)));
+            return (
+              typeof value === "number" ||
+              (typeof value === "string" && !isNaN(Number(value)))
+            );
           });
-          
+
           // Find time fields for X-axis
           const timeFields = fields.filter((field) => {
             const lower = field.toLowerCase();
-            return lower.includes("time") || lower.includes("date") || lower.includes("timestamp") || field === "__timestamp";
+            return (
+              lower.includes("time") ||
+              lower.includes("date") ||
+              lower.includes("timestamp") ||
+              field === "__timestamp"
+            );
           });
-          
+
           // Find string fields that could be categories or series
           const stringFields = fields.filter((field) => {
             const value = firstRecord[field];
             const lower = field.toLowerCase();
-            const isTimeField = lower.includes("time") || lower.includes("date") || lower.includes("timestamp") || field === "__timestamp";
-            return typeof value === "string" && isNaN(Number(value)) && !isTimeField;
+            const isTimeField =
+              lower.includes("time") ||
+              lower.includes("date") ||
+              lower.includes("timestamp") ||
+              field === "__timestamp";
+            return (
+              typeof value === "string" && isNaN(Number(value)) && !isTimeField
+            );
           });
-          
+
           // Auto-suggest mappings
           const suggestedMapping: any = {};
-          
+
           if (timeFields.length > 0) {
             suggestedMapping.xField = timeFields[0];
           } else if (stringFields.length > 0) {
             suggestedMapping.xField = stringFields[0];
           }
-          
+
           if (numericFields.length > 0) {
             suggestedMapping.yField = numericFields[0];
           }
-          
+
           // For series field, prefer non-time string fields
           if (stringFields.length > 0) {
-            const seriesCandidate = stringFields.find((field) => {
-              const lower = field.toLowerCase();
-              return lower.includes("location") || lower.includes("region") || lower.includes("zone") || 
-                     lower.includes("name") || lower.includes("type") || lower.includes("category");
-            }) || stringFields[0];
-            
+            const seriesCandidate =
+              stringFields.find((field) => {
+                const lower = field.toLowerCase();
+                return (
+                  lower.includes("location") ||
+                  lower.includes("region") ||
+                  lower.includes("zone") ||
+                  lower.includes("name") ||
+                  lower.includes("type") ||
+                  lower.includes("category")
+                );
+              }) || stringFields[0];
+
             suggestedMapping.seriesField = seriesCandidate;
           }
-          
+
           if (Object.keys(suggestedMapping).length > 0) {
             handleConfigChange({
               fieldMapping: {
@@ -289,18 +333,22 @@ export default function PanelEdit(props?: PanelEditProps) {
                 ...suggestedMapping,
               },
             });
-            toast.success(`Auto-detected field mappings: ${Object.entries(suggestedMapping).map(([k, v]) => `${k}: ${v}`).join(", ")}`);
+            toast.success(
+              `Auto-detected field mappings: ${Object.entries(suggestedMapping)
+                .map(([k, v]) => `${k}: ${v}`)
+                .join(", ")}`
+            );
           }
         }
       }
-      
+
       toast.success(`Query executed successfully - ${data.length} rows`);
     },
     onError: (error) => {
       setQueryError(error.message);
       setIsExecuting(false);
       toast.error(`Failed to execute query: ${error.message}`);
-    }
+    },
   });
 
   const handleRunQuery = useCallback(async () => {
@@ -330,7 +378,7 @@ export default function PanelEdit(props?: PanelEditProps) {
     if (localConfig?.database) {
       // Set the selected database to load tables
       setSelectedDb(localConfig.database);
-      
+
       // Also load schema if not already loaded
       if (
         !schema[localConfig.database] ||
@@ -536,20 +584,24 @@ export default function PanelEdit(props?: PanelEditProps) {
                       previewData.length > 0 ? (
                         <PanelDataProvider
                           panelId={panelId || "preview"}
-                          config={{
-                            ...localConfig,
-                            id: panelId || "preview",
-                          } as PanelConfig}
+                          config={
+                            {
+                              ...localConfig,
+                              id: panelId || "preview",
+                            } as PanelConfig
+                          }
                           dashboard={currentDashboard}
                           autoRefresh={false}
                           refreshTrigger={refreshTrigger}
                         >
                           <EnhancedPanel
                             panelId={panelId || "preview"}
-                            config={{
-                              ...localConfig,
-                              id: panelId || "preview",
-                            } as PanelConfig}
+                            config={
+                              {
+                                ...localConfig,
+                                id: panelId || "preview",
+                              } as PanelConfig
+                            }
                             dashboard={currentDashboard}
                             className="w-full h-full"
                             isEditMode={false}
@@ -678,14 +730,30 @@ export default function PanelEdit(props?: PanelEditProps) {
                                 };
 
                                 // Auto-select first time field if available
-                                if (value && localConfig?.database && schema[localConfig.database]) {
+                                if (
+                                  value &&
+                                  localConfig?.database &&
+                                  schema[localConfig.database]
+                                ) {
                                   // Schema structure is { database: { table: [...columns] } }
-                                  const tableSchema = schema[localConfig.database][value];
-                                  if (tableSchema && Array.isArray(tableSchema)) {
+                                  const tableSchema =
+                                    schema[localConfig.database][value];
+                                  if (
+                                    tableSchema &&
+                                    Array.isArray(tableSchema)
+                                  ) {
                                     const timeColumns = tableSchema.filter(
                                       (col: any) => {
-                                        const colName = (col.column_name || col.name || '').toLowerCase();
-                                        const dataType = (col.column_type || col.type || '').toLowerCase();
+                                        const colName = (
+                                          col.column_name ||
+                                          col.name ||
+                                          ""
+                                        ).toLowerCase();
+                                        const dataType = (
+                                          col.column_type ||
+                                          col.type ||
+                                          ""
+                                        ).toLowerCase();
                                         return (
                                           colName.includes("time") ||
                                           colName.includes("date") ||
@@ -702,24 +770,26 @@ export default function PanelEdit(props?: PanelEditProps) {
                                       const preferredTimeField =
                                         timeColumns.find(
                                           (col: any) =>
-                                            (col.column_name || col.name) === "__timestamp"
+                                            (col.column_name || col.name) ===
+                                            "__timestamp"
                                         ) || timeColumns[0];
                                       updates.timeField =
-                                        preferredTimeField.column_name || preferredTimeField.name;
+                                        preferredTimeField.column_name ||
+                                        preferredTimeField.name;
                                     }
                                   }
                                 }
 
-                                  // Update query to use selected table
-                                  if (
-                                    localConfig.query &&
-                                    localConfig.query.includes("your_table")
-                                  ) {
-                                    updates.query = localConfig.query.replace(
-                                      /your_table/g,
-                                      value
-                                    );
-                                  }
+                                // Update query to use selected table
+                                if (
+                                  localConfig.query &&
+                                  localConfig.query.includes("your_table")
+                                ) {
+                                  updates.query = localConfig.query.replace(
+                                    /your_table/g,
+                                    value
+                                  );
+                                }
 
                                 handleConfigChange(updates);
                               }}
@@ -825,7 +895,7 @@ export default function PanelEdit(props?: PanelEditProps) {
                     {isExecuting && (
                       <div className="absolute inset-0 bg-background/80 backdrop-blur-sm flex items-center justify-center z-10">
                         <div className="flex items-center gap-3 bg-card border rounded-lg px-4 py-3 shadow-lg">
-                          <RefreshCw className="h-4 w-4 animate-spin text-blue-600" />
+                          <Loader className="w-8 h-8" />
                           <span className="text-sm font-medium">
                             Executing query...
                           </span>

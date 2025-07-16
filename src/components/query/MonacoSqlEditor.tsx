@@ -1,7 +1,7 @@
 import { useRef, useEffect, useState, useCallback, useMemo } from "react";
 import Editor, { useMonaco } from "@monaco-editor/react";
 import { Skeleton } from "@/components/ui/skeleton";
-import Loader from "@/components/Loader";
+import Loader from "@/components/shared/Loader";
 import { useTheme } from "@/components/theme-provider";
 import type { SchemaInfo } from "@/types";
 import {
@@ -143,11 +143,23 @@ export default function MonacoSqlEditor({
     []
   );
 
+  // Store the latest onRunQuery in a ref to always use the current version
+  const onRunQueryRef = useRef(onRunQuery);
+  useEffect(() => {
+    onRunQueryRef.current = onRunQuery;
+  }, [onRunQuery]);
+
   const setupKeyboardShortcut = useCallback(
     (editor: any, monacoInstance: any) => {
       if (keyboardDisposableRef.current) {
         try {
-          if (typeof keyboardDisposableRef.current.dispose === "function") {
+          if (Array.isArray(keyboardDisposableRef.current)) {
+            keyboardDisposableRef.current.forEach(disposable => {
+              if (typeof disposable.dispose === "function") {
+                disposable.dispose();
+              }
+            });
+          } else if (typeof keyboardDisposableRef.current.dispose === "function") {
             keyboardDisposableRef.current.dispose();
           }
         } catch (e) {
@@ -161,16 +173,34 @@ export default function MonacoSqlEditor({
       }
 
       try {
-        const disposable = editor.addCommand(
+        const disposables = [];
+        
+        // Add Cmd+Enter (original shortcut)
+        const cmdEnterDisposable = editor.addCommand(
           monacoInstance.KeyMod.CtrlCmd | monacoInstance.KeyCode.Enter,
           () => {
-            onRunQuery();
+            // Use ref to always get the latest onRunQuery
+            onRunQueryRef.current();
           }
         );
-
-        if (disposable && typeof disposable !== "string") {
-          keyboardDisposableRef.current = disposable;
+        if (cmdEnterDisposable && typeof cmdEnterDisposable !== "string") {
+          disposables.push(cmdEnterDisposable);
         }
+        
+        // Add Cmd+R shortcut
+        const cmdRDisposable = editor.addCommand(
+          monacoInstance.KeyMod.CtrlCmd | monacoInstance.KeyCode.KeyR,
+          () => {
+            // The global event handler in QueryEditor will prevent default
+            // Use ref to always get the latest onRunQuery
+            onRunQueryRef.current();
+          }
+        );
+        if (cmdRDisposable && typeof cmdRDisposable !== "string") {
+          disposables.push(cmdRDisposable);
+        }
+
+        keyboardDisposableRef.current = disposables;
       } catch (e) {
         console.error(
           "[MONACO EDITOR] - Error setting up Monaco keyboard shortcut:",
@@ -178,7 +208,7 @@ export default function MonacoSqlEditor({
         );
       }
     },
-    [onRunQuery]
+    [] // Remove onRunQuery dependency since we use ref
   );
 
   const setupIntellisense = useCallback(
@@ -334,8 +364,14 @@ export default function MonacoSqlEditor({
       // Dispose keyboard shortcut with better error handling
       if (keyboardDisposableRef.current) {
         try {
-          // Check if dispose method exists before calling
-          if (typeof keyboardDisposableRef.current.dispose === "function") {
+          // Handle array of disposables
+          if (Array.isArray(keyboardDisposableRef.current)) {
+            keyboardDisposableRef.current.forEach(disposable => {
+              if (typeof disposable.dispose === "function") {
+                disposable.dispose();
+              }
+            });
+          } else if (typeof keyboardDisposableRef.current.dispose === "function") {
             keyboardDisposableRef.current.dispose();
           }
         } catch (e) {

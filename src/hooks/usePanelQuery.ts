@@ -9,11 +9,17 @@ import {
 } from "@/atoms/dashboard-atoms";
 import { apiUrlAtom, isConnectedAtom } from "@/atoms/connection-atoms";
 import { selectedDbAtom } from "@/atoms/database-atoms";
-import { UnifiedQueryProcessor } from "@/lib/query-processor";
+import { QueryProcessor } from "@/lib/query-processor";
 import type { TimeUnit } from "@/types";
-import { parseNDJSON } from "@/lib/parsers/ndjson";
-import { transformDataForPanel, type TransformedData } from "@/lib/dashboard/data-transformers";
-import { selectedTimeZoneAtom, selectedTimeFieldAtom } from "@/atoms/time-atoms";
+import parseNDJSON from "@/lib/parsers/ndjson";
+import {
+  transformDataForPanel,
+  type TransformedData,
+} from "@/lib/dashboard/data-transformers";
+import {
+  selectedTimeZoneAtom,
+  selectedTimeFieldAtom,
+} from "@/atoms/time-atoms";
 import axios from "axios";
 import type { NDJSONRecord } from "@/types/dashboard.types";
 
@@ -49,30 +55,29 @@ export function usePanelQuery({
   const selectedDb = useAtomValue(selectedDbAtom);
   const timeZone = useAtomValue(selectedTimeZoneAtom);
   const selectedTimeField = useAtomValue(selectedTimeFieldAtom);
-  
+
   const [panelData, setPanelData] = useAtom(panelDataAtom);
   const [loadingStates, setLoadingStates] = useAtom(panelLoadingStatesAtom);
-  
+
   const lastQueryRef = useRef<string>("");
   const loadingStatesRef = useRef(loadingStates);
   const abortControllerRef = useRef<AbortController | null>(null);
-  
+
   // Update ref when loadingStates changes
   useEffect(() => {
     loadingStatesRef.current = loadingStates;
   }, [loadingStates]);
-  
+
   // Get current state for this panel
   const panelState = panelData.get(panelId);
   const currentData = panelState?.data || null;
   const currentError = panelState?.error ? new Error(panelState.error) : null;
   const isLoading = loadingStates.get(panelId) || false;
-  
+
   // Transform data if available and config is valid
-  const transformedData = currentData && config
-    ? transformDataForPanel(currentData, config)
-    : null;
-  
+  const transformedData =
+    currentData && config ? transformDataForPanel(currentData, config) : null;
+
   /**
    * Cancel any ongoing query
    */
@@ -82,7 +87,7 @@ export function usePanelQuery({
       abortControllerRef.current = null;
     }
   }, []);
-  
+
   /**
    * Execute the panel query
    */
@@ -90,120 +95,142 @@ export function usePanelQuery({
     async (options?: { force?: boolean }) => {
       // Get current loading state dynamically
       const currentlyLoading = loadingStatesRef.current.get(panelId) || false;
-      
+
       // Skip if already loading (unless forced)
       if (currentlyLoading && !options?.force) {
         return;
       }
-      
+
       // Validate prerequisites
       if (!isConnected) {
         const error = new Error("Not connected to GigAPI");
-        setPanelData((prev) => new Map(prev).set(panelId, { data: [], error: error.message }));
+        setPanelData((prev) =>
+          new Map(prev).set(panelId, { data: [], error: error.message })
+        );
         onError?.(error);
         return;
       }
-      
+
       if (!config || !config.query?.trim()) {
         setPanelData((prev) => new Map(prev).set(panelId, { data: [] }));
         return;
       }
-      
+
       const database = config.database || selectedDb || "mydb";
-      
+
       // Process query with time variables using the unified processor
-      const timeColumn = config.fieldMapping?.timeField || config.timeField || selectedTimeField;
+      const timeColumn =
+        config.fieldMapping?.timeField || config.timeField || selectedTimeField;
       console.log(`[usePanelQuery] Processing query for panel ${panelId}:`, {
         originalQuery: config.query,
         timeRange: dashboard.timeRange,
         timeColumn,
         timeZone,
       });
-      const result = UnifiedQueryProcessor.process({
+      const result = QueryProcessor.process({
         database,
         query: config.query,
         timeRange: dashboard.timeRange,
         timeColumn,
         timeZone,
-        timeColumnDetails: config.fieldMapping?.timeUnit ? {
-          timeUnit: config.fieldMapping.timeUnit as TimeUnit,
-          columnName: timeColumn || '',
-          dataType: 'BIGINT'
-        } : null,
+        timeColumnDetails: config.fieldMapping?.timeUnit
+          ? {
+              timeUnit: config.fieldMapping.timeUnit as TimeUnit,
+              columnName: timeColumn || "",
+              dataType: "BIGINT",
+            }
+          : null,
       });
-      
+
       const { query: processedQuery, errors } = result;
       console.log(`[usePanelQuery] Processed query:`, processedQuery);
-      
+
       if (errors.length > 0) {
         const error = new Error(errors.join(", "));
-        setPanelData((prev) => new Map(prev).set(panelId, { data: [], error: error.message }));
+        setPanelData((prev) =>
+          new Map(prev).set(panelId, { data: [], error: error.message })
+        );
         onError?.(error);
         return;
       }
-      
+
       // Check if query has changed
       const queryKey = `${database}:${processedQuery}`;
       if (queryKey === lastQueryRef.current && currentData && !options?.force) {
         return;
       }
-      
+
       // Only cancel if there's an active request
       if (abortControllerRef.current && loadingStatesRef.current.get(panelId)) {
-        console.log(`[usePanelQuery] Cancelling previous request for panel ${panelId}`);
+        console.log(
+          `[usePanelQuery] Cancelling previous request for panel ${panelId}`
+        );
         cancel();
       }
-      
+
       // Create new abort controller
       abortControllerRef.current = new AbortController();
-      
+
       // Atomically set loading state and clear errors
       setPanelData((prev) => {
         const current = prev.get(panelId);
-        return new Map(prev).set(panelId, { 
-          data: current?.data || [], 
-          error: undefined 
+        return new Map(prev).set(panelId, {
+          data: current?.data || [],
+          error: undefined,
         });
       });
       setLoadingStates((prev) => new Map(prev).set(panelId, true));
-      
+
       try {
         // Use axios for consistent query execution
-        const response = await axios.post(`${apiUrl}?db=${database}&format=ndjson`, {
-          query: processedQuery,
-        }, {
-          signal: abortControllerRef.current!.signal,
-        });
-        
+        const response = await axios.post(
+          `${apiUrl}?db=${database}&format=ndjson`,
+          {
+            query: processedQuery,
+          },
+          {
+            signal: abortControllerRef.current!.signal,
+          }
+        );
+
         const rawData = response.data;
-        
+
         // Success path - process the response
-        
-        const { records, errors: parseErrors } = parseNDJSON<NDJSONRecord>(rawData);
-        
+
+        const { records, errors: parseErrors } =
+          parseNDJSON<NDJSONRecord>(rawData);
+
         if (parseErrors.length > 0) {
-          console.warn(`[usePanelQuery] Parse errors for panel ${panelId}:`, parseErrors);
+          console.warn(
+            `[usePanelQuery] Parse errors for panel ${panelId}:`,
+            parseErrors
+          );
         }
-        
-        console.log(`[usePanelQuery] Query successful for panel ${panelId}, got ${records.length} records`);
-        
+
+        console.log(
+          `[usePanelQuery] Query successful for panel ${panelId}, got ${records.length} records`
+        );
+
         // Update state
         setPanelData((prev) => new Map(prev).set(panelId, { data: records }));
         lastQueryRef.current = queryKey;
-        
+
         onSuccess?.(records);
       } catch (error) {
         // Skip AbortError - request was canceled
         if (axios.isCancel(error)) {
           return;
         }
-        
+
         // Handle axios errors and other errors
-        const errorObj = error instanceof Error ? error : new Error(String(error));
-        
-        setPanelData((prev) => new Map(prev).set(panelId, { data: [], error: errorObj.message }));
+        const errorObj =
+          error instanceof Error ? error : new Error(String(error));
+
+        setPanelData((prev) =>
+          new Map(prev).set(panelId, { data: [], error: errorObj.message })
+        );
         onError?.(errorObj);
-        
+
         // Show toast for user feedback
         toast.error(`Panel query failed: ${errorObj.message}`);
       } finally {
@@ -225,14 +252,14 @@ export function usePanelQuery({
       onError,
     ]
   );
-  
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
       cancel();
     };
   }, [cancel]);
-  
+
   return {
     data: currentData,
     transformedData,
@@ -241,20 +268,4 @@ export function usePanelQuery({
     execute,
     cancel,
   };
-}
-
-
-/**
- * Hook to get panel query state
- */
-export function usePanelQueryState(panelId: string) {
-  const panelData = useAtomValue(panelDataAtom);
-  const loadingStates = useAtomValue(panelLoadingStatesAtom);
-  
-  const panelState = panelData.get(panelId);
-  const data = panelState?.data || null;
-  const error = panelState?.error ? new Error(panelState.error) : null;
-  const loading = loadingStates.get(panelId) || false;
-  
-  return { data, error, loading };
 }

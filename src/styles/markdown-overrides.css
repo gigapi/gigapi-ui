@@ -1,0 +1,115 @@
+/* Markdown overrides for ChatInterface */
+
+/* KaTeX Math Display */
+.katex-display {
+  @apply my-4 overflow-x-auto;
+}
+
+.katex {
+  @apply text-[15px];
+}
+
+/* Highlight.js theme overrides */
+.hljs {
+  @apply bg-transparent !important;
+  @apply text-zinc-100;
+}
+
+.hljs-comment,
+.hljs-quote {
+  @apply text-zinc-500;
+}
+
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-addition {
+  @apply text-purple-400;
+}
+
+.hljs-string,
+.hljs-meta .hljs-meta-string {
+  @apply text-green-400;
+}
+
+.hljs-number,
+.hljs-regexp,
+.hljs-literal,
+.hljs-bullet,
+.hljs-link {
+  @apply text-cyan-400;
+}
+
+.hljs-title,
+.hljs-section,
+.hljs-name {
+  @apply text-blue-400;
+}
+
+.hljs-params {
+  @apply text-orange-400;
+}
+
+.hljs-variable,
+.hljs-template-variable,
+.hljs-attribute {
+  @apply text-yellow-400;
+}
+
+.hljs-meta,
+.hljs-doctag {
+  @apply text-pink-400;
+}
+
+.hljs-built_in {
+  @apply text-red-400;
+}
+
+/* Ensure code blocks don't have extra padding from prose */
+.prose pre {
+  @apply p-0 m-0 bg-transparent;
+}
+
+/* Fix table styling in dark mode */
+.prose table {
+  @apply text-foreground;
+}
+
+.prose thead {
+  @apply border-border;
+}
+
+.prose tbody tr {
+  @apply border-border;
+}
+
+/* Inline code styling */
+.prose :where(code):not(:where([class~="not-prose"] *))::before {
+  content: "";
+}
+
+.prose :where(code):not(:where([class~="not-prose"] *))::after {
+  content: "";
+}
+
+/* Better link styling */
+.prose a {
+  @apply font-normal no-underline hover:underline;
+}
+
+/* Task list styling */
+.prose .task-list-item {
+  @apply list-none ml-0 pl-0;
+}
+
+.prose .task-list-item input[type="checkbox"] {
+  @apply mr-2 rounded border-border;
+}
+
+/* Ensure proper math rendering spacing */
+.prose .math-inline {
+  @apply mx-0.5;
+}
+
+.prose .math-display {
+  @apply my-4;
+}

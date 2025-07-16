@@ -50,7 +50,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import ConfirmAction from "@/components/shared/ConfirmAction";
-import Loader from "@/components/Loader";
+import Loader from "@/components/shared/Loader";
 import CreateDashboardSheet from "@/components/dashboard/CreateDashboardSheet";
 import {
   Table,
@@ -237,7 +237,7 @@ export default function DashboardList() {
       try {
         const storage = getStorageImplementation();
         const exportData = await storage.exportDashboard(dashboardId);
-        const blob = new Blob([exportData], { type: "application/json" });
+        const blob = new Blob([exportData], { type: "application/x-ndjson" });
         const url = URL.createObjectURL(blob);
         const link = document.createElement("a");
         link.href = url;
@@ -553,7 +553,7 @@ export default function DashboardList() {
                       colSpan={columns.length}
                       className="h-24 text-center"
                     >
-                      <Loader />
+                       <Loader className="w-8 h-8" />
                     </TableCell>
                   </TableRow>
                 ) : table.getRowModel().rows?.length ? (

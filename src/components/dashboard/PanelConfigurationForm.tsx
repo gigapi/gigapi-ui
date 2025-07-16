@@ -18,7 +18,7 @@ import {
   SchemaAnalyzer,
   type FieldType,
 } from "@/lib/dashboard/schema-analyzer";
-import { PanelFactory } from "@/lib/dashboard/panel-factory";
+import PanelFactory from "@/lib/dashboard/panel-factory";
 import {
   type PanelConfig,
   type FieldMapping,
@@ -181,7 +181,9 @@ export function PanelConfigurationForm({
                   smartMapping = SchemaAnalyzer.getSmartFieldDefaults(
                     availableFields.length > 0
                       ? availableFields
-                      : Array.isArray(schemaFields) ? schemaFields.map((f: any) => f.name) : [],
+                      : Array.isArray(schemaFields)
+                      ? schemaFields.map((f: any) => f.name)
+                      : [],
                     fieldTypes,
                     Array.isArray(schemaFields) ? schemaFields : [],
                     newPanelType

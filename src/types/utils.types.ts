@@ -195,12 +195,6 @@ export const TimeRangeSchema = z.object({
   enabled: z.boolean(),
 });
 
-export const ColumnSchemaValidator = z.object({
-  columnName: z.string().min(1, "Column name is required"),
-  dataType: z.string().optional(),
-  timeUnit: z.enum(["ns", "us", "ms", "s"]).optional(),
-});
-
 export const HashQueryParamsSchema = z.object({
   query: z.string().optional(),
   db: z.string().optional(),
@@ -210,47 +204,6 @@ export const HashQueryParamsSchema = z.object({
   timeTo: z.string().optional(),
 });
 
-export const UIPreferencesSchema = z.object({
-  theme: z.enum(["light", "dark", "system"]).default("system"),
-  compactMode: z.boolean().default(false),
-  showLineNumbers: z.boolean().default(true),
-  autoComplete: z.boolean().default(true),
-  fontSize: z.number().min(10).max(24).default(14),
-});
-
-// Type guards
-export const isConnectionError = (error: unknown): error is ConnectionError => {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "type" in error &&
-    "message" in error &&
-    ["connection", "timeout", "network", "server", "unknown"].includes(
-      (error as ConnectionError).type
-    )
-  );
-};
-
-export const isQueryError = (error: unknown): error is QueryError => {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "type" in error &&
-    "message" in error &&
-    ["syntax", "execution", "timeout", "permission", "unknown"].includes(
-      (error as QueryError).type
-    )
-  );
-};
-
-export const isTimeRange = (value: unknown): value is TimeRange => {
-  try {
-    TimeRangeSchema.parse(value);
-    return true;
-  } catch {
-    return false;
-  }
-};
 
 // Constants
 export const STORAGE_KEYS = {

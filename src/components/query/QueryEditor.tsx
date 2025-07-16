@@ -16,10 +16,9 @@ import {
   setTimeRangeAtom,
   setSelectedTimeFieldAtom,
   setHasTimeVariablesAtom,
-  useMCP,
 } from "@/atoms";
 import { toast } from "sonner";
-import ChatPanelCompact from "@/components/chat/ChatPanelCompact";
+// import ChatPanelCompact from "@/components/chat/ChatPanelCompact";
 import { QueryEditorToolbar, QueryEditorSelectors, MonacoSqlEditor } from "./";
 import { checkForTimeVariables, detectTimeFieldsFromSchema } from "@/lib/";
 
@@ -49,8 +48,6 @@ export default function QueryEditor() {
 
   // Use schema to get columns for table
   const getColumnsForTable = (tableName: string) => getColumns(tableName);
-  // Get MCP data
-  const { chatSessions, isConnected: mcpConnected } = useMCP();
 
   // Load chat panel state from localStorage
   const [showChatPanel, setShowChatPanel] = useState(() => {
@@ -214,6 +211,33 @@ export default function QueryEditor() {
     localStorage.setItem("gigaapi_show_chat_panel", showChatPanel.toString());
   }, [showChatPanel]);
 
+  // Add global keyboard shortcut handler for Cmd+R
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Check if Cmd+R (Mac) or Ctrl+R (Windows/Linux)
+      if ((e.metaKey || e.ctrlKey) && e.key === "r") {
+        // Only prevent default and run query if the editor is focused
+        const activeElement = document.activeElement;
+        const isEditorFocused =
+          activeElement?.closest(".monaco-editor") !== null;
+
+        if (isEditorFocused) {
+          e.preventDefault();
+          e.stopPropagation();
+          handleRunQuery();
+        }
+      }
+    };
+
+    // Add event listener
+    window.addEventListener("keydown", handleKeyDown, true);
+
+    // Cleanup
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown, true);
+    };
+  }, [selectedDb, query]); // Dependencies for handleRunQuery
+
   // Check for time variables on initial mount and when query changes from outside
   useEffect(() => {
     const hasTimeVars = checkForTimeVariables(query);
@@ -246,9 +270,9 @@ export default function QueryEditor() {
           selectedTimeField={selectedTimeField}
           timeRange={timeRange}
           query={query}
-          mcpConnected={mcpConnected}
+          mcpConnected={false}
           showChatPanel={showChatPanel}
-          chatSessionsCount={chatSessions?.length || 0}
+          chatSessionsCount={0}
           onRunQuery={handleRunQuery}
           onClearQuery={handleClearQuery}
           onToggleChat={() => {
@@ -290,15 +314,10 @@ export default function QueryEditor() {
           />
         </div>
 
-        {/* Chat Panel */}
+        {/* Chat Panel - Temporarily disabled */}
         {showChatPanel && (
-          <div className="w-1/2 h-full">
-            <ChatPanelCompact
-              isOpen={showChatPanel}
-              onClose={() => {
-                setShowChatPanel(false);
-              }}
-            />
+          <div className="w-1/2 h-full flex items-center justify-center bg-muted/30">
+            <p className="text-muted-foreground">Chat panel is being updated</p>
           </div>
         )}
       </div>

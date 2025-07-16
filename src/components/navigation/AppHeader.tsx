@@ -12,10 +12,10 @@ import {
 } from "@/components/ui/breadcrumb";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Globe, Edit, Save, X, Database, Search } from "lucide-react";
-import { useAtom, useSetAtom } from "jotai";
+import { Globe, Edit, Save, X, Database, Search, RefreshCw } from "lucide-react";
+import { useAtom, useSetAtom, useAtomValue } from "jotai";
 import { apiUrlAtom, connectAtom } from "@/atoms";
-import { selectedDbAtom, setSelectedDbAtom } from "@/atoms";
+import { selectedDbAtom, setSelectedDbAtom, refreshSchemaCacheAtom, isCacheLoadingAtom, cacheProgressAtom } from "@/atoms";
 import { UnifiedSelector } from "@/components/shared/DbTableTimeSelector";
 import { toast } from "sonner";
 import { commandPaletteOpenAtom } from "@/atoms";
@@ -37,16 +37,19 @@ interface AppHeaderProps {
   showDatabaseControls?: boolean;
 }
 
-export default function AppHeader({ 
-  breadcrumbs, 
-  actions, 
-  showDatabaseControls = true
+export default function AppHeader({
+  breadcrumbs,
+  actions,
+  showDatabaseControls = true,
 }: AppHeaderProps) {
   const [apiUrl] = useAtom(apiUrlAtom);
   const [selectedDb] = useAtom(selectedDbAtom);
   const setApiUrl = useSetAtom(apiUrlAtom);
   const connect = useSetAtom(connectAtom);
   const setSelectedDb = useSetAtom(setSelectedDbAtom);
+  const refreshSchemaCache = useSetAtom(refreshSchemaCacheAtom);
+  const isCacheLoading = useAtomValue(isCacheLoadingAtom);
+  const cacheProgress = useAtomValue(cacheProgressAtom);
   const [isEndpointEditing, setIsEndpointEditing] = useState(false);
   const [tempApiUrl, setTempApiUrl] = useState(apiUrl);
   const setCommandPaletteOpen = useSetAtom(commandPaletteOpenAtom);
@@ -59,7 +62,7 @@ export default function AppHeader({
   // Handle saving the endpoint
   const handleSaveEndpoint = async () => {
     const newUrl = tempApiUrl.trim();
-    
+
     if (newUrl === apiUrl) {
       setIsEndpointEditing(false);
       return;
@@ -73,7 +76,7 @@ export default function AppHeader({
     // Update the URL and trigger connection
     setApiUrl(newUrl);
     setIsEndpointEditing(false);
-    
+
     try {
       await connect(newUrl);
     } catch (error) {
@@ -98,7 +101,7 @@ export default function AppHeader({
         orientation="vertical"
         className="mr-2 data-[orientation=vertical]:h-4"
       />
-      
+
       {/* Breadcrumb Navigation */}
       <Breadcrumb>
         <BreadcrumbList>
@@ -106,10 +109,8 @@ export default function AppHeader({
             <React.Fragment key={crumb.label}>
               <BreadcrumbItem>
                 {crumb.href ? (
-                  <BreadcrumbLink asChild>
-                    <Link to={crumb.href}>
-                      {crumb.label}
-                    </Link>
+                  <BreadcrumbLink className="max-w-200 truncate " asChild>
+                    <Link to={crumb.href}>{crumb.label}</Link>
                   </BreadcrumbLink>
                 ) : (
                   <BreadcrumbPage>{crumb.label}</BreadcrumbPage>
@@ -165,6 +166,22 @@ export default function AppHeader({
                 showIcon={false}
                 label={null}
               />
+
+              {/* Refresh Schema Cache Button */}
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => refreshSchemaCache()}
+                disabled={isCacheLoading}
+                title={isCacheLoading ? `Loading schemas... ${cacheProgress.current}/${cacheProgress.total}` : "Refresh database schema cache"}
+              >
+                <RefreshCw className={`h-4 w-4 ${isCacheLoading ? 'animate-spin' : ''}`} />
+                {isCacheLoading && cacheProgress.total > 0 && (
+                  <span className="ml-1.5 text-xs">
+                    {cacheProgress.current}/{cacheProgress.total}
+                  </span>
+                )}
+              </Button>
 
               {/* API Endpoint Control */}
               {isEndpointEditing ? (
@@ -237,6 +254,20 @@ export default function AppHeader({
                         showIcon={false}
                         label={null}
                       />
+                    </div>
+                    <Separator />
+                    <div className="space-y-2">
+                      <h4 className="font-medium">Schema Cache</h4>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => refreshSchemaCache()}
+                        disabled={isCacheLoading}
+                        className="w-full"
+                      >
+                        <RefreshCw className={`h-4 w-4 mr-2 ${isCacheLoading ? 'animate-spin' : ''}`} />
+                        {isCacheLoading ? `Loading... ${cacheProgress.current}/${cacheProgress.total}` : 'Refresh Schema Cache'}
+                      </Button>
                     </div>
                     <Separator />
                     <div className="space-y-2">

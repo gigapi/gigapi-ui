@@ -1,6 +1,11 @@
 import { useState, useEffect } from "react";
 import { useAtomValue } from "jotai";
-import { apiUrlAtom, isConnectedAtom } from "@/atoms/connection-atoms";
+import { apiUrlAtom, isConnectedAtom, availableDatabasesAtom } from "@/atoms/connection-atoms";
+import { 
+  getCachedTablesAtom, 
+  getCachedSchemaAtom,
+  schemaCacheAtom 
+} from "@/atoms/database-atoms";
 import axios from "axios";
 
 interface UseDatabaseDataOptions {
@@ -21,6 +26,12 @@ export function useDatabaseData({
   const apiUrl = useAtomValue(apiUrlAtom);
   const isConnected = useAtomValue(isConnectedAtom);
   
+  // Cache-related atoms
+  const availableDatabases = useAtomValue(availableDatabasesAtom);
+  const getCachedTables = useAtomValue(getCachedTablesAtom);
+  const getCachedSchema = useAtomValue(getCachedSchemaAtom);
+  const schemaCache = useAtomValue(schemaCacheAtom);
+  
   const [databases, setDatabases] = useState<string[]>([]);
   const [tables, setTables] = useState<string[]>([]);
   const [schema, setSchema] = useState<any[]>([]);
@@ -29,13 +40,23 @@ export function useDatabaseData({
 
   // Fetch databases
   useEffect(() => {
-    if (!fetchDatabases || !isConnected || !apiUrl) return;
+    if (!fetchDatabases || !isConnected) return;
     
     const fetchDatabaseList = async () => {
       try {
         setLoading(true);
         setError(null);
         
+        // First check if we have databases from connection state
+        if (availableDatabases && availableDatabases.length > 0) {
+          console.log("[useDatabaseData] Using cached databases from connection state:", availableDatabases.length);
+          setDatabases(availableDatabases);
+          setLoading(false);
+          return;
+        }
+        
+        // Otherwise fallback to API call
+        console.log("[useDatabaseData] No cached databases, fetching from API");
         const response = await axios.post(
           `${apiUrl}?format=json`,
           { query: "SHOW DATABASES" }
@@ -56,17 +77,28 @@ export function useDatabaseData({
     };
     
     fetchDatabaseList();
-  }, [fetchDatabases, isConnected, apiUrl]);
+  }, [fetchDatabases, isConnected, apiUrl, availableDatabases]);
 
   // Fetch tables
   useEffect(() => {
-    if (!fetchTables || !database || !isConnected || !apiUrl) return;
+    if (!fetchTables || !database || !isConnected) return;
     
     const fetchTableList = async () => {
       try {
         setLoading(true);
         setError(null);
         
+        // First check cache
+        const cachedTables = getCachedTables(database);
+        if (cachedTables && cachedTables.length > 0) {
+          console.log(`[useDatabaseData] Using cached tables for ${database}:`, cachedTables.length);
+          setTables(cachedTables);
+          setLoading(false);
+          return;
+        }
+        
+        // Fallback to API if cache miss
+        console.log(`[useDatabaseData] Cache miss for ${database} tables, fetching from API`);
         const response = await axios.post(
           `${apiUrl}?db=${database}&format=json`,
           { query: "SHOW TABLES" }
@@ -87,20 +119,31 @@ export function useDatabaseData({
     };
     
     fetchTableList();
-  }, [fetchTables, database, isConnected, apiUrl]);
+  }, [fetchTables, database, isConnected, apiUrl, getCachedTables, schemaCache]);
 
   // Fetch schema
   useEffect(() => {
-    if (!fetchSchema || !database || !table || !isConnected || !apiUrl) return;
+    if (!fetchSchema || !database || !table || !isConnected) return;
     
     const fetchTableSchema = async () => {
       try {
         setLoading(true);
         setError(null);
         
+        // First check cache
+        const cachedSchema = getCachedSchema(database, table);
+        if (cachedSchema && cachedSchema.length > 0) {
+          console.log(`[useDatabaseData] Using cached schema for ${database}.${table}`);
+          setSchema(cachedSchema);
+          setLoading(false);
+          return;
+        }
+        
+        // Fallback to API if cache miss
+        console.log(`[useDatabaseData] Cache miss for ${database}.${table} schema, fetching from API`);
         const response = await axios.post(
           `${apiUrl}?db=${database}&format=json`,
-          { query: `DESCRIBE ${table}` }
+          { query: `DESCRIBE SELECT * FROM ${table} LIMIT 1` }
         );
         
         setSchema(response.data.results || []);
@@ -114,7 +157,7 @@ export function useDatabaseData({
     };
     
     fetchTableSchema();
-  }, [fetchSchema, database, table, isConnected, apiUrl]);
+  }, [fetchSchema, database, table, isConnected, apiUrl, getCachedSchema, schemaCache]);
 
   return {
     databases,

@@ -15,8 +15,18 @@ const Toaster = ({ ...props }: ToasterProps) => {
           "--normal-bg": "var(--popover)",
           "--normal-text": "var(--popover-foreground)",
           "--normal-border": "var(--border)",
+          "--z-index": "40",
         } as React.CSSProperties
       }
+      toastOptions={{
+        classNames: {
+          toast: "pointer-events-auto",
+          title: "text-foreground",
+          description: "text-muted-foreground",
+          actionButton: "text-primary",
+          cancelButton: "text-muted-foreground",
+        },
+      }}
       {...props}
     />
   )

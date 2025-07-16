@@ -6,7 +6,6 @@ import {
   activeSessionAtom,
   sessionListAtom,
   createSessionAtom,
-  updateSessionContextAtom,
   sendMessageAtom,
   deleteSessionAtom,
   renameSessionAtom,
@@ -20,7 +19,6 @@ export function useChat() {
   const [sessionList] = useAtom(sessionListAtom);
 
   const createSession = useSetAtom(createSessionAtom);
-  const updateSessionContext = useSetAtom(updateSessionContextAtom);
   const sendMessage = useSetAtom(sendMessageAtom);
   const deleteSession = useSetAtom(deleteSessionAtom);
   const renameSession = useSetAtom(renameSessionAtom);
@@ -35,7 +33,6 @@ export function useChat() {
 
     // Actions
     createSession,
-    updateSessionContext,
     sendMessage,
     deleteSession,
     renameSession,

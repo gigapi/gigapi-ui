@@ -6,7 +6,7 @@ export interface BasePanelProps extends PanelProps {
   children?: ReactNode;
 }
 
-export abstract class BasePanel {
+abstract class BasePanel {
   abstract render(props: PanelProps): ReactNode;
 
   protected transformData(props: PanelProps) {
@@ -28,7 +28,11 @@ export function withPanelWrapper<T extends PanelProps>(
     };
 
     return (
-      <div className="h-full w-full overflow-hidden" style={{ minHeight: '200px' }} onClick={handleClick}>
+      <div
+        className="h-full w-full overflow-hidden"
+        style={{ minHeight: "200px" }}
+        onClick={handleClick}
+      >
         <WrappedComponent {...props} onTimeRangeUpdate={onTimeRangeUpdate} />
       </div>
     );

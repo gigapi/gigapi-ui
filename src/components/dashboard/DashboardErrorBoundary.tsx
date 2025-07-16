@@ -1,7 +1,7 @@
-import React, { type ErrorInfo, type ReactNode } from 'react';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Button } from '@/components/ui/button';
-import { AlertCircle, RefreshCw } from 'lucide-react';
+import React, { type ErrorInfo, type ReactNode } from "react";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { AlertCircle, RefreshCw } from "lucide-react";
 
 interface DashboardErrorBoundaryState {
   hasError: boolean;
@@ -32,7 +32,9 @@ export class DashboardErrorBoundary extends React.Component<
     };
   }
 
-  static getDerivedStateFromError(error: Error): Partial<DashboardErrorBoundaryState> {
+  static getDerivedStateFromError(
+    error: Error
+  ): Partial<DashboardErrorBoundaryState> {
     return {
       hasError: true,
       error,
@@ -40,8 +42,12 @@ export class DashboardErrorBoundary extends React.Component<
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    console.error('Dashboard Error Boundary caught an error:', error, errorInfo);
-    
+    console.error(
+      "Dashboard Error Boundary caught an error:",
+      error,
+      errorInfo
+    );
+
     this.setState({
       error,
       errorInfo,
@@ -79,7 +85,8 @@ export class DashboardErrorBoundary extends React.Component<
             <AlertDescription className="mt-2">
               <div className="space-y-4">
                 <p>
-                  An error occurred while rendering the dashboard. This might be due to:
+                  An error occurred while rendering the dashboard. This might be
+                  due to:
                 </p>
                 <ul className="list-disc list-inside space-y-1 text-sm">
                   <li>Network connectivity issues</li>
@@ -87,7 +94,7 @@ export class DashboardErrorBoundary extends React.Component<
                   <li>Corrupted panel data</li>
                   <li>Database connection problems</li>
                 </ul>
-                
+
                 {this.state.error && (
                   <details className="mt-4">
                     <summary className="cursor-pointer text-sm font-medium">
@@ -97,7 +104,7 @@ export class DashboardErrorBoundary extends React.Component<
                       {this.state.error.message}
                       {this.state.errorInfo?.componentStack && (
                         <>
-                          {'\n\nComponent Stack:'}
+                          {"\n\nComponent Stack:"}
                           {this.state.errorInfo.componentStack}
                         </>
                       )}
@@ -131,19 +138,4 @@ export class DashboardErrorBoundary extends React.Component<
 
     return this.props.children;
   }
-}
-
-/**
- * Hook component wrapper for easier usage
- */
-export function withDashboardErrorBoundary<T extends object>(
-  Component: React.ComponentType<T>
-) {
-  return function WrappedComponent(props: T) {
-    return (
-      <DashboardErrorBoundary>
-        <Component {...props} />
-      </DashboardErrorBoundary>
-    );
-  };
 }

@@ -14,4 +14,3 @@ export const commandPaletteOpenAtom = atom<boolean>(false);
 
 // Export the chat hooks
 export { useChat } from "@/hooks/useChat";
-export { useMCP } from "@/hooks/useMCP";
