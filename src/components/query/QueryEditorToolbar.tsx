@@ -8,6 +8,7 @@ import {
   MessageCircle,
   Bot,
   Share2,
+  RefreshCw,
 } from "lucide-react";
 import {
   Tooltip,
@@ -33,6 +34,7 @@ interface QueryEditorToolbarProps {
   onRunQuery: () => void;
   onClearQuery: () => void;
   onToggleChat: () => void;
+  onRefreshSchema?: () => void;
 }
 
 export default function QueryEditorToolbar({
@@ -48,6 +50,7 @@ export default function QueryEditorToolbar({
   onRunQuery,
   onClearQuery,
   onToggleChat,
+  onRefreshSchema,
 }: QueryEditorToolbarProps) {
   const copyQuery = async () => {
     if (!query.trim()) {
@@ -181,6 +184,26 @@ export default function QueryEditorToolbar({
               </Tooltip>
             </TooltipProvider>
 
+            {onRefreshSchema && selectedTable && (
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 w-8 p-0"
+                      onClick={onRefreshSchema}
+                    >
+                      <RefreshCw className="h-3.5 w-3.5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">
+                    <p className="text-xs">Refresh table schema</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            )}
+
             <div className="h-5 w-px bg-border mx-1"></div>
 
             <TooltipProvider>
@@ -302,6 +325,26 @@ export default function QueryEditorToolbar({
                 </TooltipContent>
               </Tooltip>
             </TooltipProvider>
+
+            {onRefreshSchema && selectedTable && (
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 w-8 p-0"
+                      onClick={onRefreshSchema}
+                    >
+                      <RefreshCw className="h-3.5 w-3.5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">
+                    <p className="text-xs">Refresh</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            )}
 
             <TooltipProvider>
               <Tooltip>

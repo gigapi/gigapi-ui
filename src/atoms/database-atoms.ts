@@ -3,6 +3,7 @@ import { atomWithStorage } from "jotai/utils";
 import axios from "axios";
 import { toast } from "sonner";
 import { selectedTimeFieldAtom, setSelectedTimeFieldAtom } from "./time-atoms";
+import { detectTimeFieldsFromSchema } from "@/lib/query-processor";
 
 // ============================================================================
 // Schema Cache Types
@@ -270,7 +271,20 @@ export const setSelectedTableAtom = atom(
         table,
       });
 
-      set(tableSchemaAtom, schema);
+      // Transform schema to use consistent property names
+      const transformedSchema = schema.map((col: any) => ({
+        columnName: col.column_name || col.name,
+        dataType: col.column_type || col.type || "unknown",
+        // Preserve original properties for compatibility
+        column_name: col.column_name,
+        column_type: col.column_type,
+        null: col.null,
+        default: col.default,
+        key: col.key,
+        extra: col.extra,
+      }));
+
+      set(tableSchemaAtom, transformedSchema);
 
       // Update autocomplete schema for Monaco Editor
       const currentAutoCompleteSchema = get(autoCompleteSchemaAtom);
@@ -302,29 +316,17 @@ export const setSelectedTableAtom = atom(
 
       // Auto-select time field if none selected
       const selectedTimeField = get(selectedTimeFieldAtom);
-      if (!selectedTimeField && schema.length > 0) {
-        // Find time fields
-        const timeFields = schema.filter((col: any) => {
-          const colName = (col.column_name || "").toLowerCase();
-          const dataType = (col.column_type || "").toLowerCase();
-          return (
-            colName.includes("time") ||
-            colName.includes("date") ||
-            colName.includes("timestamp") ||
-            colName === "__timestamp" ||
-            dataType.includes("timestamp") ||
-            dataType.includes("datetime")
-          );
-        });
+      if (!selectedTimeField && transformedSchema.length > 0) {
+        // Find time fields using the detectTimeFieldsFromSchema function
+        const timeFieldNames = detectTimeFieldsFromSchema(transformedSchema);
 
-        if (timeFields.length > 0) {
+        if (timeFieldNames.length > 0) {
           // Prefer __timestamp or first available time field
-          const preferredTimeField =
-            timeFields.find((col: any) => col.column_name === "__timestamp") ||
-            timeFields[0];
+          const preferredTimeFieldName = timeFieldNames.includes("__timestamp")
+            ? "__timestamp"
+            : timeFieldNames[0];
 
-          const timeFieldName = preferredTimeField.column_name;
-          set(setSelectedTimeFieldAtom, timeFieldName);
+          set(setSelectedTimeFieldAtom, preferredTimeFieldName);
         }
       }
     } catch (error) {
@@ -388,7 +390,21 @@ export const loadTablesForCurrentDbAtom = atom(null, async (get, set) => {
           database: currentDb,
           table: selectedTable,
         });
-        set(tableSchemaAtom, schema);
+
+        // Transform schema to use consistent property names
+        const transformedSchema = schema.map((col: any) => ({
+          columnName: col.column_name || col.name,
+          dataType: col.column_type || col.type || "unknown",
+          // Preserve original properties for compatibility
+          column_name: col.column_name,
+          column_type: col.column_type,
+          null: col.null,
+          default: col.default,
+          key: col.key,
+          extra: col.extra,
+        }));
+
+        set(tableSchemaAtom, transformedSchema);
       } catch (error) {
         console.error("Failed to load table schema:", error);
         // Don't show toast for schema errors during initialization
@@ -454,7 +470,19 @@ export const initializeDatabaseAtom = atom(null, async (get, set) => {
           const getCachedSchema = get(getCachedSchemaAtom);
           const cachedSchema = getCachedSchema(currentDb, selectedTable);
           if (cachedSchema) {
-            set(tableSchemaAtom, cachedSchema);
+            // Transform cached schema to use consistent property names
+            const transformedSchema = cachedSchema.map((col: any) => ({
+              columnName: col.column_name || col.name,
+              dataType: col.column_type || col.type || "unknown",
+              // Preserve original properties for compatibility
+              column_name: col.column_name,
+              column_type: col.column_type,
+              null: col.null,
+              default: col.default,
+              key: col.key,
+              extra: col.extra,
+            }));
+            set(tableSchemaAtom, transformedSchema);
           }
         }
       } else {
@@ -535,7 +563,6 @@ export const loadSchemaForDbAtom = atom(
         ...currentSchema,
         [database]: dbSchema,
       });
-
     } catch (error) {
       console.error(`Failed to load schema for database ${database}:`, error);
     }
@@ -632,7 +659,7 @@ export const loadAndCacheTableSchemaAtom = atom(
     if (cache?.databases[database]?.schemas[table]) {
       return cache.databases[database].schemas[table];
     }
-    
+
     try {
       const response = await axios.post(
         `${apiUrl}?db=${database}&format=json`,
@@ -660,7 +687,6 @@ export const loadAndCacheTableSchemaAtom = atom(
         };
 
         set(schemaCacheAtom, updatedCache);
-
       }
 
       return schema;
@@ -697,7 +723,101 @@ export const isCacheValidAtom = atom((get) => {
 // Refresh cache
 export const refreshSchemaCacheAtom = atom(null, async (_get, set) => {
   toast.info("Refreshing database schema cache...");
-  set(schemaCacheAtom, null); 
-  toast.success(`Database schema refreshed`)
+  set(schemaCacheAtom, null);
+  toast.success(`Database schema refreshed`);
   await set(initializeSchemaCacheAtom); // Initialize lightweight cache
 });
+
+// Force reload schema for current table
+export const forceReloadCurrentTableSchemaAtom = atom(
+  null,
+  async (get, set) => {
+    const database = get(selectedDbAtom);
+    const table = get(selectedTableAtom);
+
+    if (!database || !table) {
+      return;
+    }
+
+    // Clear the table schema first
+    set(tableSchemaAtom, []);
+    set(schemaLoadingAtom, true);
+
+    try {
+      // Clear cache for this specific table
+      const cache = get(schemaCacheAtom);
+      if (cache?.databases[database]?.schemas[table]) {
+        const updatedCache = {
+          ...cache,
+          databases: {
+            ...cache.databases,
+            [database]: {
+              ...cache.databases[database],
+              schemas: Object.fromEntries(
+                Object.entries(cache.databases[database].schemas).filter(
+                  ([key]) => key !== table
+                )
+              ),
+            },
+          },
+        };
+        set(schemaCacheAtom, updatedCache);
+      }
+
+      // Force reload from API
+      const apiUrl = get(apiUrlAtom);
+      const response = await axios.post(
+        `${apiUrl}?db=${database}&format=json`,
+        {
+          query: `DESCRIBE SELECT * FROM ${table} LIMIT 1`,
+        }
+      );
+
+      const schema = response.data.results || [];
+
+      // Transform and set the schema
+      const transformedSchema = schema.map((col: any) => ({
+        columnName: col.column_name || col.name,
+        dataType: col.column_type || col.type || "unknown",
+        // Preserve original properties for compatibility
+        column_name: col.column_name,
+        column_type: col.column_type,
+        null: col.null,
+        default: col.default,
+        key: col.key,
+        extra: col.extra,
+      }));
+
+      set(tableSchemaAtom, transformedSchema);
+
+      // Update cache with new schema
+      if (cache) {
+        const updatedCache = {
+          ...cache,
+          databases: {
+            ...cache.databases,
+            [database]: {
+              ...cache.databases[database],
+              schemas: {
+                ...cache.databases[database]?.schemas,
+                [table]: schema,
+              },
+            },
+          },
+        };
+        set(schemaCacheAtom, updatedCache);
+      }
+
+      toast.success(`Schema refreshed for ${table}`);
+    } catch (error) {
+      console.error(`[Schema Force Reload] Failed to reload schema:`, error);
+      toast.error(
+        `Failed to refresh schema: ${
+          error instanceof Error ? error.message : "Unknown error"
+        }`
+      );
+    } finally {
+      set(schemaLoadingAtom, false);
+    }
+  }
+);

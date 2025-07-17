@@ -1,6 +1,8 @@
 import { useCallback } from "react";
+import { useAtom } from "jotai";
 import { UnifiedSelector } from "@/components/shared/DbTableTimeSelector";
 import TimeRangeSelector from "@/components/TimeRangeSelector";
+import { schemaLoadingAtom } from "@/atoms";
 import type { TimeRange, ColumnSchema } from "@/types/utils.types";
 import type { TimeRange as DashboardTimeRange } from "@/types/dashboard.types";
 
@@ -54,6 +56,8 @@ export default function QueryEditorSelectors({
   onTimeFieldChange,
   onTimeRangeChange,
 }: QueryEditorSelectorsProps) {
+  const [isSchemaLoading] = useAtom(schemaLoadingAtom);
+  
   const handleTimeFieldChange = useCallback(
     (value: string) => {
       if (value === "_NO_TIME_FIELDS_") {
@@ -106,14 +110,16 @@ export default function QueryEditorSelectors({
             <UnifiedSelector
               type="timeField"
               context="query"
-              style="select"
+              style="popover"
               value={selectedTimeField || ""}
               onChange={handleTimeFieldChange}
               database={selectedDb}
               table={selectedTable}
-              className="w-auto min-w-[120px]"
+              className="w-auto min-w-[150px]"
               showIcon={false}
               label={null}
+              disabled={isSchemaLoading}
+              placeholder={isSchemaLoading ? "Loading schema..." : undefined}
             />
           </div>
         )}
@@ -163,7 +169,7 @@ export default function QueryEditorSelectors({
                 <UnifiedSelector
                   type="timeField"
                   context="query"
-                  style="select"
+                  style="popover"
                   value={selectedTimeField || ""}
                   onChange={handleTimeFieldChange}
                   database={selectedDb}
@@ -171,6 +177,8 @@ export default function QueryEditorSelectors({
                   className="w-full"
                   showIcon={false}
                   label={null}
+                  disabled={isSchemaLoading}
+                  placeholder={isSchemaLoading ? "Loading schema..." : undefined}
                 />
               </div>
             </div>

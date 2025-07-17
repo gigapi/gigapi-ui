@@ -14,7 +14,14 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Database, Table, Clock, Search, ChevronDown } from "lucide-react";
+import {
+  Database,
+  Table,
+  Clock,
+  Search,
+  ChevronDown,
+  Loader2,
+} from "lucide-react";
 import { cn } from "@/lib/utils/class-utils";
 import { useAtom } from "jotai";
 import {
@@ -134,7 +141,9 @@ export function UnifiedSelector({
         }
 
         // For query context, use tableSchema atom (from DESCRIBE query)
-        if (!tableSchema || !Array.isArray(tableSchema)) return [];
+        if (!tableSchema || !Array.isArray(tableSchema)) {
+          return [];
+        }
 
         const timeFields: string[] = [];
         tableSchema.forEach((column: any) => {
@@ -198,6 +207,7 @@ export function UnifiedSelector({
 
   // Get placeholder based on type and context
   const getPlaceholder = () => {
+    // Always prioritize custom placeholder if provided
     if (placeholder) return placeholder;
 
     switch (type) {
@@ -206,7 +216,8 @@ export function UnifiedSelector({
       case "table":
         return database ? "Select table" : "Select database first";
       case "timeField":
-        return table ? "Select time field" : "Select table first";
+        if (!table) return "Select table first";
+        return "Select time field";
     }
   };
 
@@ -264,6 +275,8 @@ export function UnifiedSelector({
                   ? "Select a database first"
                   : type === "timeField" && !table
                   ? "Select a table first"
+                  : type === "timeField"
+                  ? "No time fields found"
                   : "No options available"}
               </div>
             ) : (
@@ -295,7 +308,10 @@ export function UnifiedSelector({
             aria-expanded={isOpen}
             className={cn(
               "w-full justify-between",
-              !value && "text-muted-foreground"
+              !value &&
+                !placeholder?.includes("Loading") &&
+                "text-muted-foreground",
+              disabled && placeholder?.includes("Loading") && "opacity-100"
             )}
             disabled={
               disabled ||
@@ -304,8 +320,14 @@ export function UnifiedSelector({
             }
           >
             <div className="flex items-center gap-2 truncate">
-              {showIcon && getIcon()}
-              <span className="truncate">{value || getPlaceholder()}</span>
+              {disabled && placeholder?.includes("Loading") ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                showIcon && getIcon()
+              )}
+              <span className="truncate">
+                {value || getPlaceholder() || "Select time field"}
+              </span>
             </div>
             <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
           </Button>
@@ -325,7 +347,11 @@ export function UnifiedSelector({
           <div className="max-h-[300px] overflow-y-auto">
             {filteredOptions.length === 0 ? (
               <div className="py-6 text-center text-sm text-muted-foreground">
-                {searchTerm ? "No results found" : "No options available"}
+                {searchTerm
+                  ? "No results found"
+                  : type === "timeField"
+                  ? "No time fields found in this table"
+                  : "No options available"}
               </div>
             ) : (
               <div className="p-1">

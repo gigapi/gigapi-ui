@@ -16,6 +16,7 @@ import {
   setTimeRangeAtom,
   setSelectedTimeFieldAtom,
   setHasTimeVariablesAtom,
+  forceReloadCurrentTableSchemaAtom,
 } from "@/atoms";
 import { toast } from "sonner";
 import ChatPanelCompact from "@/components/chat/ChatPanelCompact";
@@ -37,6 +38,7 @@ export default function QueryEditor() {
   const setSelectedTableAction = useSetAtom(setSelectedTableAtom);
   const setSelectedTimeField = useSetAtom(setSelectedTimeFieldAtom);
   const setHasTimeVariables = useSetAtom(setHasTimeVariablesAtom);
+  const forceReloadSchema = useSetAtom(forceReloadCurrentTableSchemaAtom);
 
   // Use schema to get columns for table
   const getColumnsForTable = (tableName: string) => getColumns(tableName);
@@ -55,7 +57,11 @@ export default function QueryEditor() {
   const timeFieldOptions = useMemo(() => {
     if (!selectedTable) return [];
     const columns = getColumnsForTable(selectedTable);
-    return columns ? detectTimeFieldsFromSchema(columns) : [];
+    const detectedTimeFields = columns
+      ? detectTimeFieldsFromSchema(columns)
+      : [];
+
+    return detectedTimeFields;
   }, [selectedTable, getColumnsForTable]);
 
   // Handle time field selection
@@ -111,6 +117,11 @@ export default function QueryEditor() {
       editorRef.current.setValue("");
     }
   }, [setQuery]);
+
+  // Handle refreshing schema
+  const handleRefreshSchema = useCallback(() => {
+    forceReloadSchema();
+  }, [forceReloadSchema]);
 
   // Handle editor change - FIXED: immediate update, no debounce
   const handleEditorChange = useCallback(
@@ -227,6 +238,7 @@ export default function QueryEditor() {
           onToggleChat={() => {
             setShowChatPanel(!showChatPanel);
           }}
+          onRefreshSchema={handleRefreshSchema}
         />
 
         {/* Database, Table, and Time Selectors */}
