@@ -42,13 +42,6 @@ export const hasTimeVariablesAtom = atom<boolean>(false);
 export const setHasTimeVariablesAtom = atom(
   null,
   (get, set, hasTimeVars: boolean) => {
-    const current = get(hasTimeVariablesAtom);
-    console.log("🔥 SET HAS TIME VARIABLES ATOM:", {
-      from: current,
-      to: hasTimeVars,
-      changed: current !== hasTimeVars,
-      timestamp: new Date().toISOString(),
-    });
     set(hasTimeVariablesAtom, hasTimeVars);
   }
 );
@@ -57,7 +50,6 @@ export const setHasTimeVariablesAtom = atom(
 export const setTimeRangeAtom = atom(
   null,
   (_get, set, timeRange: TimeRange) => {
-    console.log("🔥 [Time] Setting time range:", timeRange);
     set(timeRangeAtom, timeRange);
   }
 );
@@ -65,7 +57,6 @@ export const setTimeRangeAtom = atom(
 export const setSelectedTimeFieldAtom = atom(
   null,
   (get, set, field: string) => {
-    console.log("🔥 [Time] Setting selected time field:", field);
     set(selectedTimeFieldAtom, field);
 
     // Update time range to include the field
@@ -75,7 +66,6 @@ export const setSelectedTimeFieldAtom = atom(
         ...currentRange,
         field,
       };
-      console.log("🔥 [Time] Updating time range with field:", newRange);
       set(timeRangeAtom, newRange);
     }
   }

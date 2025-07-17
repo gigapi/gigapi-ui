@@ -82,12 +82,5 @@ function parseNDJSON<T = any>(rawData: string): NDJSONParseResult<T> {
   };
 }
 
-/**
- * Stringify objects to NDJSON format
- */
-export function stringifyNDJSON<T = any>(records: T[]): string {
-  return records.map((record) => JSON.stringify(record)).join("\n");
-}
-
 // Export the main parser as default
 export default parseNDJSON;

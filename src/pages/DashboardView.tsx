@@ -94,27 +94,13 @@ export default function DashboardView() {
   }, [navigate]);
 
   useEffect(() => {
-    console.log("[DashboardView] Dashboard ID changed:", dashboardId);
     if (dashboardId) {
-      console.log("[DashboardView] Loading dashboard...");
       loadDashboard(dashboardId);
     }
     return () => {
-      console.log("[DashboardView] Clearing current dashboard on unmount");
       clearCurrentDashboard();
     };
   }, [dashboardId, loadDashboard, clearCurrentDashboard]);
-
-  // Log dashboard changes for debugging
-  useEffect(() => {
-    console.log(
-      "[DashboardView] Current dashboard changed:",
-      currentDashboard?.name,
-      "with",
-      currentDashboard?.panels?.length || 0,
-      "panels"
-    );
-  }, [currentDashboard?.id]); // Only log when dashboard ID changes
 
   useEffect(() => {
     const edit = searchParams.get("edit");
@@ -223,20 +209,14 @@ export default function DashboardView() {
 
   const handleTimeRangeChange = useCallback(
     async (timeRange: any) => {
-      console.log("[DashboardView] Time range change requested:", timeRange);
       if (!currentDashboard) {
-        console.log(
-          "[DashboardView] No current dashboard, skipping time range update"
-        );
         return;
       }
       try {
-        console.log("[DashboardView] Updating dashboard time range");
         await updateDashboard({
           dashboardId: currentDashboard.id,
           updates: { timeRange },
         });
-        console.log("[DashboardView] Time range updated, refreshing panels");
         await refreshAllPanels();
         toast.success("Time range updated");
       } catch (err) {

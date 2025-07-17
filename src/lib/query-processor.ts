@@ -69,67 +69,63 @@ export class QueryProcessor {
     // First, sanitize the query
     let processedQuery = QuerySanitizer.stripAtSymbols(query);
     processedQuery = QuerySanitizer.fixTimeFilter(processedQuery);
-    
+
     const interpolatedVars: Record<string, any> = {};
     const errors: string[] = [];
-    
+
     // Validate the sanitized query
     const sanitizerValidation = QuerySanitizer.validate(processedQuery);
     if (!sanitizerValidation.isValid) {
       errors.push(...sanitizerValidation.errors);
     }
-    
-    const hasTimeVariables = this.checkForTimeVariables(processedQuery);
 
-    // Validate time variable context if present
-    if (hasTimeVariables) {
-      const validation = this.validateTimeVariableContext(
-        query,
-        timeColumn,
-        timeRange
-      );
-      if (!validation.isValid) {
-        errors.push(...validation.errors);
-      }
-    }
+    const hasTimeVariables = this.checkForTimeVariables(processedQuery);
 
     // Handle time field replacement
     let effectiveTimeColumn = timeColumn;
-    
+
     // Auto-detect time field if not provided but query uses $__timeField
-    if (processedQuery.includes('$__timeField') && !effectiveTimeColumn) {
+    if (processedQuery.includes("$__timeField") && !effectiveTimeColumn) {
       // Try to detect from query context
-      const timeFieldMatch = processedQuery.match(/SELECT\s+([\w.]+)\s+AS\s+time/i);
+      const timeFieldMatch = processedQuery.match(
+        /SELECT\s+([\w.]+)\s+AS\s+time/i
+      );
       if (timeFieldMatch) {
-        effectiveTimeColumn = timeFieldMatch[1].replace(/\$__timeField/g, '__timestamp');
+        effectiveTimeColumn = timeFieldMatch[1].replace(
+          /\$__timeField/g,
+          "__timestamp"
+        );
       } else {
         // Check for common time field patterns in the query
         const timeFieldPatterns = [
-          '__timestamp',
-          'timestamp',
-          'time',
-          'created_at',
-          'updated_at',
-          'event_time',
-          'log_time'
+          "__timestamp",
+          "timestamp",
+          "time",
+          "created_at",
+          "updated_at",
+          "event_time",
+          "log_time",
         ];
-        
+
         for (const pattern of timeFieldPatterns) {
           if (processedQuery.toLowerCase().includes(pattern.toLowerCase())) {
             effectiveTimeColumn = pattern;
             break;
           }
         }
-        
+
         // Default fallback
         if (!effectiveTimeColumn) {
-          effectiveTimeColumn = '__timestamp';
+          effectiveTimeColumn = "__timestamp";
         }
       }
     }
-    
+
     if (effectiveTimeColumn) {
-      processedQuery = processedQuery.replace(/\$__timeField/g, effectiveTimeColumn);
+      processedQuery = processedQuery.replace(
+        /\$__timeField/g,
+        effectiveTimeColumn
+      );
       interpolatedVars.timeField = effectiveTimeColumn;
 
       // Fix GROUP BY and ORDER BY clauses when using time field aliases
@@ -150,9 +146,9 @@ export class QueryProcessor {
           // Replace "SELECT timeColumn as alias" with "SELECT timeColumn" when they're the same
           processedQuery = processedQuery.replace(
             new RegExp(
-              `${this.escapeRegex(effectiveTimeColumn)}\\s+as\\s+${this.escapeRegex(
-                alias
-              )}\\b`,
+              `${this.escapeRegex(
+                effectiveTimeColumn
+              )}\\s+as\\s+${this.escapeRegex(alias)}\\b`,
               "gi"
             ),
             effectiveTimeColumn
@@ -248,117 +244,6 @@ export class QueryProcessor {
   }
 
   /**
-   * Validate time variable context with enhanced error reporting
-   */
-  static validateTimeVariableContext(
-    query: string,
-    selectedTimeField: string | undefined,
-    timeRange: TimeRangeUnion | undefined
-  ): { isValid: boolean; errors: string[] } {
-    const errors: string[] = [];
-
-    if (!this.checkForTimeVariables(query)) {
-      return { isValid: true, errors: [] };
-    }
-
-    // Check for $__timeFilter usage
-    if (query.includes("$__timeFilter")) {
-      if (!selectedTimeField) {
-        // Check if query uses a hardcoded time field like __timestamp
-        if (
-          !query.includes("__timestamp") &&
-          !query.includes("timestamp") &&
-          !query.includes("time")
-        ) {
-          errors.push(
-            "$__timeFilter requires a time field to be selected or explicitly defined in the query"
-          );
-        }
-      }
-
-      if (!timeRange) {
-        errors.push("$__timeFilter requires a time range to be configured");
-      }
-    }
-
-    // Check for $__timeField usage - now handled automatically
-    if (query.includes("$__timeField") && !selectedTimeField) {
-      // This is now handled by auto-detection, so just log info
-      console.info("$__timeField detected - will auto-detect time field");
-    }
-
-    // Check for $__timeFrom/$__timeTo usage
-    if (
-      (query.includes("$__timeFrom") || query.includes("$__timeTo")) &&
-      !timeRange
-    ) {
-      errors.push(
-        "$__timeFrom and $__timeTo require a time range to be configured"
-      );
-    }
-
-    // Check if time range is enabled for QueryTimeRange
-    if (timeRange && "enabled" in timeRange && !timeRange.enabled) {
-      errors.push(
-        "Time range must be enabled when using time variables. Enable it in the time picker."
-      );
-    }
-
-    // Check if time range has valid values
-    if (timeRange) {
-      const bounds = this.getTimeBounds(timeRange);
-      if (!bounds) {
-        errors.push(
-          "Time range has invalid values. Please check the from/to dates."
-        );
-      } else {
-        // Validate date order
-        if (bounds.from >= bounds.to) {
-          errors.push("Time range 'from' date must be before 'to' date");
-        }
-      }
-    }
-
-    // Check for GROUP BY with aliases when using time variables
-    if (
-      selectedTimeField &&
-      (query.includes("$__timeField") || query.includes("$__timeFilter"))
-    ) {
-      const aliasPattern = new RegExp(
-        `${this.escapeRegex(selectedTimeField)}\\s+as\\s+(\\w+)\\b`,
-        "gi"
-      );
-      const groupByPattern = /GROUP\s+BY\s+(\w+)/gi;
-
-      const aliasMatches = [...query.matchAll(aliasPattern)];
-      const groupByMatches = [...query.matchAll(groupByPattern)];
-
-      if (aliasMatches.length > 0 && groupByMatches.length > 0) {
-        const aliases = aliasMatches.map((m) => m[1].toLowerCase());
-        const groupByCols = groupByMatches.map((m) => m[1].toLowerCase());
-
-        // Check if GROUP BY uses an alias that should reference the time field
-        const problematicGroupBy = groupByCols.find(
-          (col) =>
-            aliases.includes(col) && col !== selectedTimeField.toLowerCase()
-        );
-
-        if (problematicGroupBy) {
-          // This is actually handled automatically now, but we can warn about it
-          console.info(
-            `Auto-fixing GROUP BY ${problematicGroupBy} to use ${selectedTimeField} for time field consistency`
-          );
-        }
-      }
-    }
-
-    return {
-      isValid: errors.length === 0,
-      errors,
-    };
-  }
-
-  /**
    * Generate time filter for the query
    */
   private static generateTimeFilter(
@@ -408,7 +293,6 @@ export class QueryProcessor {
     if ("type" in timeRange) {
       if (timeRange.type === "relative") {
         to = now;
-        console.log("[QueryProcessor] Parsing relative time:", timeRange.from);
         from = this.parseRelativeTime(timeRange.from, now);
       } else {
         from =
@@ -455,7 +339,6 @@ export class QueryProcessor {
    * Parse relative time string like "5m", "1h", "24h", "now-1h"
    */
   private static parseRelativeTime(timeStr: string, baseTime: Date): Date {
-    console.log("[QueryProcessor] parseRelativeTime input:", timeStr);
     if (timeStr === "now") return baseTime;
 
     // Remove "now-" prefix if present
@@ -732,64 +615,6 @@ export function checkForTimeVariables(query: string): boolean {
   return QueryProcessor.checkForTimeVariables(query);
 }
 
-export function validateTimeVariableContext(
-  query: string,
-  selectedTimeField: string | undefined,
-  timeRange: TimeRangeUnion | undefined
-): { isValid: boolean; errors: string[] } {
-  return QueryProcessor.validateTimeVariableContext(
-    query,
-    selectedTimeField,
-    timeRange
-  );
-}
-
 export function detectTimeFieldsFromSchema(columns: ColumnSchema[]): string[] {
   return QueryProcessor.detectTimeFieldsFromSchema(columns);
-}
-
-export function processQueryWithTimeVariables(
-  query: string,
-  selectedTimeField: string | undefined,
-  timeRange: any,
-  selectedTimeFieldDetails?: ColumnSchema | null,
-  timeZone = "UTC"
-): { processedQuery: string; hasTimeVariables: boolean; error?: string } {
-  const result = QueryProcessor.process({
-    database: "",
-    query,
-    timeColumn: selectedTimeField,
-    timeColumnDetails: selectedTimeFieldDetails,
-    timeRange,
-    timeZone,
-  });
-
-  return {
-    processedQuery: result.query,
-    hasTimeVariables: result.hasTimeVariables,
-    error: result.errors.length > 0 ? result.errors[0] : undefined,
-  };
-}
-
-export function previewProcessedQuery(
-  query: string,
-  selectedTimeField: string | undefined,
-  timeRange: any,
-  selectedTimeFieldDetails?: ColumnSchema | null,
-  timeZone = "UTC"
-): { processedQuery: string; hasTimeVariables: boolean; errors: string[] } {
-  const result = QueryProcessor.process({
-    database: "",
-    query,
-    timeColumn: selectedTimeField,
-    timeColumnDetails: selectedTimeFieldDetails,
-    timeRange,
-    timeZone,
-  });
-
-  return {
-    processedQuery: result.query,
-    hasTimeVariables: result.hasTimeVariables,
-    errors: result.errors,
-  };
 }

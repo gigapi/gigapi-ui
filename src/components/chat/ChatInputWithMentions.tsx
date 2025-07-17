@@ -31,6 +31,8 @@ interface MentionItem {
   value: string;
   database?: string;
   description?: string;
+  columnCount?: number;
+  isAmbiguous?: boolean;
 }
 
 export default function ChatInputWithMentions({
@@ -59,14 +61,28 @@ export default function ChatInputWithMentions({
 
     const filter = mentionFilter.toLowerCase();
     const suggestions: MentionItem[] = [];
+    const tableOccurrences = new Map<string, string[]>();
+
+    // First pass: count table occurrences across databases
+    Object.entries(schemaCache.databases).forEach(([db, data]) => {
+      data.tables.forEach((table) => {
+        if (!tableOccurrences.has(table)) {
+          tableOccurrences.set(table, []);
+        }
+        tableOccurrences.get(table)!.push(db);
+      });
+    });
 
     // Add databases
-    Object.keys(schemaCache.databases).forEach((db) => {
+    Object.entries(schemaCache.databases).forEach(([db, data]) => {
       if (db.toLowerCase().includes(filter)) {
+        const tableCount = data.tables.length;
+        const hasSchemas = data.schemas && Object.keys(data.schemas).length > 0;
+        
         suggestions.push({
           type: "database",
           value: db,
-          description: `${schemaCache.databases[db].tables.length} tables`,
+          description: `${tableCount} table${tableCount !== 1 ? 's' : ''}${hasSchemas ? ' with schemas' : ''}`,
         });
       }
     });
@@ -79,17 +95,37 @@ export default function ChatInputWithMentions({
           fullName.toLowerCase().includes(filter) ||
           table.toLowerCase().includes(filter)
         ) {
+          const columns = data.schemas?.[table];
+          const columnCount = columns ? columns.length : 0;
+          const occurrences = tableOccurrences.get(table) || [];
+          const isAmbiguous = occurrences.length > 1;
+          
           suggestions.push({
             type: "table",
             value: fullName,
             database: db,
-            description: `in ${db}`,
+            description: isAmbiguous 
+              ? `⚠️ in ${db} (also in: ${occurrences.filter(d => d !== db).join(', ')})`
+              : `in ${db}${columnCount > 0 ? ` • ${columnCount} columns` : ''}`,
+            columnCount,
+            isAmbiguous,
           });
         }
       });
     });
 
-    return suggestions.slice(0, 100); // Limit to 10 suggestions
+    // Sort suggestions: databases first, then tables, ambiguous tables highlighted
+    suggestions.sort((a, b) => {
+      if (a.type !== b.type) {
+        return a.type === "database" ? -1 : 1;
+      }
+      if (a.isAmbiguous !== b.isAmbiguous) {
+        return a.isAmbiguous ? -1 : 1;
+      }
+      return a.value.localeCompare(b.value);
+    });
+
+    return suggestions.slice(0, 50); // Limit to 50 suggestions
   };
 
   const suggestions = getMentionSuggestions();

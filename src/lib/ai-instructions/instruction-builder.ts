@@ -2,13 +2,20 @@
  * AI instruction builder - combines modular instructions
  */
 
-import { CORE_INSTRUCTIONS_DIRECT, CORE_INSTRUCTIONS_AGENTIC } from './core-instructions';
-import { SQL_INSTRUCTIONS } from './sql-instructions';
-import { CHART_INSTRUCTIONS } from './chart-instructions';
-import { SCHEMA_INSTRUCTIONS } from './schema-instructions';
-import { MENTION_INSTRUCTIONS } from './mention-instructions';
-import { AGENTIC_INSTRUCTIONS } from './agentic-instructions';
-import { getTemplateSuggestions, type QueryTemplate } from '../query-templates';
+import {
+  CORE_INSTRUCTIONS_DIRECT,
+  CORE_INSTRUCTIONS_AGENTIC,
+} from "./core-instructions";
+import { SQL_INSTRUCTIONS } from "./sql-instructions";
+import { CHART_INSTRUCTIONS } from "./chart-instructions";
+import { SCHEMA_INSTRUCTIONS } from "./schema-instructions";
+import { MENTION_INSTRUCTIONS } from "./mention-instructions";
+import { AGENTIC_INSTRUCTIONS, AGENTIC_EXAMPLES } from "./agentic-instructions";
+import {
+  CONTEXT_PRESERVATION_INSTRUCTIONS,
+  AGENTIC_CONTEXT_PRESERVATION,
+} from "./context-preservation-instructions";
+import { getTemplateSuggestions, type QueryTemplate } from "../query-templates";
 
 export interface InstructionOptions {
   includeCore?: boolean;
@@ -48,7 +55,7 @@ export class InstructionBuilder {
       includeAgentic = false,
       includeTemplates = false,
       userMessage,
-      customInstructions = []
+      customInstructions = [],
     } = this.options;
 
     // Core instructions - use agentic or direct based on mode
@@ -81,7 +88,11 @@ export class InstructionBuilder {
     // Agentic instructions for interactive exploration
     if (includeAgentic) {
       this.instructions.push(AGENTIC_INSTRUCTIONS);
-      
+      this.instructions.push(AGENTIC_EXAMPLES);
+
+      // Add context preservation for agentic mode
+      this.instructions.push(AGENTIC_CONTEXT_PRESERVATION);
+
       // Add template suggestions based on user message
       if (includeTemplates && userMessage) {
         const suggestions = getTemplateSuggestions(userMessage);
@@ -91,6 +102,9 @@ export class InstructionBuilder {
       }
     }
 
+    // Always include general context preservation
+    this.instructions.push(CONTEXT_PRESERVATION_INSTRUCTIONS);
+
     // Custom instructions
     if (customInstructions.length > 0) {
       this.instructions.push(...customInstructions);
@@ -98,7 +112,7 @@ export class InstructionBuilder {
   }
 
   public getInstructions(): string {
-    return this.instructions.join('\n\n---\n\n');
+    return this.instructions.join("\n\n---\n\n");
   }
 
   public addCustomInstruction(instruction: string): InstructionBuilder {
@@ -107,7 +121,9 @@ export class InstructionBuilder {
   }
 
   public static buildComplete(isAgentic: boolean = false): string {
-    return new InstructionBuilder({ includeAgentic: isAgentic }).getInstructions();
+    return new InstructionBuilder({
+      includeAgentic: isAgentic,
+    }).getInstructions();
   }
 
   public static buildAgentic(options?: AgenticOptions): string {
@@ -119,7 +135,7 @@ export class InstructionBuilder {
       includeMentions: true,
       includeAgentic: true,
       includeTemplates: true,
-      userMessage: options?.userMessage || ''
+      userMessage: options?.userMessage || "",
     }).getInstructions();
   }
 
@@ -130,7 +146,7 @@ export class InstructionBuilder {
 Based on your message, here are proven query patterns that work well:
 
 `;
-    
+
     templates.forEach((template, index) => {
       instructions += `## ${index + 1}. ${template.name} (${template.category})
 `;
@@ -138,9 +154,9 @@ Based on your message, here are proven query patterns that work well:
       instructions += `**Pattern**: \`${template.pattern}\`\n`;
       instructions += `**Chart Type**: ${template.suggestedChartType}\n`;
       instructions += `**Example**: \`${template.example}\`\n`;
-      instructions += `**When to use**: ${template.tags.join(', ')}\n\n`;
+      instructions += `**When to use**: ${template.tags.join(", ")}\n\n`;
     });
-    
+
     instructions += `
 ## Template Usage in Proposals
 
@@ -154,15 +170,17 @@ When using these templates in your proposals:
 \`\`\`proposal
 {
   "type": "query_proposal",
-  "title": "${templates[0]?.name || 'Template Query'}",
-  "template": "${templates[0]?.id || 'template_id'}",
-  "chart_type": "${templates[0]?.suggestedChartType || 'table'}",
+  "title": "${templates[0]?.name || "Template Query"}",
+  "template": "${templates[0]?.id || "template_id"}",
+  "chart_type": "${templates[0]?.suggestedChartType || "table"}",
   "query": "[adapted template pattern]",
-  "rationale": "Using the proven ${templates[0]?.name || 'template'} pattern because..."
+  "rationale": "Using the proven ${
+    templates[0]?.name || "template"
+  } pattern because..."
 }
 \`\`\`
 `;
-    
+
     return instructions;
   }
 
@@ -172,7 +190,7 @@ When using these templates in your proposals:
       includeSQL: true,
       includeChart: false,
       includeSchema: true,
-      includeMentions: true
+      includeMentions: true,
     }).getInstructions();
   }
 
@@ -182,7 +200,7 @@ When using these templates in your proposals:
       includeSQL: true,
       includeChart: true,
       includeSchema: true,
-      includeMentions: true
+      includeMentions: true,
     }).getInstructions();
   }
 
@@ -192,7 +210,7 @@ When using these templates in your proposals:
       includeSQL: false,
       includeChart: false,
       includeSchema: true,
-      includeMentions: true
+      includeMentions: true,
     }).getInstructions();
   }
 
@@ -205,15 +223,11 @@ When using these templates in your proposals:
       includeMentions: true,
       includeAgentic: true,
       includeTemplates: true,
-      userMessage
+      userMessage,
     }).getInstructions();
   }
 }
 
 // Export convenience functions
-export const buildCompleteInstructions = (isAgentic: boolean = false) => InstructionBuilder.buildComplete(isAgentic);
-export const buildSQLInstructions = InstructionBuilder.buildForSQL;
-export const buildChartInstructions = InstructionBuilder.buildForChart;
-export const buildSchemaInstructions = InstructionBuilder.buildForSchema;
-export const buildAgentic = InstructionBuilder.buildAgentic;
-export const buildWithTemplates = InstructionBuilder.buildWithTemplates;
+export const buildCompleteInstructions = (isAgentic: boolean = false) =>
+  InstructionBuilder.buildComplete(isAgentic);

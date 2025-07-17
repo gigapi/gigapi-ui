@@ -14,10 +14,11 @@ import {
   type NDJSONRecord,
 } from "@/types/dashboard.types";
 import { type TransformedData } from "@/lib/dashboard/data-transformers";
-import { getPanelComponent } from "./panels";
+import { PanelRenderer } from "./PanelRenderer";
 import Loader from "@/components/shared/Loader";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { PanelErrorBoundary } from "./PanelErrorBoundary";
+import { getPanelComponent } from "./panels";
 
 interface PanelDataContextValue {
   data: NDJSONRecord[] | null;
@@ -124,10 +125,8 @@ interface EnhancedPanelProps {
 }
 
 export function EnhancedPanel({
-  panelId,
   config,
   className,
-  onEdit,
   isEditMode = false,
   isSelected = false,
   onSelect,
@@ -138,24 +137,12 @@ export function EnhancedPanel({
 
   const handleTimeRangeUpdate = useCallback(
     (timeRange: any) => {
-      console.log("[EnhancedPanel] Time range selected from chart:", timeRange);
       if (updateDashboardTimeRange) {
         updateDashboardTimeRange(timeRange);
       }
     },
     [updateDashboardTimeRange]
   );
-
-  // Log panel state changes for debugging (only when data changes)
-  useEffect(() => {
-    if (data && data.length > 0) {
-      console.log(`[EnhancedPanel] Panel ${panelId} data loaded:`, {
-        dataLength: data.length,
-        configType: config.type,
-        fieldMapping: config.fieldMapping,
-      });
-    }
-  }, [panelId, data?.length, config.type, config.fieldMapping]);
 
   // Show loading state if loading and no data yet
   // This prevents showing "No data available" before the first query completes
@@ -190,16 +177,16 @@ export function EnhancedPanel({
     );
   }
 
+  // Use the unified PanelRenderer
   return (
-    <PanelComponent
+    <PanelRenderer
       config={config}
       data={data || []}
       isEditMode={isEditMode}
       isSelected={isSelected}
       onSelect={onSelect}
-      onEdit={onEdit}
-      className={className}
       onTimeRangeUpdate={handleTimeRangeUpdate}
+      className={className}
     />
   );
 }

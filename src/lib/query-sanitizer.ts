@@ -70,6 +70,37 @@ export class QuerySanitizer {
   }
   
   /**
+   * Extract query string from various formats
+   */
+  static extractQueryString(query: any): string {
+    if (typeof query === 'string') {
+      return query;
+    } else if (Array.isArray(query)) {
+      // If query is an array of query objects, take the first one's SQL
+      if (query.length > 0 && query[0] && typeof query[0] === 'object' && query[0].sql) {
+        return query[0].sql;
+      } else if (query.length > 0 && typeof query[0] === 'string') {
+        return query[0];
+      } else {
+        console.warn('Invalid query array format:', query);
+        return '';
+      }
+    } else if (typeof query === 'object' && query !== null) {
+      // If it's an object, try to extract SQL
+      if (query.sql) {
+        return query.sql;
+      } else if (query.query) {
+        return query.query;
+      } else {
+        console.warn('Invalid query object format:', query);
+        return '';
+      }
+    } else {
+      return String(query);
+    }
+  }
+
+  /**
    * Sanitize a complete query artifact
    * Note: For full query processing including time variables, use QueryProcessor.process()
    */
@@ -78,22 +109,17 @@ export class QuerySanitizer {
     
     const sanitized = { ...artifact };
     
-    // Handle different query formats
+    // Handle different query formats and ensure we always get a string
     if (artifact.query) {
-      if (typeof artifact.query === 'string') {
+      const queryString = this.extractQueryString(artifact.query);
+      if (queryString) {
         // Basic sanitization only - QueryProcessor handles time variables
-        sanitized.query = this.stripAtSymbols(artifact.query);
+        sanitized.query = this.stripAtSymbols(queryString);
         sanitized.query = this.fixTimeFilter(sanitized.query);
-      } else if (Array.isArray(artifact.query)) {
-        // If query is an array of query objects, just take the first one's SQL
-        // This is a weird format from the AI, we should use only the first query
-        if (artifact.query.length > 0 && artifact.query[0].sql) {
-          sanitized.query = this.stripAtSymbols(artifact.query[0].sql);
-          sanitized.query = this.fixTimeFilter(sanitized.query);
-        } else {
-          // Invalid format, remove query
-          delete sanitized.query;
-        }
+      } else {
+        // Invalid format, remove query
+        console.warn('Failed to extract query string from:', artifact.query);
+        delete sanitized.query;
       }
     }
     

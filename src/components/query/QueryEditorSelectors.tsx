@@ -89,11 +89,11 @@ export default function QueryEditorSelectors({
           <UnifiedSelector
             type="table"
             context="query"
-            style="select"
+            style="popover"
             value={selectedTable || ""}
             onChange={onTableChange}
             database={selectedDb}
-            className="w-auto"
+            className="w-auto min-w-[200px]"
             showIcon={false}
             label={null}
           />
@@ -142,7 +142,7 @@ export default function QueryEditorSelectors({
               <UnifiedSelector
                 type="table"
                 context="query"
-                style="select"
+                style="popover"
                 value={selectedTable || ""}
                 onChange={onTableChange}
                 database={selectedDb}

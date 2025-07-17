@@ -55,7 +55,7 @@ export function PanelConfigurationForm({
   // Ensure config always has a valid panel type
   React.useEffect(() => {
     if (!config.type) {
-      onConfigChange({ type: "timeseries" });
+      onConfigChange({ type: "table" });
     }
   }, [config.type, onConfigChange]);
 
@@ -150,7 +150,7 @@ export function PanelConfigurationForm({
             Panel Type
           </Label>
           <Select
-            value={config.type || "timeseries"}
+            value={config.type || "table"}
             onValueChange={(value) => {
               const newPanelType = value as PanelConfig["type"];
 

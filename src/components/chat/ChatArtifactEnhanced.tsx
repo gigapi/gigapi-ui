@@ -72,6 +72,7 @@ import type {
 } from "@/types/chat.types";
 import type { Dashboard, TimeRange } from "@/types/dashboard.types";
 import parseNDJSON from "@/lib/parsers/ndjson";
+import { useNavigate } from "react-router-dom";
 
 interface ChatArtifactEnhancedProps {
   artifact: ChatArtifact;
@@ -99,19 +100,6 @@ export default function ChatArtifactEnhanced({
   session,
   dashboardTimeRange,
 }: ChatArtifactEnhancedProps) {
-  // Debug logging
-  useEffect(() => {
-    console.log(`[ChatArtifactEnhanced] Mounting artifact ${artifact.id}`, {
-      type: artifact.type,
-      title: artifact.title,
-      hasPersistedData: !!(artifact as any).metadata?.cachedData,
-      persistedDataLength: (artifact as any).metadata?.cachedData?.length || 0,
-    });
-    
-    return () => {
-      console.log(`[ChatArtifactEnhanced] Unmounting artifact ${artifact.id}`);
-    };
-  }, [artifact.id]);
   const [apiUrl] = useAtom(apiUrlAtom);
   const setQuery = useSetAtom(setQueryAtom);
   const [dashboards] = useAtom(dashboardListAtom);
@@ -119,6 +107,9 @@ export default function ChatArtifactEnhanced({
   const addPanel = useSetAtom(addPanelAtom);
   const [chatSessions, setChatSessions] = useAtom(chatSessionsAtom);
   const [schemaCache] = useAtom(schemaCacheAtom);
+
+  // Navigate
+  const navigation = useNavigate();
 
   // Artifact context for logging
   const {
@@ -137,11 +128,13 @@ export default function ChatArtifactEnhanced({
   const [data, setData] = useState<any[]>(persistedData || []);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(persistedError || null);
-  const [executionTime, setExecutionTime] = useState<number | null>(persistedExecutionTime || null);
+  const [executionTime, setExecutionTime] = useState<number | null>(
+    persistedExecutionTime || null
+  );
   const [showDebugDialog, setShowDebugDialog] = useState(false);
   const [isEditingQuery, setIsEditingQuery] = useState(false);
   const [editedQuery, setEditedQuery] = useState("");
-  
+
   // Determine artifact type and extract data first
   const isQueryArtifact = artifact.type === "query";
   const isChartArtifact = artifact.type === "chart";
@@ -149,16 +142,17 @@ export default function ChatArtifactEnhanced({
 
   // Extract validation info from metadata
   const validationErrors = (artifact as any).metadata?.validationErrors || [];
-  const validationWarnings = (artifact as any).metadata?.validationWarnings || [];
+  const validationWarnings =
+    (artifact as any).metadata?.validationWarnings || [];
 
   // Time range state
   const [selectedTimeRange, setSelectedTimeRange] = useState<string>("1h");
-  
+
   // Get the original query first (needed for time field detection)
   const originalQuery = isQueryArtifact
     ? (artifactData as QueryArtifact).query
     : (artifactData as ChartArtifact).query;
-  
+
   // Time field state (QueryProcessor will auto-detect if needed)
   const [selectedTimeField, setSelectedTimeField] = useState<string>(
     artifactData.timeField || ""
@@ -168,7 +162,7 @@ export default function ChatArtifactEnhanced({
   const [showSaveToDashboard, setShowSaveToDashboard] = useState(false);
   const [selectedDashboardId, setSelectedDashboardId] = useState<string>("new");
   const [newDashboardName, setNewDashboardName] = useState("");
-  
+
   // Use edited query if available, otherwise use original
   const query = editedQuery || originalQuery;
 
@@ -178,7 +172,9 @@ export default function ChatArtifactEnhanced({
     : (artifactData as ChartArtifact).database || "default";
 
   // Strip @ prefix from database name if present
-  const database = rawDatabase ? QuerySanitizer.stripAtSymbols(rawDatabase) : rawDatabase;
+  const database = rawDatabase
+    ? QuerySanitizer.stripAtSymbols(rawDatabase)
+    : rawDatabase;
 
   // Get effective time range
   const getEffectiveTimeRange = useCallback((): TimeRange => {
@@ -219,18 +215,21 @@ export default function ChatArtifactEnhanced({
       // Start with basic sanitization
       let finalQuery = QuerySanitizer.stripAtSymbols(query);
       finalQuery = QuerySanitizer.fixTimeFilter(finalQuery);
-      
+
       // Only use QueryProcessor for queries with time variables
-      const hasTimeVariables = finalQuery.includes('$__timeFilter') || 
-                               finalQuery.includes('$__timeField') ||
-                               finalQuery.includes('$__timeFrom') ||
-                               finalQuery.includes('$__timeTo') ||
-                               finalQuery.includes('$__interval');
-      
+      const hasTimeVariables =
+        finalQuery.includes("$__timeFilter") ||
+        finalQuery.includes("$__timeField") ||
+        finalQuery.includes("$__timeFrom") ||
+        finalQuery.includes("$__timeTo") ||
+        finalQuery.includes("$__interval");
+
       if (hasTimeVariables) {
         const timeRange = getEffectiveTimeRange();
-        const chartData = isChartArtifact ? (artifactData as ChartArtifact) : null;
-        
+        const chartData = isChartArtifact
+          ? (artifactData as ChartArtifact)
+          : null;
+
         log(artifact.id, "info", "Processing query with time variables", {
           timeRange,
           selectedTimeField,
@@ -239,15 +238,21 @@ export default function ChatArtifactEnhanced({
 
         // Get column details for the time field if available
         let timeColumnDetails: any = null;
-        if ((selectedTimeField || chartData?.fieldMapping?.xField) && schemaCache) {
-          const timeColumn = selectedTimeField || chartData?.fieldMapping?.xField;
+        if (
+          (selectedTimeField || chartData?.fieldMapping?.xField) &&
+          schemaCache
+        ) {
+          const timeColumn =
+            selectedTimeField || chartData?.fieldMapping?.xField;
           // Search for column details in schema cache
           const dbData = schemaCache.databases[database];
           if (dbData) {
             for (const table of dbData.tables) {
               const tableSchema = dbData.schemas[table];
               if (tableSchema) {
-                const columnDetail = tableSchema.find((col: any) => col.column_name === timeColumn);
+                const columnDetail = tableSchema.find(
+                  (col: any) => col.column_name === timeColumn
+                );
                 if (columnDetail) {
                   // Convert to ColumnSchema format expected by QueryProcessor
                   timeColumnDetails = {
@@ -255,9 +260,14 @@ export default function ChatArtifactEnhanced({
                     dataType: columnDetail.column_type,
                   };
                   // If it's a BIGINT column and looks like a time field, set timeUnit to 'ns'
-                  if (columnDetail.column_type?.toLowerCase().includes('bigint') && 
-                      (timeColumn.toLowerCase().includes('time') || timeColumn === '__timestamp')) {
-                    timeColumnDetails.timeUnit = 'ns';
+                  if (
+                    columnDetail.column_type
+                      ?.toLowerCase()
+                      .includes("bigint") &&
+                    (timeColumn.toLowerCase().includes("time") ||
+                      timeColumn === "__timestamp")
+                  ) {
+                    timeColumnDetails.timeUnit = "ns";
                   }
                   break;
                 }
@@ -314,7 +324,10 @@ export default function ChatArtifactEnhanced({
         log(artifact.id, "debug", "Parsing API response", {
           responseType: typeof response.data,
           responseLength: response.data?.length || 0,
-          responseSample: typeof response.data === 'string' ? response.data.substring(0, 100) : response.data,
+          responseSample:
+            typeof response.data === "string"
+              ? response.data.substring(0, 100)
+              : response.data,
         });
 
         const parseResult = parseNDJSON(response.data);
@@ -341,7 +354,11 @@ export default function ChatArtifactEnhanced({
         });
 
         if (results.length === 0) {
-          log(artifact.id, "info", "Query returned no data - this is normal for some queries");
+          log(
+            artifact.id,
+            "info",
+            "Query returned no data - this is normal for some queries"
+          );
           // Don't set this as an error - no data can be a valid result
         }
 
@@ -350,21 +367,23 @@ export default function ChatArtifactEnhanced({
         if (currentSession) {
           const updatedMessages = currentSession.messages.map((message) => {
             if (message.metadata?.artifacts) {
-              const updatedArtifacts = message.metadata.artifacts.map((art: any) => {
-                if (art.id === artifact.id) {
-                  return {
-                    ...art,
-                    metadata: {
-                      ...art.metadata,
-                      cachedData: results,
-                      executionTime: execTime,
-                      executionError: null,
-                      lastExecuted: new Date().toISOString(),
-                    },
-                  };
+              const updatedArtifacts = message.metadata.artifacts.map(
+                (art: any) => {
+                  if (art.id === artifact.id) {
+                    return {
+                      ...art,
+                      metadata: {
+                        ...art.metadata,
+                        cachedData: results,
+                        executionTime: execTime,
+                        executionError: null,
+                        lastExecuted: new Date().toISOString(),
+                      },
+                    };
+                  }
+                  return art;
                 }
-                return art;
-              });
+              );
               return {
                 ...message,
                 metadata: {
@@ -428,21 +447,23 @@ export default function ChatArtifactEnhanced({
       if (currentSession) {
         const updatedMessages = currentSession.messages.map((message) => {
           if (message.metadata?.artifacts) {
-            const updatedArtifacts = message.metadata.artifacts.map((art: any) => {
-              if (art.id === artifact.id) {
-                return {
-                  ...art,
-                  metadata: {
-                    ...art.metadata,
-                    cachedData: [],
-                    executionTime: errorExecTime,
-                    executionError: errorMessage,
-                    lastExecuted: new Date().toISOString(),
-                  },
-                };
+            const updatedArtifacts = message.metadata.artifacts.map(
+              (art: any) => {
+                if (art.id === artifact.id) {
+                  return {
+                    ...art,
+                    metadata: {
+                      ...art.metadata,
+                      cachedData: [],
+                      executionTime: errorExecTime,
+                      executionError: errorMessage,
+                      lastExecuted: new Date().toISOString(),
+                    },
+                  };
+                }
+                return art;
               }
-              return art;
-            });
+            );
             return {
               ...message,
               metadata: {
@@ -492,7 +513,11 @@ export default function ChatArtifactEnhanced({
   // Auto-execute on mount only if no persisted data
   useEffect(() => {
     if (query && database && !persistedData) {
-      log(artifact.id, "info", "Auto-executing query on mount (no cached data)");
+      log(
+        artifact.id,
+        "info",
+        "Auto-executing query on mount (no cached data)"
+      );
       executeQuery();
     } else if (persistedData) {
       log(artifact.id, "info", "Using cached data from previous execution", {
@@ -510,19 +535,59 @@ export default function ChatArtifactEnhanced({
     }
   }, [selectedTimeRange]);
 
+  // Helper function to extract query string from various formats
+  const extractQueryString = (queryInput: any): string => {
+    if (typeof queryInput === "string") {
+      return queryInput;
+    } else if (Array.isArray(queryInput)) {
+      // If query is an array of query objects, take the first one's SQL
+      if (
+        queryInput.length > 0 &&
+        queryInput[0] &&
+        typeof queryInput[0] === "object" &&
+        queryInput[0].sql
+      ) {
+        return queryInput[0].sql;
+      } else if (queryInput.length > 0 && typeof queryInput[0] === "string") {
+        return queryInput[0];
+      } else {
+        return JSON.stringify(queryInput, null, 2);
+      }
+    } else if (typeof queryInput === "object" && queryInput !== null) {
+      // If it's an object, try to extract SQL or stringify it
+      if (queryInput.sql) {
+        return queryInput.sql;
+      } else if (queryInput.query) {
+        return queryInput.query;
+      } else {
+        return JSON.stringify(queryInput, null, 2);
+      }
+    } else {
+      return String(queryInput);
+    }
+  };
+
   const copyQuery = () => {
     if (query) {
-      navigator.clipboard.writeText(query);
+      const queryText = extractQueryString(query);
+      navigator.clipboard.writeText(queryText);
       toast.success("Query copied to clipboard");
-      log(artifact.id, "info", "Query copied to clipboard");
+      log(artifact.id, "info", "Query copied to clipboard", {
+        queryType: typeof query,
+        queryText,
+      });
     }
   };
 
   const useQueryInEditor = () => {
     if (query) {
-      setQuery(query);
+      const queryText = extractQueryString(query);
+      setQuery(queryText);
       toast.success("Query loaded in editor");
-      log(artifact.id, "info", "Query loaded in editor");
+      log(artifact.id, "info", "Query loaded in editor", {
+        queryType: typeof query,
+        queryText,
+      });
     }
   };
 
@@ -584,7 +649,12 @@ export default function ChatArtifactEnhanced({
       // Add panel to dashboard
       await addPanel({ panelData: panelConfig, dashboardId });
 
-      toast.success(`Chart saved to dashboard successfully!`);
+      toast.success(`Chart saved to dashboard successfully!`, {
+        action: {
+          label: "Go to dashboard",
+          onClick: () => navigation(`/dashboard/${dashboardId}`),
+        },
+      });
       log(artifact.id, "info", "Panel saved to dashboard", {
         dashboardId,
         panelConfig,
@@ -622,25 +692,27 @@ export default function ChatArtifactEnhanced({
 
   const saveQueryEdit = () => {
     setIsEditingQuery(false);
-    
+
     // Update the artifact data with the edited query
     if (isQueryArtifact) {
       (artifact.data as QueryArtifact).query = editedQuery;
     } else if (isChartArtifact) {
       (artifact.data as ChartArtifact).query = editedQuery;
     }
-    
+
     // Update the chat session to persist the changes
     const currentSession = chatSessions[session.id];
     if (currentSession) {
       const updatedMessages = currentSession.messages.map((message) => {
         if (message.metadata?.artifacts) {
-          const updatedArtifacts = message.metadata.artifacts.map((art: any) => {
-            if (art.id === artifact.id) {
-              return { ...art, data: { ...art.data, query: editedQuery } };
+          const updatedArtifacts = message.metadata.artifacts.map(
+            (art: any) => {
+              if (art.id === artifact.id) {
+                return { ...art, data: { ...art.data, query: editedQuery } };
+              }
+              return art;
             }
-            return art;
-          });
+          );
           return {
             ...message,
             metadata: {
@@ -651,7 +723,7 @@ export default function ChatArtifactEnhanced({
         }
         return message;
       });
-      
+
       setChatSessions({
         ...chatSessions,
         [session.id]: {
@@ -661,10 +733,10 @@ export default function ChatArtifactEnhanced({
         },
       });
     }
-    
+
     // Execute the query with the new edited query
     executeQuery();
-    
+
     toast.success("Query updated successfully");
     log(artifact.id, "info", "Query manually edited and saved", {
       originalQuery: originalQuery,
@@ -757,12 +829,6 @@ export default function ChatArtifactEnhanced({
   // Start render operation when component renders with data
   useEffect(() => {
     if (data.length > 0 && !error) {
-      console.log(`[ChatArtifactEnhanced] Data available for rendering artifact ${artifact.id}`, {
-        dataLength: data.length,
-        chartType: panelConfig?.type,
-        isChart: isChartArtifact,
-      });
-      
       const renderOpId = startOperation(artifact.id, "render", {
         dataRows: data.length,
         chartType: panelConfig?.type,
@@ -774,11 +840,6 @@ export default function ChatArtifactEnhanced({
       }, 100);
 
       return () => clearTimeout(timer);
-    } else if (data.length === 0 && !isLoading && !error) {
-      console.log(`[ChatArtifactEnhanced] No data for artifact ${artifact.id}`, {
-        isLoading,
-        hasError: !!error,
-      });
     }
   }, [data, error]);
 
@@ -825,31 +886,35 @@ export default function ChatArtifactEnhanced({
 
             <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
               {/* Time Range Selector */}
-              {(query.includes("$__timeFilter") || query.includes("$__timeFrom") || query.includes("$__timeTo") || query.includes("$__interval")) && !dashboardTimeRange && (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="outline" size="sm">
-                      <Clock className="w-3 h-3 mr-2" />
-                      {TIME_PRESETS.find((p) => p.value === selectedTimeRange)
-                        ?.label || "Custom"}
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-48">
-                    <DropdownMenuLabel>Time Range</DropdownMenuLabel>
-                    <DropdownMenuSeparator />
-                    {TIME_PRESETS.map((preset) => (
-                      <DropdownMenuItem
-                        key={preset.value}
-                        onClick={() => setSelectedTimeRange(preset.value)}
-                        className="text-sm"
-                      >
-                        <Calendar className="w-3 h-3 mr-2" />
-                        {preset.label}
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              )}
+              {(query.includes("$__timeFilter") ||
+                query.includes("$__timeFrom") ||
+                query.includes("$__timeTo") ||
+                query.includes("$__interval")) &&
+                !dashboardTimeRange && (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="outline" size="sm">
+                        <Clock className="w-3 h-3 mr-2" />
+                        {TIME_PRESETS.find((p) => p.value === selectedTimeRange)
+                          ?.label || "Custom"}
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-48">
+                      <DropdownMenuLabel>Time Range</DropdownMenuLabel>
+                      <DropdownMenuSeparator />
+                      {TIME_PRESETS.map((preset) => (
+                        <DropdownMenuItem
+                          key={preset.value}
+                          onClick={() => setSelectedTimeRange(preset.value)}
+                          className="text-sm"
+                        >
+                          <Calendar className="w-3 h-3 mr-2" />
+                          {preset.label}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )}
 
               <Button
                 variant="outline"
@@ -909,18 +974,26 @@ export default function ChatArtifactEnhanced({
           {(validationErrors.length > 0 || validationWarnings.length > 0) && (
             <div className="mb-3 space-y-2">
               {validationErrors.map((error: any, index: number) => (
-                <div key={index} className="flex items-start gap-2 text-sm text-red-600">
+                <div
+                  key={index}
+                  className="flex items-start gap-2 text-sm text-red-600"
+                >
                   <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
                   <div>
-                    <span className="font-semibold">Error:</span> {error.message}
+                    <span className="font-semibold">Error:</span>{" "}
+                    {error.message}
                   </div>
                 </div>
               ))}
               {validationWarnings.map((warning: any, index: number) => (
-                <div key={index} className="flex items-start gap-2 text-sm text-yellow-600">
+                <div
+                  key={index}
+                  className="flex items-start gap-2 text-sm text-yellow-600"
+                >
                   <Info className="w-4 h-4 mt-0.5 flex-shrink-0" />
                   <div>
-                    <span className="font-semibold">Warning:</span> {warning.message}
+                    <span className="font-semibold">Warning:</span>{" "}
+                    {warning.message}
                     {warning.suggestion && (
                       <div className="text-xs text-muted-foreground mt-1">
                         💡 {warning.suggestion}
@@ -931,7 +1004,7 @@ export default function ChatArtifactEnhanced({
               ))}
             </div>
           )}
-          
+
           {/* Time Field Selector for queries with time filter */}
           {query.includes("$__timeFilter") && (
             <div className="mb-4">
@@ -944,26 +1017,40 @@ export default function ChatArtifactEnhanced({
                 schemaColumns={(() => {
                   // Try to get schema columns from localStorage
                   try {
-                    const schemaCache = localStorage.getItem("gigapi_schema_cache");
+                    const schemaCache = localStorage.getItem(
+                      "gigapi_schema_cache"
+                    );
                     if (schemaCache && database) {
                       const parsed = JSON.parse(schemaCache);
                       const dbSchema = parsed.databases?.[database];
                       if (dbSchema?.schemas) {
                         // Collect all timestamp columns from all tables
                         const timeColumns: string[] = [];
-                        Object.values(dbSchema.schemas).forEach((columns: any) => {
-                          if (Array.isArray(columns)) {
-                            columns.forEach((col: any) => {
-                              if (col.column_type?.toLowerCase().includes('time') ||
-                                  col.column_type?.toLowerCase().includes('date') ||
-                                  col.column_name?.toLowerCase().includes('time') ||
-                                  col.column_name?.toLowerCase().includes('date') ||
-                                  col.column_name === '__timestamp') {
-                                timeColumns.push(col.column_name);
-                              }
-                            });
+                        Object.values(dbSchema.schemas).forEach(
+                          (columns: any) => {
+                            if (Array.isArray(columns)) {
+                              columns.forEach((col: any) => {
+                                if (
+                                  col.column_type
+                                    ?.toLowerCase()
+                                    .includes("time") ||
+                                  col.column_type
+                                    ?.toLowerCase()
+                                    .includes("date") ||
+                                  col.column_name
+                                    ?.toLowerCase()
+                                    .includes("time") ||
+                                  col.column_name
+                                    ?.toLowerCase()
+                                    .includes("date") ||
+                                  col.column_name === "__timestamp"
+                                ) {
+                                  timeColumns.push(col.column_name);
+                                }
+                              });
+                            }
                           }
-                        });
+                        );
                         return [...new Set(timeColumns)]; // Remove duplicates
                       }
                     }
@@ -975,7 +1062,7 @@ export default function ChatArtifactEnhanced({
               />
             </div>
           )}
-          
+
           <div className="bg-background rounded border min-h-[200px] sm:min-h-[320px] relative">
             {error ? (
               <div className="flex items-center justify-center h-full p-4 sm:p-6">
@@ -1055,7 +1142,7 @@ export default function ChatArtifactEnhanced({
                       </>
                     )}
                   </div>
-                  
+
                   {/* Edit Query Button */}
                   {!isEditingQuery ? (
                     <div className="flex items-center gap-1">
@@ -1104,7 +1191,7 @@ export default function ChatArtifactEnhanced({
                   )}
                 </div>
               </div>
-              
+
               {/* Query Editor */}
               {isEditingQuery ? (
                 <Textarea

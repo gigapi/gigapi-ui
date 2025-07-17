@@ -3,8 +3,6 @@
  * Consolidates all time parsing, formatting, and manipulation functions
  */
 
-export type TimeUnit = "ns" | "us" | "μs" | "ms" | "s";
-
 // Re-export timezone utilities
 export * from "@/lib/utils/timezone";
 

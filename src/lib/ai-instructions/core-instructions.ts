@@ -108,5 +108,4 @@ You are GigAPI AI, a specialized assistant for data analysis and visualization. 
 - **ITERATE** based on user feedback and data discoveries
 `;
 
-// Export default as direct mode
-export const CORE_INSTRUCTIONS = CORE_INSTRUCTIONS_DIRECT;
+// Export default as direct mode - removed unused CORE_INSTRUCTIONS

@@ -1,49 +1,71 @@
 import { useEffect, useRef, useMemo } from "react";
 import { useSetAtom, useAtomValue } from "jotai";
 import QueryEditor from "@/components/query/QueryEditor";
-import QueryResults from "@/components/QueryResults";
+import QueryResults from "@/components/query/QueryResults";
 import {
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
 import AppLayout from "@/components/navigation/AppLayout";
-import { initializeDatabaseAtom, isConnectedAtom } from "@/atoms";
+import { 
+  initializeDatabaseAtom, 
+  isConnectedAtom,
+  setQueryAtom,
+  setSelectedDbAtom,
+  setSelectedTableAtom,
+  selectedTimeFieldAtom,
+  setTimeRangeAtom
+} from "@/atoms";
+import { HashQueryUtils } from "@/lib/url/hash-query-utils";
 
 function Home() {
   const initializeDatabase = useSetAtom(initializeDatabaseAtom);
   const isConnected = useAtomValue(isConnectedAtom);
   const initializedRef = useRef(false);
+  const urlParamsLoadedRef = useRef(false);
+  
+  // Atoms for setting query parameters
+  const setQuery = useSetAtom(setQueryAtom);
+  const setSelectedDb = useSetAtom(setSelectedDbAtom);
+  const setSelectedTable = useSetAtom(setSelectedTableAtom);
+  const setSelectedTimeField = useSetAtom(selectedTimeFieldAtom);
+  const setTimeRange = useSetAtom(setTimeRangeAtom);
 
-  console.log("🔥 HOME RENDER:", {
-    isConnected,
-    initializedRef: initializedRef.current,
-    timestamp: new Date().toISOString(),
-  });
+
+  // Load query parameters from URL on mount
+  useEffect(() => {
+    if (!urlParamsLoadedRef.current) {
+      urlParamsLoadedRef.current = true;
+      
+      const params = HashQueryUtils.decodeHashQuery();
+      if (params) {
+        // Apply the parameters
+        if (params.query) setQuery(params.query);
+        if (params.db) setSelectedDb(params.db);
+        if (params.table) setSelectedTable(params.table);
+        if (params.timeField) setSelectedTimeField(params.timeField);
+        
+        // Handle time range
+        if (params.timeFrom && params.timeTo) {
+          setTimeRange({
+            from: params.timeFrom,
+            to: params.timeTo,
+            type: 'relative'
+          });
+        }
+      }
+    }
+  }, [setQuery, setSelectedDb, setSelectedTable, setSelectedTimeField, setTimeRange]);
 
   // Initialize database and tables when connected (only once)
   useEffect(() => {
-    console.log("🔥 [Home] useEffect triggered:", {
-      isConnected,
-      initializedRef: initializedRef.current,
-      timestamp: new Date().toISOString(),
-    });
-
     if (isConnected && !initializedRef.current) {
-      console.log(
-        "🔥 [Home] Initializing database for the first time at",
-        new Date().toISOString()
-      );
       initializedRef.current = true;
       initializeDatabase();
     } else if (!isConnected) {
       // Reset initialization flag when disconnected
-      console.log("🔥 [Home] Not connected, resetting initialization flag");
       initializedRef.current = false;
-    } else {
-      console.log("🔥 [Home] Skipping initialization:", {
-        reason: isConnected ? "already initialized" : "not connected",
-      });
     }
   }, [isConnected, initializeDatabase]);
 

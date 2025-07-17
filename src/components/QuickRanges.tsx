@@ -16,9 +16,7 @@ export default function QuickRanges({
 }: QuickRangesProps) {
   const [searchQuick, setSearchQuick] = useState("");
 
-  // Filter quick ranges based on search
   const filteredQuickRanges = useMemo(() => {
-    // Add "No time filter" option at the beginning
     const allRanges = [NO_TIME_FILTER, ...QUICK_RANGES];
 
     if (!searchQuick) return allRanges;

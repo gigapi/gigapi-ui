@@ -82,18 +82,10 @@ export const schemaCacheAtom = atomWithStorage<SchemaCache | null>(
   null,
   {
     getItem: (key) => {
-      console.log("[SchemaCache] Loading from localStorage...");
       const item = localStorage.getItem(key);
       if (item) {
         try {
           const parsed = JSON.parse(item);
-          console.log("[SchemaCache] Found cache in localStorage:", {
-            databases: Object.keys(parsed.databases || {}),
-            timestamp: new Date(parsed.timestamp).toISOString(),
-            age:
-              Math.round((Date.now() - parsed.timestamp) / 1000 / 60) +
-              " minutes",
-          });
           return parsed;
         } catch (e) {
           console.error(
@@ -103,18 +95,12 @@ export const schemaCacheAtom = atomWithStorage<SchemaCache | null>(
           return null;
         }
       }
-      console.log("[SchemaCache] No cache found in localStorage");
       return null;
     },
     setItem: (key, value) => {
-      console.log("[SchemaCache] Saving to localStorage:", {
-        databases: Object.keys(value?.databases || {}),
-        timestamp: new Date(value?.timestamp || 0).toISOString(),
-      });
       localStorage.setItem(key, JSON.stringify(value));
     },
     removeItem: (key) => {
-      console.log("[SchemaCache] Removing from localStorage");
       localStorage.removeItem(key);
     },
   }
@@ -129,26 +115,17 @@ export const cacheProgressAtom = atom<{ current: number; total: number }>({
 
 // Synchronous cache check - directly from localStorage
 export const getLocalStorageCacheAtom = atom(() => {
-  console.log("[SchemaCache] Direct localStorage check...");
   try {
     const item = localStorage.getItem("gigapi_schema_cache");
     if (item) {
       const parsed = JSON.parse(item);
       const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
       const isValid = Date.now() - parsed.timestamp < TWENTY_FOUR_HOURS;
-      console.log("[SchemaCache] Direct localStorage result:", {
-        found: true,
-        valid: isValid,
-        databases: Object.keys(parsed.databases || {}),
-        age:
-          Math.round((Date.now() - parsed.timestamp) / 1000 / 60) + " minutes",
-      });
       return isValid ? parsed : null;
     }
   } catch (e) {
     console.error("[SchemaCache] Direct localStorage error:", e);
   }
-  console.log("[SchemaCache] Direct localStorage result: not found or invalid");
   return null;
 });
 
@@ -167,19 +144,13 @@ export const setSelectedDbAtom = atom(
 
     // Early return if database hasn't changed
     if (currentDb === database) {
-      console.log(`[Database] Database ${database} already selected, skipping`);
       return;
     }
 
     // Check if already loading tables
     if (get(tablesLoadingAtom)) {
-      console.log(`[Database] Tables already loading, skipping`);
       return;
     }
-
-    console.log(
-      `[Database] Setting selected database from ${currentDb} to ${database}`
-    );
 
     set(selectedDbAtom, database);
     set(selectedTableAtom, ""); // Clear table selection
@@ -197,13 +168,9 @@ export const setSelectedDbAtom = atom(
       const cachedTables = getCachedTables(database);
 
       if (cachedTables.length > 0) {
-        console.log(
-          `[Database] Using cached tables for ${database}: ${cachedTables.length} tables`
-        );
         tables = cachedTables;
       } else {
         // Fallback to API if cache miss
-        console.log(`[Database] Cache miss for ${database}, fetching from API`);
         const apiUrl = get(apiUrlAtom);
         const response = await axios.post(
           `${apiUrl}?db=${database}&format=json`,
@@ -239,25 +206,16 @@ export const setSelectedDbAtom = atom(
         [database]: updatedTables,
       });
 
-      console.log(
-        `[Database] Initialized autocomplete schema for ${database} with ${tables.length} tables`
-      );
-
       // Save tables for AI/MCP use
       const currentAITables = get(tablesListForAIAtom);
       set(tablesListForAIAtom, {
         ...currentAITables,
         [database]: tables,
       });
-      console.log(
-        `[Database] Saved ${tables.length} tables for AI/MCP in database ${database}:`,
-        tables
-      );
 
       // Auto-select first table if none selected
       const currentTable = get(selectedTableAtom);
       if (!currentTable && tables.length > 0) {
-        console.log(`[Database] Auto-selecting first table: ${tables[0]}`);
         set(setSelectedTableAtom, tables[0]);
       }
     } catch (error) {
@@ -300,36 +258,17 @@ export const setSelectedTableAtom = atom(
 
     // Check if already loading schema
     if (get(schemaLoadingAtom)) {
-      console.log(`[Database] Schema already loading for ${table}, skipping`);
       return;
     }
 
     set(schemaLoadingAtom, true);
 
     try {
-      let schema: ColumnSchema[] = [];
-
-      // Check cache first
-      const getCachedSchema = get(getCachedSchemaAtom);
-      const cachedSchema = getCachedSchema(database, table);
-
-      if (cachedSchema) {
-        console.log(`[Database] Using cached schema for ${database}.${table}`);
-        schema = cachedSchema;
-      } else {
-        // Fallback to API if cache miss
-        console.log(
-          `[Database] Cache miss for ${database}.${table}, fetching from API`
-        );
-        const apiUrl = get(apiUrlAtom);
-        const response = await axios.post(
-          `${apiUrl}?db=${database}&format=json`,
-          {
-            query: `DESCRIBE SELECT * FROM ${table} LIMIT 1`,
-          }
-        );
-        schema = response.data.results || [];
-      }
+      // Use lazy loading - it will check cache first, then load if needed
+      const schema = await set(loadAndCacheTableSchemaAtom, {
+        database,
+        table,
+      });
 
       set(tableSchemaAtom, schema);
 
@@ -360,16 +299,12 @@ export const setSelectedTableAtom = atom(
       }
 
       set(autoCompleteSchemaAtom, updatedSchema);
-      console.log(
-        `[Database] Updated autocomplete schema for ${database}.${table}:`,
-        tableSchema
-      );
 
       // Auto-select time field if none selected
       const selectedTimeField = get(selectedTimeFieldAtom);
       if (!selectedTimeField && schema.length > 0) {
         // Find time fields
-        const timeFields = schema.filter((col) => {
+        const timeFields = schema.filter((col: any) => {
           const colName = (col.column_name || "").toLowerCase();
           const dataType = (col.column_type || "").toLowerCase();
           return (
@@ -385,11 +320,10 @@ export const setSelectedTableAtom = atom(
         if (timeFields.length > 0) {
           // Prefer __timestamp or first available time field
           const preferredTimeField =
-            timeFields.find((col) => col.column_name === "__timestamp") ||
+            timeFields.find((col: any) => col.column_name === "__timestamp") ||
             timeFields[0];
 
           const timeFieldName = preferredTimeField.column_name;
-          console.log(`[Database] Auto-selecting time field: ${timeFieldName}`);
           set(setSelectedTimeFieldAtom, timeFieldName);
         }
       }
@@ -415,7 +349,6 @@ export const loadTablesForCurrentDbAtom = atom(null, async (get, set) => {
 
   // Check if already loading tables
   if (get(tablesLoadingAtom)) {
-    console.log(`[Database] Tables already loading for ${currentDb}, skipping`);
     return;
   }
 
@@ -429,13 +362,9 @@ export const loadTablesForCurrentDbAtom = atom(null, async (get, set) => {
     const cachedTables = getCachedTables(currentDb);
 
     if (cachedTables.length > 0) {
-      console.log(
-        `[Database] Using cached tables for ${currentDb}: ${cachedTables.length} tables`
-      );
       tables = cachedTables;
     } else {
       // Fallback to API if cache miss
-      console.log(`[Database] Cache miss for ${currentDb}, fetching from API`);
       const apiUrl = get(apiUrlAtom);
       const response = await axios.post(
         `${apiUrl}?db=${currentDb}&format=json`,
@@ -454,32 +383,11 @@ export const loadTablesForCurrentDbAtom = atom(null, async (get, set) => {
     const selectedTable = get(selectedTableAtom);
     if (selectedTable && tables.includes(selectedTable)) {
       try {
-        let schema: ColumnSchema[] = [];
-
-        // Check cache first
-        const getCachedSchema = get(getCachedSchemaAtom);
-        const cachedSchema = getCachedSchema(currentDb, selectedTable);
-
-        if (cachedSchema) {
-          console.log(
-            `[Database] Using cached schema for ${currentDb}.${selectedTable}`
-          );
-          schema = cachedSchema;
-        } else {
-          // Fallback to API if cache miss
-          console.log(
-            `[Database] Cache miss for schema ${currentDb}.${selectedTable}, fetching from API`
-          );
-          const apiUrl = get(apiUrlAtom);
-          const schemaResponse = await axios.post(
-            `${apiUrl}?db=${currentDb}&format=json`,
-            {
-              query: `DESCRIBE SELECT * FROM ${selectedTable} LIMIT 1`,
-            }
-          );
-          schema = schemaResponse.data.results || [];
-        }
-
+        // Use lazy loading - it will check cache first, then load if needed
+        const schema = await set(loadAndCacheTableSchemaAtom, {
+          database: currentDb,
+          table: selectedTable,
+        });
         set(tableSchemaAtom, schema);
       } catch (error) {
         console.error("Failed to load table schema:", error);
@@ -517,37 +425,16 @@ export const loadTablesForCurrentDbAtom = atom(null, async (get, set) => {
 // Initialize database atom
 export const initializeDatabaseAtom = atom(null, async (get, set) => {
   const isConnected = get(isConnectedAtom);
-  console.log("[Database] initializeDatabaseAtom called:", {
-    isConnected,
-    timestamp: new Date().toISOString(),
-  });
-
   // Don't initialize if not connected
   if (!isConnected) {
-    console.log("[Database] Not connected, skipping initialization");
     return;
   }
-
-  // Check cache status before proceeding
-  const schemaCache = get(schemaCacheAtom);
-  console.log("[Database] Cache status at initialization:", {
-    hasCache: !!schemaCache,
-    databases: schemaCache ? Object.keys(schemaCache.databases) : [],
-    isCacheLoading: get(isCacheLoadingAtom),
-  });
 
   const databases = get(availableDatabasesAtom);
   const currentDb = get(selectedDbAtom);
 
-  console.log(
-    `🔥 [Database] Initializing with ${databases.length} databases, current: ${currentDb}`
-  );
-
   // If no database selected but databases available, select first one
   if (!currentDb && databases.length > 0) {
-    console.log(
-      `🔥 [Database] No database selected, selecting first: ${databases[0]}`
-    );
     await set(setSelectedDbAtom, databases[0]);
   } else if (currentDb) {
     // If database is already selected, just load its tables
@@ -559,10 +446,6 @@ export const initializeDatabaseAtom = atom(null, async (get, set) => {
       const cachedTables = getCachedTables(currentDb);
 
       if (cachedTables.length > 0) {
-        console.log(
-          `🔥 [Database] SUCCESS: Loading ${cachedTables.length} tables from cache for ${currentDb}`,
-          cachedTables
-        );
         set(availableTablesAtom, cachedTables);
 
         // Also check if we have a selected table and load its schema from cache
@@ -571,26 +454,12 @@ export const initializeDatabaseAtom = atom(null, async (get, set) => {
           const getCachedSchema = get(getCachedSchemaAtom);
           const cachedSchema = getCachedSchema(currentDb, selectedTable);
           if (cachedSchema) {
-            console.log(
-              `🔥 [Database] SUCCESS: Loading schema from cache for ${currentDb}.${selectedTable}`
-            );
             set(tableSchemaAtom, cachedSchema);
-          } else {
-            console.log(
-              `🔥 [Database] No cached schema for ${currentDb}.${selectedTable}`
-            );
           }
         }
       } else {
-        console.log(
-          `🔥 [Database] CACHE MISS: No cached tables for ${currentDb}, will load from API`
-        );
         await set(loadTablesForCurrentDbAtom);
       }
-    } else {
-      console.log(
-        `🔥 [Database] Database ${currentDb} already has ${currentTables.length} tables loaded`
-      );
     }
   }
 });
@@ -617,7 +486,6 @@ export const loadSchemaForDbAtom = atom(
 
     // If schema already exists for this database, skip
     if (currentSchema[database]) {
-      console.log(`[Database] Schema already loaded for ${database}`);
       return;
     }
 
@@ -668,9 +536,6 @@ export const loadSchemaForDbAtom = atom(
         [database]: dbSchema,
       });
 
-      console.log(
-        `[Database] Loaded schema for ${tables.length} tables in ${database}`
-      );
     } catch (error) {
       console.error(`Failed to load schema for database ${database}:`, error);
     }
@@ -681,19 +546,14 @@ export const loadSchemaForDbAtom = atom(
 // Schema Cache Functions
 // ============================================================================
 
-// Load complete schema cache for all databases
-export const loadCompleteSchemaCacheAtom = atom(null, async (get, set) => {
+// Initialize schema cache with just database and table lists (no schemas)
+export const initializeSchemaCacheAtom = atom(null, async (get, set) => {
   const apiUrl = get(apiUrlAtom);
   const databases = get(availableDatabasesAtom);
 
   if (!databases.length) {
-    console.log("[SchemaCache] No databases available to cache");
     return;
   }
-
-  console.log(`[SchemaCache] Starting to cache ${databases.length} databases`);
-  set(isCacheLoadingAtom, true);
-  set(cacheProgressAtom, { current: 0, total: databases.length });
 
   const cache: SchemaCache = {
     databases: {},
@@ -701,18 +561,18 @@ export const loadCompleteSchemaCacheAtom = atom(null, async (get, set) => {
     version: "1.0",
   };
 
-  try {
-    for (let i = 0; i < databases.length; i++) {
-      const database = databases[i];
-      console.log(
-        `[SchemaCache] Loading database ${i + 1}/${
-          databases.length
-        }: ${database}`
-      );
-      set(cacheProgressAtom, { current: i + 1, total: databases.length });
+  // Only load table lists, not schemas
+  for (const database of databases) {
+    try {
+      // Check if we already have tables in memory
+      const currentTables = get(tablesListForAIAtom)[database];
 
-      try {
-        // Get tables for database
+      if (currentTables && currentTables.length > 0) {
+        cache.databases[database] = {
+          tables: currentTables,
+          schemas: {}, // Empty schemas - will be loaded on demand
+        };
+      } else {
         const tablesResponse = await axios.post(
           `${apiUrl}?db=${database}&format=json`,
           { query: "SHOW TABLES" }
@@ -723,82 +583,29 @@ export const loadCompleteSchemaCacheAtom = atom(null, async (get, set) => {
             ?.map((item: any) => item.table_name || item.Table || item.name)
             .filter(Boolean) || [];
 
-        console.log(
-          `[SchemaCache] Found ${tables.length} tables in ${database}`
-        );
-
-        // Get schemas for all tables in parallel (batch by 10 to avoid overwhelming)
-        const batchSize = 10;
-        const allSchemas: { table: string; schema: ColumnSchema[] }[] = [];
-
-        for (let j = 0; j < tables.length; j += batchSize) {
-          const batch = tables.slice(j, j + batchSize);
-          const schemaPromises = batch.map(async (table: string) => {
-            try {
-              const schemaResponse = await axios.post(
-                `${apiUrl}?db=${database}&format=json`,
-                { query: `DESCRIBE SELECT * FROM ${table} LIMIT 1` }
-              );
-              return { table, schema: schemaResponse.data.results || [] };
-            } catch (error) {
-              console.error(
-                `[SchemaCache] Failed to load schema for ${database}.${table}:`,
-                error
-              );
-              return { table, schema: [] };
-            }
-          });
-
-          const batchResults = await Promise.all(schemaPromises);
-          allSchemas.push(...batchResults);
-        }
-
         cache.databases[database] = {
           tables,
-          schemas: allSchemas.reduce((acc, { table, schema }) => {
-            acc[table] = schema;
-            return acc;
-          }, {} as Record<string, ColumnSchema[]>),
+          schemas: {}, // Empty schemas - will be loaded on demand
         };
-      } catch (error) {
-        console.error(
-          `[SchemaCache] Failed to load database ${database}:`,
-          error
-        );
-        cache.databases[database] = { tables: [], schemas: {} };
+
+        // Update tables list for AI
+        const currentAITables = get(tablesListForAIAtom);
+        set(tablesListForAIAtom, {
+          ...currentAITables,
+          [database]: tables,
+        });
       }
+    } catch (error) {
+      console.error(
+        `[SchemaCache] Failed to load tables for ${database}:`,
+        error
+      );
+      cache.databases[database] = { tables: [], schemas: {} };
     }
-
-    // Save cache
-    set(schemaCacheAtom, cache);
-
-    // Also update existing atoms for compatibility
-    set(
-      tablesListForAIAtom,
-      Object.entries(cache.databases).reduce((acc, [db, data]) => {
-        acc[db] = data.tables;
-        return acc;
-      }, {} as Record<string, string[]>)
-    );
-
-    // Count total tables cached
-    const totalTables = Object.values(cache.databases).reduce(
-      (sum, db: any) => sum + db.tables.length,
-      0
-    );
-    console.log(
-      `[SchemaCache] Cache loaded successfully: ${databases.length} databases, ${totalTables} tables`
-    );
-    toast.success(
-      `Schema cache loaded: ${databases.length} databases, ${totalTables} tables`
-    );
-  } catch (error) {
-    console.error("[SchemaCache] Failed to load cache:", error);
-    toast.error("Failed to load database schema cache");
-  } finally {
-    set(isCacheLoadingAtom, false);
-    set(cacheProgressAtom, { current: 0, total: 0 });
   }
+
+  // Save lightweight cache
+  set(schemaCacheAtom, cache);
 });
 
 // Get cached schema for a specific table
@@ -810,17 +617,69 @@ export const getCachedSchemaAtom = atom(
     }
 );
 
+// Lazily load and cache schema for a specific table
+export const loadAndCacheTableSchemaAtom = atom(
+  null,
+  async (
+    get,
+    set,
+    { database, table }: { database: string; table: string }
+  ) => {
+    const apiUrl = get(apiUrlAtom);
+    const cache = get(schemaCacheAtom);
+
+    // Check if already cached
+    if (cache?.databases[database]?.schemas[table]) {
+      return cache.databases[database].schemas[table];
+    }
+    
+    try {
+      const response = await axios.post(
+        `${apiUrl}?db=${database}&format=json`,
+        {
+          query: `DESCRIBE SELECT * FROM ${table} LIMIT 1`,
+        }
+      );
+
+      const schema = response.data.results || [];
+
+      // Update cache with the new schema
+      if (cache) {
+        const updatedCache = {
+          ...cache,
+          databases: {
+            ...cache.databases,
+            [database]: {
+              ...cache.databases[database],
+              schemas: {
+                ...cache.databases[database]?.schemas,
+                [table]: schema,
+              },
+            },
+          },
+        };
+
+        set(schemaCacheAtom, updatedCache);
+
+      }
+
+      return schema;
+    } catch (error) {
+      console.error(
+        `[SchemaCache] Failed to load schema for ${database}.${table}:`,
+        error
+      );
+      throw error;
+    }
+  }
+);
+
 // Get cached tables for a database
 export const getCachedTablesAtom = atom(
   (get) =>
     (database: string): string[] => {
       const cache = get(schemaCacheAtom);
       const tables = cache?.databases[database]?.tables || [];
-      console.log(`[SchemaCache] getCachedTables for ${database}:`, {
-        cacheExists: !!cache,
-        databaseInCache: !!cache?.databases[database],
-        tablesCount: tables.length,
-      });
       return tables;
     }
 );
@@ -828,26 +687,17 @@ export const getCachedTablesAtom = atom(
 // Check if cache is valid (not older than 24 hours)
 export const isCacheValidAtom = atom((get) => {
   const cache = get(schemaCacheAtom);
-  console.log("[SchemaCache] Checking validity:", {
-    hasCache: !!cache,
-    timestamp: cache ? new Date(cache.timestamp).toISOString() : "none",
-    age: cache
-      ? Math.round((Date.now() - cache.timestamp) / 1000 / 60) + " minutes"
-      : "N/A",
-  });
-
   if (!cache) return false;
 
   const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
   const isValid = Date.now() - cache.timestamp < TWENTY_FOUR_HOURS;
-  console.log("[SchemaCache] Cache validity result:", isValid);
   return isValid;
 });
 
 // Refresh cache
 export const refreshSchemaCacheAtom = atom(null, async (_get, set) => {
-  console.log("[SchemaCache] Refreshing cache...");
   toast.info("Refreshing database schema cache...");
-  set(schemaCacheAtom, null); // Clear old cache
-  await set(loadCompleteSchemaCacheAtom);
+  set(schemaCacheAtom, null); 
+  toast.success(`Database schema refreshed`)
+  await set(initializeSchemaCacheAtom); // Initialize lightweight cache
 });

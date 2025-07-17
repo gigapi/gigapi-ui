@@ -1,8 +1,8 @@
 import { useState, useEffect } from "react";
 import { useAtom, useSetAtom } from "jotai"; 
-import { setQueryAtom, queryHistoryAtom, clearQueryHistoryAtom } from "@/atoms";
+import { setQueryAtom, queryHistoryAtom, clearQueryHistoryAtom, type QueryHistoryItem } from "@/atoms";
 import { selectedTimeFieldAtom, setTimeRangeAtom } from "@/atoms";
-import { setSelectedDbAtom, selectedTableAtom } from "@/atoms";
+import { setSelectedDbAtom, setSelectedTableAtom } from "@/atoms";
 
 
 import { checkForTimeVariables } from "@/lib/query-processor";
@@ -41,20 +41,7 @@ import { toast } from "sonner";
 import { formatDate } from "@/lib/";
 import { SidebarMenuButton } from "@/components/ui/sidebar";
 
-// Use the same type as in QueryContext
-type HistoryItem = {
-  id: string;
-  query: string;
-  db: string;
-  table: string | null;
-  timestamp: string;
-  timeField: string | null;
-  timeRange: any | null;
-  success: boolean;
-  error?: string;
-  executionTime?: number;
-  rowCount?: number;
-};
+// Remove local type definition - using imported QueryHistoryItem instead
 
 export default function QueryHistory() {
   const setQuery = useSetAtom(setQueryAtom);
@@ -63,8 +50,8 @@ export default function QueryHistory() {
   const setSelectedTimeField = useSetAtom(selectedTimeFieldAtom);
   const setTimeRange = useSetAtom(setTimeRangeAtom);
   const setSelectedDb = useSetAtom(setSelectedDbAtom);
-  const setSelectedTable = useSetAtom(selectedTableAtom);
-  const [localHistory, setLocalHistory] = useState<HistoryItem[]>([]);
+  const setSelectedTable = useSetAtom(setSelectedTableAtom);
+  const [localHistory, setLocalHistory] = useState<QueryHistoryItem[]>([]);
   const [isOpen, setIsOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
@@ -77,7 +64,7 @@ export default function QueryHistory() {
   }, [isOpen, queryHistory]);
 
   // Load a query from history with all its context
-  function loadQueryFromHistory(item: HistoryItem) {
+  function loadQueryFromHistory(item: QueryHistoryItem) {
     // First set the database (this might trigger schema loading)
     setSelectedDb(item.db);
 

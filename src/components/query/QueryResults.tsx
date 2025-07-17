@@ -58,19 +58,16 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import PanelFactory from "@/lib/dashboard/panel-factory";
-import parseNDJSON from "@/lib/parsers/ndjson";
 import {
   type PanelConfig,
   type Dashboard,
   type NDJSONRecord,
-  type PanelProps,
 } from "@/types/dashboard.types";
-import {
-  getPanelComponent,
-  ChartRenderer,
-} from "@/components/dashboard/panels";
+import { PanelRenderer } from "@/components/dashboard/PanelRenderer";
+import { PanelPreviewContainer } from "@/components/dashboard/PanelPreviewContainer";
 import { PanelConfigurationForm } from "@/components/dashboard/PanelConfigurationForm";
 import { SchemaAnalyzer } from "@/lib/dashboard/schema-analyzer";
+import { useNavigate } from "react-router-dom";
 
 // Local interface for display-specific performance metrics
 interface DisplayPerformanceMetrics {
@@ -95,14 +92,9 @@ export default function QueryResults() {
   const [processedQuery] = useAtom(processedQueryAtom);
   const createDashboard = useSetAtom(createDashboardAtom);
   const addPanel = useSetAtom(addPanelAtom);
-  
-  // Debug logging
-  useEffect(() => {
-    console.log("QueryResults - results:", results);
-    console.log("QueryResults - isLoading:", isLoading);
-    console.log("QueryResults - error:", error);
-    console.log("QueryResults - rawQueryResponse:", rawQueryResponse);
-  }, [results, isLoading, error, rawQueryResponse]);
+
+  const navigate = useNavigate();
+
 
   // Extract values from metrics
   const executionTime = queryMetrics?.executionTime || null;
@@ -118,7 +110,7 @@ export default function QueryResults() {
   // Panel creation states - initialize with empty field mapping
   const [panelConfig, setPanelConfig] = useState<PanelConfig>(() => {
     const initial = PanelFactory.createPanel({
-      type: "timeseries",
+      type: "line",
       title: "Query Panel",
       database: selectedDb || "",
       query: query,
@@ -128,6 +120,13 @@ export default function QueryResults() {
     return initial;
   });
   const [availableFields, setAvailableFields] = useState<string[]>([]);
+  
+  // Track which fields have been manually set by the user
+  const [userModifiedFields, setUserModifiedFields] = useState<{
+    xField?: boolean;
+    yField?: boolean;
+    seriesField?: boolean;
+  }>({});
   const [showSaveToDashboard, setShowSaveToDashboard] = useState(false);
   const [newDashboardName, setNewDashboardName] = useState("");
   const [selectedDashboardId, setSelectedDashboardId] = useState<string>("new");
@@ -223,10 +222,6 @@ export default function QueryResults() {
     }
   }, [actualExecutedQuery, rawJson]);
 
-  // apiUrl is already defined above
-
-  // Schema fields are now handled by atoms/API calls, no need for separate hook
-
   // Update available fields when results change
   useEffect(() => {
     if (results && results.length > 0) {
@@ -267,39 +262,79 @@ export default function QueryResults() {
         );
       }
 
-      // Update panel config with smart defaults
-      setPanelConfig((prev) => ({
-        ...prev,
-        fieldMapping: {
-          ...prev.fieldMapping,
-          // Only set fields that aren't already set
-          xField: prev.fieldMapping?.xField || smartMapping.xField,
-          yField: prev.fieldMapping?.yField || smartMapping.yField,
-          seriesField:
-            prev.fieldMapping?.seriesField || smartMapping.seriesField, // Include series field suggestions
-        },
-      }));
+      // Only update field mapping if we actually have smart mapping suggestions
+      if (smartMapping && (smartMapping.xField || smartMapping.yField)) {
+        setPanelConfig((prev) => {
+          const newMapping: any = {};
+          
+          // For xField: use existing if valid and user modified, otherwise use smart default
+          if (userModifiedFields.xField && prev.fieldMapping?.xField && availableFields.includes(prev.fieldMapping.xField)) {
+            newMapping.xField = prev.fieldMapping.xField;
+          } else {
+            newMapping.xField = smartMapping.xField;
+          }
+          
+          // For yField: use existing if valid and user modified, otherwise use smart default
+          if (userModifiedFields.yField && prev.fieldMapping?.yField && availableFields.includes(prev.fieldMapping.yField)) {
+            newMapping.yField = prev.fieldMapping.yField;
+          } else {
+            newMapping.yField = smartMapping.yField;
+          }
+          
+          // For seriesField: use existing if valid and user modified, otherwise use smart default
+          if (userModifiedFields.seriesField && prev.fieldMapping?.seriesField && availableFields.includes(prev.fieldMapping.seriesField)) {
+            newMapping.seriesField = prev.fieldMapping.seriesField;
+          } else {
+            newMapping.seriesField = smartMapping.seriesField;
+          }
+          
+          return {
+            ...prev,
+            fieldMapping: {
+              ...newMapping,
+              // Ensure we don't have undefined values
+              xField: newMapping.xField || undefined,
+              yField: newMapping.yField || undefined,
+              seriesField: newMapping.seriesField || undefined,
+            },
+          };
+        });
+      }
     }
-  }, [panelConfig.type, availableFields, results]);
+  }, [panelConfig.type, availableFields, results, userModifiedFields]);
 
   // Update panel config when query changes
   useEffect(() => {
-    setPanelConfig((prev) => ({
-      ...prev,
-      query: query,
-      // Reset field mapping when query changes to allow new smart defaults
-      fieldMapping: query !== prev.query ? {} : prev.fieldMapping,
-    }));
+    setPanelConfig((prev) => {
+      if (query === prev.query) {
+        return prev; // No change needed
+      }
+      
+      return {
+        ...prev,
+        query: query,
+        // Let the smart field mapping useEffect handle field validation
+        // Don't reset field mapping here - let it be handled by the smart mapping logic
+      };
+    });
   }, [query]);
 
   // Update panel config when database changes
   useEffect(() => {
-    setPanelConfig((prev) => ({
-      ...prev,
-      database: selectedDb || "",
-      // Reset field mapping when database changes to allow new smart defaults
-      fieldMapping: selectedDb !== prev.database ? {} : prev.fieldMapping,
-    }));
+    setPanelConfig((prev) => {
+      if ((selectedDb || "") === prev.database) {
+        return prev; // No change needed
+      }
+      
+      return {
+        ...prev,
+        database: selectedDb || "",
+        // Let the smart field mapping useEffect handle field validation
+      };
+    });
+    
+    // Reset user modified flags when database changes since schema may be different
+    setUserModifiedFields({});
   }, [selectedDb]);
 
   // Load dashboards for the save dialog
@@ -398,7 +433,7 @@ export default function QueryResults() {
         </div>
       );
     }
-    
+
     if (Array.isArray(results)) {
       if (results.length === 0) {
         return (
@@ -411,7 +446,7 @@ export default function QueryResults() {
       }
       return <GigTable data={results} initialPageSize={25} />;
     }
-    
+
     // If results is not an array, wrap it in an array
     return <GigTable data={[results]} initialPageSize={25} />;
   }
@@ -439,21 +474,39 @@ export default function QueryResults() {
     }
 
     return (
-      <div className="h-full flex gap-3 p-3">
-        <div className="flex-1 flex flex-col min-h-0">
-          <div className="h-full min-h-[400px] max-h-[800px] resize-y overflow-hidden border rounded">
+      <div className="h-full flex gap-3 p-3 grid grid-cols-12">
+        <div className="flex-1 flex flex-col min-h-0 col-span-9">
+          <div className="min-h-[400px] max-h-[800px] rounded resize-y col-span-10">
             {renderPanelPreview()}
           </div>
         </div>
 
         {/* Panel Configuration - Right Side */}
-        <div className="w-80 flex flex-col space-y-4">
+        <div className="w-80 flex flex-col space-y-4  col-span-1">
           <PanelConfigurationForm
             config={panelConfig}
             schemaFields={availableFields}
-            onConfigChange={(updates) =>
-              setPanelConfig((prev) => ({ ...prev, ...updates }))
-            }
+            onConfigChange={(updates) => {
+              // Track which fields were manually changed
+              if (updates.fieldMapping) {
+                const newUserModified = { ...userModifiedFields };
+                
+                // Check if field mappings were changed
+                if (updates.fieldMapping.xField !== undefined) {
+                  newUserModified.xField = true;
+                }
+                if (updates.fieldMapping.yField !== undefined) {
+                  newUserModified.yField = true;
+                }
+                if (updates.fieldMapping.seriesField !== undefined) {
+                  newUserModified.seriesField = true;
+                }
+                
+                setUserModifiedFields(newUserModified);
+              }
+              
+              setPanelConfig((prev) => ({ ...prev, ...updates }));
+            }}
             availableFields={availableFields}
             previewData={results}
             showAdvancedOptions={false}
@@ -544,82 +597,29 @@ export default function QueryResults() {
       );
     }
 
-    try {
-      // Use results directly as they're already parsed
-      let records: NDJSONRecord[];
-      if (Array.isArray(results)) {
-        records = results;
-      } else if (results && typeof results === 'object') {
-        records = [results];
-      } else {
-        // Fallback to parsing rawJson if results are not usable
-        if (typeof rawJson === "string" && rawJson.trim()) {
-          const parsed = parseNDJSON(rawJson);
-          records = parsed.records;
-        } else {
-          records = [];
-        }
-      }
-
-      const configWithMapping = panelConfig;
-
-      // Chart types that use the unified ChartRenderer
-      const CHART_TYPES = [
-        "timeseries",
-        "line",
-        "area",
-        "bar",
-        "scatter",
-        "pie",
-        "donut",
-      ];
-      const isChartType = CHART_TYPES.includes(panelConfig.type);
-
-      if (isChartType) {
-        return (
-          <ChartRenderer
-            config={configWithMapping}
-            data={records}
-            isEditMode={false}
-            height="100%"
-            width="100%"
-          />
-        );
-      }
-
-      // Use the unified panel system for non-chart types
-      const panelProps: PanelProps = {
-        config: configWithMapping,
-        data: records,
-        isEditMode: false,
-      };
-
-      const PanelComponent = getPanelComponent(panelConfig.type);
-
-      if (!PanelComponent) {
-        return (
-          <div className="flex items-center justify-center h-full text-muted-foreground">
-            <div className="text-center">
-              <AlertCircle className="h-12 w-12 mx-auto mb-4" />
-              <p>Unsupported panel type: {panelConfig.type}</p>
-            </div>
-          </div>
-        );
-      }
-
-      return <PanelComponent {...panelProps} />;
-    } catch (error) {
-      console.error("Error rendering panel preview:", error);
-      return (
-        <div className="flex items-center justify-center h-full text-red-500">
-          <div className="text-center">
-            <AlertCircle className="h-12 w-12 mx-auto mb-4" />
-            <p>Error rendering panel preview</p>
-            <p className="text-sm mt-2">{String(error)}</p>
-          </div>
-        </div>
-      );
+    // Prepare data as NDJSONRecord array
+    let records: NDJSONRecord[];
+    if (Array.isArray(results)) {
+      records = results;
+    } else if (results && typeof results === "object") {
+      records = [results];
+    } else {
+      records = [];
     }
+
+    // Use the unified PanelRenderer with key to force re-render on type change
+    return (
+      <PanelPreviewContainer config={panelConfig}>
+        <PanelRenderer
+          key={`${panelConfig.type}-${panelConfig.id}`}
+          config={panelConfig}
+          data={records}
+          isPreview={true}
+          height="100%"
+          width="100%"
+        />
+      </PanelPreviewContainer>
+    );
   }
 
   async function handleSaveToDashboard() {
@@ -671,7 +671,12 @@ export default function QueryResults() {
       // Add panel to the specified dashboard (no need to load it first)
       await addPanel({ panelData: finalConfig, dashboardId });
 
-      toast.success(`Panel saved to dashboard successfully!`);
+      toast.success(`Panel saved to dashboard successfully!`, {
+        action: {
+          label: "Go to dashboard",
+          onClick: () => navigate(`/dashboard/${dashboardId}`),
+        },
+      });
       setShowSaveToDashboard(false);
       setNewDashboardName("");
       setSelectedDashboardId("new"); // Reset for next use

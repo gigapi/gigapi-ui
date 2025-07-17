@@ -98,11 +98,3 @@ export function getPanelComponent(type: PanelType) {
   const definition = getPanelTypeDefinition(type);
   return definition?.component;
 }
-
-// Panel categories for UI organization
-export const PANEL_CATEGORIES = {
-  "Time Series": ["timeseries", "line", "area"] as PanelType[],
-  Charts: ["bar", "scatter", "pie", "donut"] as PanelType[],
-  "Single Value": ["stat", "gauge"] as PanelType[],
-  Data: ["table"] as PanelType[],
-};

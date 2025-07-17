@@ -76,11 +76,6 @@ export interface EnhancedArtifact {
   };
 }
 
-export interface ArtifactProcessor {
-  validate(artifact: ChatArtifact, context: QueryContext): Promise<ValidationResult>;
-  enhance(artifact: ChatArtifact, context: QueryContext): Promise<EnhancedArtifact>;
-  optimize(artifact: ChatArtifact, context: QueryContext): Promise<ChatArtifact>;
-}
 
 export interface TimeVariable {
   name: string;

@@ -20,9 +20,9 @@ export class ResultFeedbackManager {
   ): ResultFeedback {
     const summary = this.generateSummary(result, originalProposal);
     const insights = this.generateInsights(result);
-    const recommendations = this.generateRecommendations(result, originalProposal);
-    const followUpQuestions = this.generateFollowUpQuestions(result, originalProposal);
-    
+    const recommendations = this.generateRecommendations(result);
+    const followUpQuestions = this.generateFollowUpQuestions(result);
+
     return {
       artifact_id: artifactId,
       result,
@@ -38,7 +38,10 @@ export class ResultFeedbackManager {
   /**
    * Generate a human-readable summary of the execution results
    */
-  private generateSummary(result: ExecutionResult, proposal: ProposalArtifact): string {
+  private generateSummary(
+    result: ExecutionResult,
+    proposal: ProposalArtifact
+  ): string {
     if (!result.success) {
       return `Query execution failed: ${result.error}. The query "${proposal.query}" could not be executed against database "${result.database}".`;
     }
@@ -48,18 +51,23 @@ export class ResultFeedbackManager {
     const columns = result.metadata?.columns || [];
 
     let summary = `Query executed successfully in ${executionTime}ms. `;
-    
+
     if (rowCount === 0) {
-      summary += "No data was returned, which could indicate: (1) No matching records for the specified criteria, (2) The time range might be too narrow, or (3) The table might be empty.";
+      summary +=
+        "No data was returned, which could indicate: (1) No matching records for the specified criteria, (2) The time range might be too narrow, or (3) The table might be empty.";
     } else if (rowCount === 1) {
-      summary += `Returned 1 row with ${columns.length} column${columns.length !== 1 ? 's' : ''}`;
+      summary += `Returned 1 row with ${columns.length} column${
+        columns.length !== 1 ? "s" : ""
+      }`;
       if (columns.length > 0) {
-        summary += `: ${columns.join(', ')}`;
+        summary += `: ${columns.join(", ")}`;
       }
     } else {
-      summary += `Returned ${rowCount} rows with ${columns.length} column${columns.length !== 1 ? 's' : ''}`;
+      summary += `Returned ${rowCount} rows with ${columns.length} column${
+        columns.length !== 1 ? "s" : ""
+      }`;
       if (columns.length > 0) {
-        summary += `: ${columns.join(', ')}`;
+        summary += `: ${columns.join(", ")}`;
       }
     }
 
@@ -74,17 +82,31 @@ export class ResultFeedbackManager {
 
     if (!result.success) {
       // Error insights
-      if (result.error?.includes("table") && result.error?.includes("does not exist")) {
-        insights.push("The specified table does not exist in the database. Check table name spelling or database selection.");
+      if (
+        result.error?.includes("table") &&
+        result.error?.includes("does not exist")
+      ) {
+        insights.push(
+          "The specified table does not exist in the database. Check table name spelling or database selection."
+        );
       }
-      if (result.error?.includes("column") && result.error?.includes("does not exist")) {
-        insights.push("One or more columns in the query do not exist. Verify column names against the table schema.");
+      if (
+        result.error?.includes("column") &&
+        result.error?.includes("does not exist")
+      ) {
+        insights.push(
+          "One or more columns in the query do not exist. Verify column names against the table schema."
+        );
       }
       if (result.error?.includes("timeout")) {
-        insights.push("Query execution timed out. Consider adding more specific WHERE clauses or LIMIT statements.");
+        insights.push(
+          "Query execution timed out. Consider adding more specific WHERE clauses or LIMIT statements."
+        );
       }
       if (result.error?.includes("Parameter Not Allowed")) {
-        insights.push("Query contains unsupported parameters. Check for time variables that need proper configuration.");
+        insights.push(
+          "Query contains unsupported parameters. Check for time variables that need proper configuration."
+        );
       }
       return insights;
     }
@@ -95,31 +117,58 @@ export class ResultFeedbackManager {
 
     // Performance insights
     if (executionTime > 10000) {
-      insights.push(`Query took ${executionTime}ms to execute, which is relatively slow. Consider optimizing with indexes or more specific filters.`);
+      insights.push(
+        `Query took ${executionTime}ms to execute, which is relatively slow. Consider optimizing with indexes or more specific filters.`
+      );
     } else if (executionTime < 100) {
-      insights.push(`Query executed very quickly (${executionTime}ms), indicating good performance.`);
+      insights.push(
+        `Query executed very quickly (${executionTime}ms), indicating good performance.`
+      );
     }
 
     // Data volume insights
     if (rowCount > 10000) {
-      insights.push(`Large result set (${rowCount} rows) returned. Consider adding pagination or more specific filters for better performance.`);
+      insights.push(
+        `Large result set (${rowCount} rows) returned. Consider adding pagination or more specific filters for better performance.`
+      );
     } else if (rowCount > 1000) {
-      insights.push(`Moderate result set (${rowCount} rows) returned. Data is substantial enough for meaningful analysis.`);
+      insights.push(
+        `Moderate result set (${rowCount} rows) returned. Data is substantial enough for meaningful analysis.`
+      );
     }
 
     // Data structure insights
     if (columns.length > 20) {
-      insights.push(`Query returns many columns (${columns.length}). Consider selecting only the columns needed for analysis.`);
+      insights.push(
+        `Query returns many columns (${columns.length}). Consider selecting only the columns needed for analysis.`
+      );
     }
 
     // Time-based insights
-    if (columns.some(col => col.toLowerCase().includes('time') || col.toLowerCase().includes('date'))) {
-      insights.push("Results include time-based columns, making this suitable for time series analysis and trend detection.");
+    if (
+      columns.some(
+        (col) =>
+          col.toLowerCase().includes("time") ||
+          col.toLowerCase().includes("date")
+      )
+    ) {
+      insights.push(
+        "Results include time-based columns, making this suitable for time series analysis and trend detection."
+      );
     }
 
     // Aggregation insights
-    if (columns.some(col => col.toLowerCase().includes('avg') || col.toLowerCase().includes('sum') || col.toLowerCase().includes('count'))) {
-      insights.push("Results include aggregated metrics, which are useful for summary statistics and KPI analysis.");
+    if (
+      columns.some(
+        (col) =>
+          col.toLowerCase().includes("avg") ||
+          col.toLowerCase().includes("sum") ||
+          col.toLowerCase().includes("count")
+      )
+    ) {
+      insights.push(
+        "Results include aggregated metrics, which are useful for summary statistics and KPI analysis."
+      );
     }
 
     return insights;
@@ -128,18 +177,29 @@ export class ResultFeedbackManager {
   /**
    * Generate recommendations for improvement
    */
-  private generateRecommendations(result: ExecutionResult, proposal: ProposalArtifact): string[] {
+  private generateRecommendations(result: ExecutionResult): string[] {
     const recommendations: string[] = [];
 
     if (!result.success) {
       // Error-specific recommendations
-      if (result.error?.includes("table") && result.error?.includes("does not exist")) {
-        recommendations.push("Query a different table or check available tables in the database schema.");
-        recommendations.push("Verify that you're connected to the correct database.");
+      if (
+        result.error?.includes("table") &&
+        result.error?.includes("does not exist")
+      ) {
+        recommendations.push(
+          "Query a different table or check available tables in the database schema."
+        );
+        recommendations.push(
+          "Verify that you're connected to the correct database."
+        );
       }
       if (result.error?.includes("$__timeFilter")) {
-        recommendations.push("Configure a time range in the query interface to use time filtering.");
-        recommendations.push("Select a time field for the query to work properly.");
+        recommendations.push(
+          "Configure a time range in the query interface to use time filtering."
+        );
+        recommendations.push(
+          "Select a time field for the query to work properly."
+        );
       }
       return recommendations;
     }
@@ -149,29 +209,45 @@ export class ResultFeedbackManager {
 
     // Performance recommendations
     if (result.execution_time > 5000) {
-      recommendations.push("Add WHERE clauses to filter data and improve query performance.");
-      recommendations.push("Consider using LIMIT to restrict the number of returned rows.");
+      recommendations.push(
+        "Add WHERE clauses to filter data and improve query performance."
+      );
+      recommendations.push(
+        "Consider using LIMIT to restrict the number of returned rows."
+      );
     }
 
     // Data quality recommendations
     if (rowCount === 0) {
-      recommendations.push("Expand the time range or modify filter criteria to capture more data.");
-      recommendations.push("Check if the table contains data for the specified time period.");
+      recommendations.push(
+        "Expand the time range or modify filter criteria to capture more data."
+      );
+      recommendations.push(
+        "Check if the table contains data for the specified time period."
+      );
     }
 
     // Query structure recommendations
     if (!query.includes("WHERE") && !query.includes("LIMIT")) {
-      recommendations.push("Add WHERE conditions to filter results and improve performance.");
+      recommendations.push(
+        "Add WHERE conditions to filter results and improve performance."
+      );
     }
 
     if (!query.includes("ORDER BY") && rowCount > 1) {
-      recommendations.push("Consider adding ORDER BY to sort results meaningfully.");
+      recommendations.push(
+        "Consider adding ORDER BY to sort results meaningfully."
+      );
     }
 
     // Analysis recommendations
     if (rowCount > 100) {
-      recommendations.push("This dataset is suitable for creating visualizations and charts.");
-      recommendations.push("Consider grouping or aggregating data for trend analysis.");
+      recommendations.push(
+        "This dataset is suitable for creating visualizations and charts."
+      );
+      recommendations.push(
+        "Consider grouping or aggregating data for trend analysis."
+      );
     }
 
     return recommendations;
@@ -180,12 +256,16 @@ export class ResultFeedbackManager {
   /**
    * Generate follow-up questions based on results
    */
-  private generateFollowUpQuestions(result: ExecutionResult, proposal: ProposalArtifact): string[] {
+  private generateFollowUpQuestions(result: ExecutionResult): string[] {
     const questions: string[] = [];
 
     if (!result.success) {
-      questions.push("Would you like me to suggest an alternative query approach?");
-      questions.push("Should I help you identify the correct table or column names?");
+      questions.push(
+        "Would you like me to suggest an alternative query approach?"
+      );
+      questions.push(
+        "Should I help you identify the correct table or column names?"
+      );
       return questions;
     }
 
@@ -193,22 +273,38 @@ export class ResultFeedbackManager {
     const columns = result.metadata?.columns || [];
 
     if (rowCount === 0) {
-      questions.push("Would you like to try a different time range or filter criteria?");
+      questions.push(
+        "Would you like to try a different time range or filter criteria?"
+      );
       questions.push("Should I check what data is available in this table?");
     } else if (rowCount > 0) {
-      questions.push("Would you like me to create a visualization of this data?");
+      questions.push(
+        "Would you like me to create a visualization of this data?"
+      );
       questions.push("Should I analyze trends or patterns in the results?");
-      
-      if (columns.some(col => col.toLowerCase().includes('time') || col.toLowerCase().includes('date'))) {
-        questions.push("Would you like to see this data as a time series chart?");
+
+      if (
+        columns.some(
+          (col) =>
+            col.toLowerCase().includes("time") ||
+            col.toLowerCase().includes("date")
+        )
+      ) {
+        questions.push(
+          "Would you like to see this data as a time series chart?"
+        );
       }
-      
+
       if (columns.length > 5) {
-        questions.push("Should I focus on specific columns for deeper analysis?");
+        questions.push(
+          "Should I focus on specific columns for deeper analysis?"
+        );
       }
-      
+
       if (rowCount > 100) {
-        questions.push("Would you like me to summarize key statistics from this data?");
+        questions.push(
+          "Would you like me to summarize key statistics from this data?"
+        );
       }
     }
 
@@ -272,7 +368,13 @@ export class ResultFeedbackManager {
     }
 
     // Time-based data (usually indicates good structure)
-    if (columns.some(col => col.toLowerCase().includes('time') || col.toLowerCase().includes('date'))) {
+    if (
+      columns.some(
+        (col) =>
+          col.toLowerCase().includes("time") ||
+          col.toLowerCase().includes("date")
+      )
+    ) {
       score += 0.1;
     }
 
@@ -284,26 +386,34 @@ export class ResultFeedbackManager {
    */
   formatFeedbackForAI(feedback: ResultFeedback): string {
     let aiMessage = `EXECUTION RESULT FEEDBACK:\n\n`;
-    
+
     aiMessage += `SUMMARY: ${feedback.summary}\n\n`;
-    
+
     if (feedback.insights.length > 0) {
-      aiMessage += `INSIGHTS:\n${feedback.insights.map(insight => `• ${insight}`).join('\n')}\n\n`;
+      aiMessage += `INSIGHTS:\n${feedback.insights
+        .map((insight) => `• ${insight}`)
+        .join("\n")}\n\n`;
     }
-    
+
     if (feedback.recommendations.length > 0) {
-      aiMessage += `RECOMMENDATIONS:\n${feedback.recommendations.map(rec => `• ${rec}`).join('\n')}\n\n`;
+      aiMessage += `RECOMMENDATIONS:\n${feedback.recommendations
+        .map((rec) => `• ${rec}`)
+        .join("\n")}\n\n`;
     }
-    
+
     if (feedback.follow_up_questions.length > 0) {
-      aiMessage += `SUGGESTED FOLLOW-UP QUESTIONS:\n${feedback.follow_up_questions.map(q => `• ${q}`).join('\n')}\n\n`;
+      aiMessage += `SUGGESTED FOLLOW-UP QUESTIONS:\n${feedback.follow_up_questions
+        .map((q) => `• ${q}`)
+        .join("\n")}\n\n`;
     }
-    
-    aiMessage += `CONFIDENCE SCORE: ${Math.round(feedback.confidence_score * 100)}%\n`;
-    aiMessage += `DATA QUALITY SCORE: ${Math.round(feedback.data_quality_score * 100)}%\n`;
-    
+
+    aiMessage += `CONFIDENCE SCORE: ${Math.round(
+      feedback.confidence_score * 100
+    )}%\n`;
+    aiMessage += `DATA QUALITY SCORE: ${Math.round(
+      feedback.data_quality_score * 100
+    )}%\n`;
+
     return aiMessage;
   }
 }
-
-export default ResultFeedbackManager;

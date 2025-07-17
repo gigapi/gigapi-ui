@@ -1,11 +1,10 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import rehypeHighlight from "rehype-highlight";
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import {
   Bot,
@@ -19,7 +18,9 @@ import {
 import { toast } from "sonner";
 import { useSetAtom } from "jotai";
 import { updateSessionConnectionAtom } from "@/atoms/chat-atoms";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import ArtifactRendererWrapper from "./artifacts/ArtifactRendererWrapper";
+import LazyArtifact from "./artifacts/LazyArtifact";
 import ChatInputWithMentions from "./ChatInputWithMentions";
 import type { ChatSession, ChatMessage } from "@/types/chat.types";
 import "katex/dist/katex.min.css";
@@ -42,12 +43,58 @@ export default function ChatInterface({
     new Set()
   );
   const updateSessionConnection = useSetAtom(updateSessionConnectionAtom);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const [autoScroll, setAutoScroll] = useState(true);
 
-  // Auto-scroll to bottom when new messages arrive
+  // Virtual scrolling setup
+  const messageEstimateSize = useMemo(() => {
+    // Estimate size based on average message height
+    // User messages: ~100px, Assistant messages: ~200px, with artifacts: ~500px
+    return (index: number) => {
+      const message = session.messages[index];
+      if (!message) return 150;
+
+      const baseHeight = message.role === "user" ? 100 : 200;
+      const artifactHeight = (message.metadata?.artifacts?.length || 0) * 400;
+      const thinkingHeight =
+        message.metadata?.thinking && expandedThinking.has(message.id)
+          ? 200
+          : 0;
+
+      return baseHeight + artifactHeight + thinkingHeight;
+    };
+  }, [session.messages, expandedThinking]);
+
+  const rowVirtualizer = useVirtualizer({
+    count: session.messages.length,
+    getScrollElement: () => scrollContainerRef.current,
+    estimateSize: messageEstimateSize,
+    overscan: 3, // Render 3 messages above and below viewport
+  });
+
+  // Auto-scroll to bottom when new messages arrive (if auto-scroll is enabled)
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [session.messages]);
+    if (autoScroll && session.messages.length > 0) {
+      rowVirtualizer.scrollToIndex(session.messages.length - 1, {
+        behavior: "smooth",
+      });
+    }
+  }, [session.messages.length, autoScroll, rowVirtualizer]);
+
+  // Detect manual scrolling
+  useEffect(() => {
+    const scrollContainer = scrollContainerRef.current;
+    if (!scrollContainer) return;
+
+    const handleScroll = () => {
+      const { scrollTop, scrollHeight, clientHeight } = scrollContainer;
+      const isAtBottom = scrollHeight - scrollTop - clientHeight < 100;
+      setAutoScroll(isAtBottom);
+    };
+
+    scrollContainer.addEventListener("scroll", handleScroll);
+    return () => scrollContainer.removeEventListener("scroll", handleScroll);
+  }, []);
 
   const handleSendMessage = async () => {
     if (!inputMessage.trim() || isLoading) return;
@@ -157,13 +204,20 @@ export default function ChatInterface({
                                   className || ""
                                 );
                                 const isInline = !className || !match;
-                                const codeString = String(children).replace(
+                                // Extract text content from children properly
+                                const extractText = (node: any): string => {
+                                  if (typeof node === 'string') return node;
+                                  if (Array.isArray(node)) return node.map(extractText).join('');
+                                  if (node?.props?.children) return extractText(node.props.children);
+                                  return String(node);
+                                };
+                                const codeString = extractText(children).replace(
                                   /\n$/,
                                   ""
                                 );
                                 const codeId = `code-${
                                   message.id
-                                }-${Math.random().toString(36).substr(2, 9)}`;
+                                }-${Math.random().toString(36).substring(2, 11)}`;
 
                                 return !isInline ? (
                                   <div className="my-4 relative group">
@@ -320,17 +374,21 @@ export default function ChatInterface({
                 </div>
               )}
 
-              {/* Artifacts */}
+              {/* Artifacts with lazy loading */}
               {message.metadata?.artifacts?.map((artifact) => (
                 <div key={artifact.id} className="mt-4">
-                  <ArtifactRendererWrapper
-                    artifact={artifact}
-                    session={session}
-                  />
+                  <LazyArtifact
+                    artifactId={artifact.id}
+                    artifactType={artifact.type}
+                    estimatedHeight={artifact.type === "table" ? 600 : 400}
+                  >
+                    <ArtifactRendererWrapper
+                      artifact={artifact}
+                      session={session}
+                    />
+                  </LazyArtifact>
                 </div>
               ))}
-
-              {/* Timestamp - removed for cleaner look */}
             </div>
           </div>
         </div>
@@ -359,9 +417,13 @@ export default function ChatInterface({
         </div>
       </div>
 
-      {/* Messages */}
-      <ScrollArea className="flex-1">
-        <div className="max-w-5xl mx-auto px-4 py-6">
+      {/* Messages with virtual scrolling */}
+      <div
+        ref={scrollContainerRef}
+        className="flex-1 overflow-auto"
+        style={{ contain: "strict" }}
+      >
+        <div className="max-w-5xl mx-auto px-4">
           {session.messages.length === 0 ? (
             <div className="text-center py-20">
               <div className="inline-flex items-center justify-center w-16 mb-6">
@@ -376,11 +438,38 @@ export default function ChatInterface({
               </p>
             </div>
           ) : (
-            <>{session.messages.map(renderMessage)}</>
+            <div
+              style={{
+                height: `${rowVirtualizer.getTotalSize()}px`,
+                width: "100%",
+                position: "relative",
+              }}
+            >
+              {rowVirtualizer.getVirtualItems().map((virtualItem) => {
+                const message = session.messages[virtualItem.index];
+                if (!message) return null;
+
+                return (
+                  <div
+                    key={virtualItem.key}
+                    data-index={virtualItem.index}
+                    ref={rowVirtualizer.measureElement}
+                    style={{
+                      position: "absolute",
+                      top: 0,
+                      left: 0,
+                      width: "100%",
+                      transform: `translateY(${virtualItem.start}px)`,
+                    }}
+                  >
+                    {renderMessage(message)}
+                  </div>
+                );
+              })}
+            </div>
           )}
-          <div ref={messagesEndRef} />
         </div>
-      </ScrollArea>
+      </div>
 
       {/* Input */}
       <div>

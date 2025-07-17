@@ -272,7 +272,7 @@ export default function SimpleChatSidebar({
                         </Button>
                       </div>
                     ) : (
-                      <button
+                      <div
                         onClick={() => onSessionSelect(session.id)}
                         className="w-full text-left p-2.5 flex items-center gap-3"
                       >
@@ -332,7 +332,7 @@ export default function SimpleChatSidebar({
                             </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
-                      </button>
+                      </div>
                     )}
                   </div>
                 ))

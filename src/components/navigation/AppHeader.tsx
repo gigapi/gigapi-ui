@@ -12,13 +12,27 @@ import {
 } from "@/components/ui/breadcrumb";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Globe, Edit, Save, X, Database, Search, RefreshCw } from "lucide-react";
+import {
+  Globe,
+  Edit,
+  Save,
+  X,
+  Database,
+  Search,
+  RefreshCw,
+} from "lucide-react";
 import { useAtom, useSetAtom, useAtomValue } from "jotai";
 import { apiUrlAtom, connectAtom } from "@/atoms";
-import { selectedDbAtom, setSelectedDbAtom, refreshSchemaCacheAtom, isCacheLoadingAtom, cacheProgressAtom } from "@/atoms";
+import {
+  selectedDbAtom,
+  setSelectedDbAtom,
+  refreshSchemaCacheAtom,
+  isCacheLoadingAtom,
+  cacheProgressAtom,
+  openCommandPaletteAtom,
+} from "@/atoms";
 import { UnifiedSelector } from "@/components/shared/DbTableTimeSelector";
 import { toast } from "sonner";
-import { commandPaletteOpenAtom } from "@/atoms";
 
 import {
   Popover,
@@ -50,9 +64,9 @@ export default function AppHeader({
   const refreshSchemaCache = useSetAtom(refreshSchemaCacheAtom);
   const isCacheLoading = useAtomValue(isCacheLoadingAtom);
   const cacheProgress = useAtomValue(cacheProgressAtom);
+  const openCommandPalette = useSetAtom(openCommandPaletteAtom);
   const [isEndpointEditing, setIsEndpointEditing] = useState(false);
   const [tempApiUrl, setTempApiUrl] = useState(apiUrl);
-  const setCommandPaletteOpen = useSetAtom(commandPaletteOpenAtom);
 
   // Update temp URL when apiUrl changes
   useEffect(() => {
@@ -128,7 +142,7 @@ export default function AppHeader({
         <Button
           variant="outline"
           size="sm"
-          onClick={() => setCommandPaletteOpen(true)}
+          onClick={() => openCommandPalette()}
           className="hidden sm:flex items-center gap-2 text-muted-foreground"
         >
           <Search className="h-4 w-4" />
@@ -142,7 +156,7 @@ export default function AppHeader({
         <Button
           variant="outline"
           size="sm"
-          onClick={() => setCommandPaletteOpen(true)}
+          onClick={() => openCommandPalette()}
           className="sm:hidden"
         >
           <Search className="h-4 w-4" />
@@ -173,9 +187,15 @@ export default function AppHeader({
                 variant="outline"
                 onClick={() => refreshSchemaCache()}
                 disabled={isCacheLoading}
-                title={isCacheLoading ? `Loading schemas... ${cacheProgress.current}/${cacheProgress.total}` : "Refresh database schema cache"}
+                title={
+                  isCacheLoading
+                    ? `Loading schemas... ${cacheProgress.current}/${cacheProgress.total}`
+                    : "Refresh database schema cache"
+                }
               >
-                <RefreshCw className={`h-4 w-4 ${isCacheLoading ? 'animate-spin' : ''}`} />
+                <RefreshCw
+                  className={`h-4 w-4 ${isCacheLoading ? "animate-spin" : ""}`}
+                />
                 {isCacheLoading && cacheProgress.total > 0 && (
                   <span className="ml-1.5 text-xs">
                     {cacheProgress.current}/{cacheProgress.total}
@@ -265,8 +285,14 @@ export default function AppHeader({
                         disabled={isCacheLoading}
                         className="w-full"
                       >
-                        <RefreshCw className={`h-4 w-4 mr-2 ${isCacheLoading ? 'animate-spin' : ''}`} />
-                        {isCacheLoading ? `Loading... ${cacheProgress.current}/${cacheProgress.total}` : 'Refresh Schema Cache'}
+                        <RefreshCw
+                          className={`h-4 w-4 mr-2 ${
+                            isCacheLoading ? "animate-spin" : ""
+                          }`}
+                        />
+                        {isCacheLoading
+                          ? `Loading... ${cacheProgress.current}/${cacheProgress.total}`
+                          : "Refresh Schema Cache"}
                       </Button>
                     </div>
                     <Separator />

@@ -5,22 +5,32 @@ import { QueryProcessor } from "@/lib/query-processor";
 import { toast } from "sonner";
 import parseNDJSON from "@/lib/parsers/ndjson";
 
+// Define the structure for query history items
+export interface QueryHistoryItem {
+  id: string;
+  query: string;
+  processedQuery?: string;
+  database: string;
+  db: string; // Alias for database for backward compatibility
+  table: string | null;
+  timeField: string | null;
+  timeRange: any | null;
+  timestamp: string;
+  success: boolean;
+  error?: string;
+  executionTime?: number;
+  rowCount?: number;
+}
+
 export const queryAtom = atomWithStorage<string>("gigapi_current_query", "", {
   getItem: (key) => {
     const stored = localStorage.getItem(key);
-    console.log("🔥 QUERY ATOM GET:", { key, stored });
     return stored || "";
   },
   setItem: (key, value) => {
-    console.log("🔥 QUERY ATOM SET:", {
-      key,
-      value,
-      timestamp: new Date().toISOString(),
-    });
     localStorage.setItem(key, value);
   },
   removeItem: (key) => {
-    console.log("🔥 QUERY ATOM REMOVE:", { key });
     localStorage.removeItem(key);
   },
 });
@@ -41,15 +51,56 @@ export const rawQueryResponseAtom = atom<string>("");
 // Processed query (for debugging)
 export const processedQueryAtom = atom<string>("");
 
-// Query history (stored in memory, will use IndexedDB later)
-export const queryHistoryAtom = atom<any[]>([]);
+// Query history - persistent storage in localStorage
+export const queryHistoryAtom = atomWithStorage<QueryHistoryItem[]>(
+  "gigapi_query_history",
+  [],
+  {
+    getItem: (key) => {
+      try {
+        const stored = localStorage.getItem(key);
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          // Ensure backward compatibility - convert old format if needed
+          if (Array.isArray(parsed)) {
+            return parsed.map((item: any) => ({
+              ...item,
+              db: item.db || item.database, // Ensure db field exists
+              table: item.table || null,
+              timeField: item.timeField || null,
+              timeRange: item.timeRange || null,
+            }));
+          }
+        }
+      } catch (error) {
+        console.error("Failed to load query history:", error);
+      }
+      return [];
+    },
+    setItem: (key, value) => {
+      try {
+        // Keep only the last 50 items to prevent excessive storage
+        const trimmedValue = value.slice(0, 50);
+        localStorage.setItem(key, JSON.stringify(trimmedValue));
+      } catch (error) {
+        console.error("Failed to save query history:", error);
+        // If storage is full, try to save fewer items
+        try {
+          const reducedValue = value.slice(0, 25);
+          localStorage.setItem(key, JSON.stringify(reducedValue));
+        } catch (retryError) {
+          console.error("Failed to save reduced query history:", retryError);
+        }
+      }
+    },
+    removeItem: (key) => {
+      localStorage.removeItem(key);
+    },
+  }
+);
 
 // Actions
 export const setQueryAtom = atom(null, (_get, set, query: string) => {
-  console.log("🔥 SET QUERY ATOM CALLED:", {
-    query,
-    timestamp: new Date().toISOString(),
-  });
   set(queryAtom, query);
 });
 
@@ -117,10 +168,6 @@ export const executeQueryAtom = atom(null, async (get, set) => {
 
       processedQuery = processed.query;
       set(processedQueryAtom, processedQuery);
-
-      console.log("Original query:", query);
-      console.log("Processed query:", processedQuery);
-      console.log("Interpolated variables:", processed.interpolatedVars);
     }
 
     // Execute the processed query
@@ -137,39 +184,31 @@ export const executeQueryAtom = atom(null, async (get, set) => {
     let parsedResults: any[];
     let rawResponse: string;
 
-    console.log("API Response type:", typeof result);
-    console.log("API Response sample:", typeof result === 'string' ? result.substring(0, 200) : result);
-
-    if (typeof result === 'string') {
+    if (typeof result === "string") {
       rawResponse = result;
-      
+
       // First, try to parse as JSON array
       try {
         const jsonParsed = JSON.parse(result);
         if (Array.isArray(jsonParsed)) {
           parsedResults = jsonParsed;
-          console.log("Parsed as JSON array:", parsedResults.length, "records");
-        } else if (jsonParsed && typeof jsonParsed === 'object') {
+        } else if (jsonParsed && typeof jsonParsed === "object") {
           // Single JSON object
           parsedResults = [jsonParsed];
-          console.log("Parsed as single JSON object");
         } else {
           // Try NDJSON parsing
           const { records } = parseNDJSON(result);
           parsedResults = records;
-          console.log("Parsed as NDJSON:", records.length, "records");
         }
       } catch (e) {
         // Not valid JSON, try NDJSON
         const { records } = parseNDJSON(result);
         parsedResults = records;
-        console.log("Parsed as NDJSON after JSON parse failed:", records.length, "records");
       }
     } else if (Array.isArray(result)) {
       // Result is already an array of records
       parsedResults = result;
       rawResponse = JSON.stringify(result, null, 2);
-      console.log("Result is already an array:", result.length, "records");
     } else {
       // Result is a single object or wrapped response
       if (result.data && Array.isArray(result.data)) {
@@ -183,22 +222,21 @@ export const executeQueryAtom = atom(null, async (get, set) => {
         parsedResults = [result];
         rawResponse = JSON.stringify(result, null, 2);
       }
-      console.log("Result is an object, parsed to:", parsedResults.length, "records");
     }
 
     // Store raw response for Raw tab
     set(rawQueryResponseAtom, rawResponse);
 
     const executionTime = Date.now() - startTime;
-    console.log("Parsed results sample:", parsedResults.slice(0, 2));
-
-    console.log("Setting queryResultsAtom with:", parsedResults);
     set(queryResultsAtom, parsedResults);
     set(queryExecutionTimeAtom, executionTime);
-    
+
     // Calculate size properly based on the raw response
-    const responseSize = typeof result === 'string' ? result.length : JSON.stringify(result).length;
-    
+    const responseSize =
+      typeof result === "string"
+        ? result.length
+        : JSON.stringify(result).length;
+
     set(queryMetricsAtom, {
       executionTime,
       rowCount: parsedResults.length,
@@ -206,12 +244,16 @@ export const executeQueryAtom = atom(null, async (get, set) => {
       processedRows: parsedResults.length,
     });
 
-    // Add to history
-    const historyItem = {
+    // Add to history with full context
+    const historyItem: QueryHistoryItem = {
       id: crypto.randomUUID(),
       query,
       processedQuery: hasTimeVariables ? processedQuery : undefined,
       database: selectedDb,
+      db: selectedDb, // Alias for backward compatibility
+      table: selectedTable || null,
+      timeField: selectedTimeField || null,
+      timeRange: timeRange || null,
       timestamp: new Date().toISOString(),
       success: true,
       executionTime,
@@ -255,11 +297,15 @@ export const executeQueryAtom = atom(null, async (get, set) => {
     set(queryErrorAtom, errorMessage);
     set(queryResultsAtom, null); // Clear results on error
 
-    // Add failed query to history
-    const historyItem = {
+    // Add failed query to history with full context
+    const historyItem: QueryHistoryItem = {
       id: crypto.randomUUID(),
       query,
       database: selectedDb,
+      db: selectedDb, // Alias for backward compatibility
+      table: selectedTable || null,
+      timeField: selectedTimeField || null,
+      timeRange: timeRange || null,
       timestamp: new Date().toISOString(),
       success: false,
       error: errorMessage,

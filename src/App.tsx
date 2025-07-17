@@ -5,14 +5,18 @@ import {
   Route,
   useParams,
 } from "react-router-dom";
-import { RefreshCw } from "lucide-react";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
 import { useAtom, useSetAtom } from "jotai";
 import "@/components/ui/toast-fixes.css";
 
 // New clean atoms
-import { connectionStateAtom, isConnectedAtom, connectAtom, apiUrlAtom } from "@/atoms";
+import {
+  connectionStateAtom,
+  isConnectedAtom,
+  connectAtom,
+  apiUrlAtom,
+} from "@/atoms";
 
 // Pages
 import ConnectionStatus from "@/pages/ConnectionStatus";
@@ -27,6 +31,7 @@ import { AppSidebar } from "@/components/navigation/app-sidebar";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { CommandPalette } from "@/components/shared/CommandPalette";
 import { ArtifactProvider } from "@/contexts/ArtifactContext";
+import Loader from "./components/shared/Loader";
 
 // const VERSION = import.meta.env.PACKAGE_VERSION;
 
@@ -49,19 +54,9 @@ function AppInitializer() {
 
     // Wait for apiUrl to be loaded from storage
     if (!apiUrl || apiUrl === "") {
-      console.log("🔥 [AppInitializer] Waiting for API URL to load from storage");
       return;
     }
-
-    console.log("🔥 [AppInitializer] API URL loaded:", apiUrl);
-    console.log("🔥 [AppInitializer] localStorage status:", {
-      hasSchemaCache: !!localStorage.getItem('gigapi_schema_cache'),
-      selectedDb: localStorage.getItem('gigapi_selected_db'),
-      selectedTable: localStorage.getItem('gigapi_selected_table')
-    });
-
-    // Try to connect on app start
-    console.log("🔥 [AppInitializer] Starting initial connection at", new Date().toISOString());
+    
     connect().catch((error) => {
       console.error("🔥 [AppInitializer] Connection failed:", error);
     });
@@ -88,8 +83,14 @@ function AppWithRouter() {
             <Route path="/connect" element={<ConnectionStatus />} />
             <Route path="/dashboards" element={<DashboardList />} />
             <Route path="/dashboard/:dashboardId" element={<DashboardView />} />
-            <Route path="/dashboard/:dashboardId/panel/new" element={<PanelEdit />} />
-            <Route path="/dashboard/:dashboardId/panel/:panelId" element={<PanelEdit />} />
+            <Route
+              path="/dashboard/:dashboardId/panel/new"
+              element={<PanelEdit />}
+            />
+            <Route
+              path="/dashboard/:dashboardId/panel/:panelId"
+              element={<PanelEdit />}
+            />
             <Route path="/chat" element={<ChatPage />} />
             <Route path="/chat/:chatId" element={<ChatRoute />} />
           </Routes>
@@ -144,7 +145,6 @@ class ErrorBoundary extends React.Component<
 export default function App() {
   const [connectionState] = useAtom(connectionStateAtom);
   const [isConnected] = useAtom(isConnectedAtom);
-  
 
   useEffect(() => {
     // Global error handler
@@ -179,27 +179,41 @@ export default function App() {
         <ArtifactProvider>
           <AppInitializer />
 
-        {/* Show connection page for non-connected states */}
-        {!isConnected ? (
-          <>
-            {connectionState === "connecting" ? (
-              <div className="h-screen flex items-center justify-center">
-                <div className="flex flex-col items-center gap-4">
-                  <RefreshCw className="h-8 w-8 animate-spin text-primary" />
-                  <p className="text-muted-foreground">Connecting to API...</p>
+          {/* Show connection page for non-connected states */}
+          {!isConnected ? (
+            <>
+              {connectionState === "connecting" ? (
+                <div className="h-screen flex items-center justify-center">
+                  <div className="flex flex-col items-center gap-4">
+                    <Loader />
+                    <p className="text-muted-foreground">
+                      Connecting to API...
+                    </p>
+                  </div>
                 </div>
-              </div>
-            ) : (
-              <ConnectionStatus />
-            )}
-            <Toaster />
-          </>
-        ) : (
-          <>
-            <AppWithRouter />
-            <Toaster position="top-right" richColors expand closeButton duration={3000} />
-          </>
-        )}
+              ) : (
+                <ConnectionStatus />
+              )}
+              <Toaster
+                position="top-right"
+                richColors
+                expand
+                closeButton
+                duration={3000}
+              />
+            </>
+          ) : (
+            <>
+              <AppWithRouter />
+              <Toaster
+                position="top-right"
+                richColors
+                expand
+                closeButton
+                duration={3000}
+              />
+            </>
+          )}
         </ArtifactProvider>
       </ThemeProvider>
     </ErrorBoundary>

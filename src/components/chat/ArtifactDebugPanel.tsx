@@ -148,7 +148,7 @@ export default function ArtifactDebugPanel({
                 variant="ghost"
                 size="sm"
                 onClick={() => clearLogs(artifactId)}
-                className="h-8 text-red-500 hover:text-red-400"
+                className="h-8 text-red-500 hover:text-red-400 mr-12"
               >
                 <Trash2 className="w-4 h-4 mr-2" />
                 Clear

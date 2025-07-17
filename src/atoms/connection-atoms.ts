@@ -39,7 +39,6 @@ const getInitialApiUrl = () => {
   return getDefaultApiUrl();
 };
 
-
 export const apiUrlAtom = atomWithStorage<string>(
   "gigapi_connection_url",
   getInitialApiUrl(),
@@ -77,11 +76,11 @@ export const availableDatabasesAtom = atom((get) =>
   get(databasesAtom).map((db) => db.database_name)
 );
 
-import { 
-  databaseListForAIAtom, 
-  loadCompleteSchemaCacheAtom,
+import {
+  databaseListForAIAtom,
+  initializeSchemaCacheAtom,
   schemaCacheAtom,
-  getLocalStorageCacheAtom 
+  getLocalStorageCacheAtom,
 } from "./database-atoms";
 
 // Validate API URL format
@@ -97,7 +96,7 @@ const validateApiUrl = (url: string): boolean => {
 // Main connection action atom
 export const connectAtom = atom(null, async (get, set, apiUrl?: string) => {
   const url = apiUrl || get(apiUrlAtom);
-  console.log('[Connection] Starting connection process to:', url);
+  const previousUrl = get(apiUrlAtom);
 
   // Validate URL
   if (!validateApiUrl(url)) {
@@ -109,14 +108,19 @@ export const connectAtom = atom(null, async (get, set, apiUrl?: string) => {
 
   // Don't reconnect if already connected to same URL
   if (get(connectionStateAtom) === "connected" && !apiUrl) {
-    console.log('[Connection] Already connected, skipping');
     return;
   }
 
   // Don't connect if already connecting
   if (get(isConnectingAtom)) {
-    console.log('[Connection] Already connecting, skipping');
     return;
+  }
+
+  // Clear schema cache if connecting to a different instance
+  if (apiUrl && apiUrl !== previousUrl) {
+    set(schemaCacheAtom, null);
+    // Also clear related atoms
+    set(databaseListForAIAtom, []);
   }
 
   set(isConnectingAtom, true);
@@ -149,28 +153,19 @@ export const connectAtom = atom(null, async (get, set, apiUrl?: string) => {
       if (apiUrl && apiUrl !== get(apiUrlAtom)) {
         set(apiUrlAtom, apiUrl);
       }
-      
-      // First check localStorage directly to avoid race conditions
-      console.log('[Connection] Checking for cache...');
+
       const directCacheCheck = get(getLocalStorageCacheAtom);
-      
+
       if (directCacheCheck) {
-        console.log('[Connection] Found valid cache in localStorage, ensuring atom is initialized');
         // Make sure the atom has the cache loaded
         const atomCache = get(schemaCacheAtom);
         if (!atomCache) {
-          console.log('[Connection] Atom not initialized with cache, setting it now');
           set(schemaCacheAtom, directCacheCheck);
         }
-        console.log('[Connection] Using existing valid schema cache:', {
-          databases: Object.keys(directCacheCheck.databases),
-          totalTables: Object.values(directCacheCheck.databases).reduce((sum, db: any) => sum + db.tables.length, 0)
-        });
       } else {
-        // No valid cache, load fresh from API
-        console.log("[Connection] No valid cache found in localStorage, loading fresh schema cache...");
-        await set(loadCompleteSchemaCacheAtom);
-        console.log("[Connection] Fresh schema cache loaded, ready for initialization");
+        // No valid cache, initialize lightweight cache structure
+
+        await set(initializeSchemaCacheAtom);
       }
     }
   } catch (error) {

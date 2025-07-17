@@ -42,7 +42,8 @@ export default function ChatPage({ chatId }: ChatPageProps) {
   // Initialize selected connection when connections load
   useEffect(() => {
     if (connections.length > 0 && !selectedConnectionId) {
-      const activeConnection = connections.find((c) => c.isActive) || connections[0];
+      const activeConnection =
+        connections.find((c) => c.isActive) || connections[0];
       setSelectedConnectionId(activeConnection.id);
     }
   }, [connections, selectedConnectionId]);
@@ -63,8 +64,9 @@ export default function ChatPage({ chatId }: ChatPageProps) {
       }
 
       // Use selected connection or fallback to active/first connection
-      const connectionId = selectedConnectionId || 
-        connections.find((c) => c.isActive)?.id || 
+      const connectionId =
+        selectedConnectionId ||
+        connections.find((c) => c.isActive)?.id ||
         connections[0]?.id;
 
       if (!connectionId) {
@@ -94,8 +96,9 @@ export default function ChatPage({ chatId }: ChatPageProps) {
       }
 
       // Use selected connection or fallback to active/first connection
-      const connectionId = selectedConnectionId || 
-        connections.find((c) => c.isActive)?.id || 
+      const connectionId =
+        selectedConnectionId ||
+        connections.find((c) => c.isActive)?.id ||
         connections[0]?.id;
 
       if (!connectionId) {
@@ -191,36 +194,6 @@ export default function ChatPage({ chatId }: ChatPageProps) {
                           Add AI Connection
                         </Button>
                       </div>
-
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-left">
-                        <div className="bg-muted/20 rounded-lg p-4">
-                          <Bot className="w-8 h-8 text-primary mb-2" />
-                          <h4 className="font-semibold mb-1">
-                            Multiple Providers
-                          </h4>
-                          <p className="text-sm text-muted-foreground">
-                            Connect OpenAI, Anthropic, Ollama, Hugging Face, and
-                            more
-                          </p>
-                        </div>
-                        <div className="bg-muted/20 rounded-lg p-4">
-                          <Zap className="w-8 h-8 text-primary mb-2" />
-                          <h4 className="font-semibold mb-1">
-                            Smart Switching
-                          </h4>
-                          <p className="text-sm text-muted-foreground">
-                            Switch between providers on the fly for different
-                            tasks
-                          </p>
-                        </div>
-                        <div className="bg-muted/20 rounded-lg p-4">
-                          <Database className="w-8 h-8 text-primary mb-2" />
-                          <h4 className="font-semibold mb-1">Data Context</h4>
-                          <p className="text-sm text-muted-foreground">
-                            AI understands your database schema and tables
-                          </p>
-                        </div>
-                      </div>
                     </div>
                   ) : (
                     <ChatInputWithMentions
@@ -231,8 +204,12 @@ export default function ChatPage({ chatId }: ChatPageProps) {
                       session={{
                         id: "welcome",
                         title: "Welcome",
-                        aiConnectionId: selectedConnectionId || connections[0]?.id || "",
-                        connection: connections.find(c => c.id === selectedConnectionId) || connections[0],
+                        aiConnectionId:
+                          selectedConnectionId || connections[0]?.id || "",
+                        connection:
+                          connections.find(
+                            (c) => c.id === selectedConnectionId
+                          ) || connections[0],
                         messages: [],
                         createdAt: new Date().toISOString(),
                         updatedAt: new Date().toISOString(),

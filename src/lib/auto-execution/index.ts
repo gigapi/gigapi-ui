@@ -325,5 +325,3 @@ export class AutoExecutionEngine {
     return { ...this.config };
   }
 }
-
-export default AutoExecutionEngine;

@@ -5,7 +5,7 @@ export interface Dashboard {
   timeRange: TimeRange;
   timeZone?: string;
   refreshInterval?: number;
-  panels: PanelConfig[];  // Embedded panels directly in dashboard
+  panels: PanelConfig[]; // Embedded panels directly in dashboard
   layout: {
     panels: PanelLayout[];
     gridSettings?: {
@@ -80,7 +80,7 @@ export interface FieldMapping {
   labelField?: string;
   valueField?: string;
   timeField?: string;
-  timeUnit?: 'ns' | 'us' | 'μs' | 'ms' | 's';
+  timeUnit?: "ns" | "us" | "μs" | "ms" | "s";
 }
 
 export interface FieldConfig {
@@ -213,13 +213,6 @@ export type PanelType =
   | "pie"
   | "donut";
 
-export interface PanelData {
-  panelId: string;
-  data: NDJSONRecord[];
-  lastUpdated: Date;
-  error?: string;
-}
-
 export interface NDJSONRecord {
   __timestamp?: string;
   date?: string;
@@ -247,52 +240,6 @@ export interface PanelProps {
   onDuplicate?: (panelId: string) => void;
   onTimeRangeUpdate?: (timeRange: TimeRange) => void;
   className?: string;
-}
-
-export interface DashboardContextType {
-  currentDashboard: Dashboard | null;
-  panels: Map<string, PanelConfig>;
-  panelData: Map<string, PanelData>;
-  panelLoadingStates: Map<string, boolean>;
-
-  isEditMode: boolean;
-  selectedPanelId: string | null;
-  isConfigSidebarOpen: boolean;
-
-  loading: boolean;
-  error: string | null;
-
-  createDashboard: (
-    dashboard: Omit<Dashboard, "id" | "metadata">
-  ) => Promise<Dashboard>;
-  updateDashboard: (id: string, updates: Partial<Dashboard>) => Promise<void>;
-  deleteDashboard: (id: string) => Promise<void>;
-  loadDashboard: (id: string) => Promise<void>;
-  saveDashboard: () => Promise<void>;
-  clearCurrentDashboard: () => void;
-
-  addPanel: (
-    panel: Omit<PanelConfig, "id">,
-    dashboardId?: string
-  ) => Promise<string>;
-  updatePanel: (id: string, updates: Partial<PanelConfig>) => Promise<void>;
-  deletePanel: (id: string) => Promise<void>;
-  duplicatePanel: (id: string) => Promise<string>;
-  getPanelById: (panelId: string) => PanelConfig | undefined;
-  isPanelLoading: (panelId: string) => boolean;
-
-  updateLayout: (layouts: PanelLayout[]) => void;
-
-  refreshPanelData: (panelId: string) => Promise<void>;
-  refreshAllPanels: () => Promise<void>;
-
-  updateDashboardTimeRange: (timeRange: TimeRange) => Promise<void>;
-  resetDashboardTimeRange: () => Promise<void>;
-  updateDashboardTimeZone: (timeZone: string) => Promise<void>;
-
-  setEditMode: (enabled: boolean) => void;
-  setSelectedPanel: (panelId: string | null) => void;
-  setConfigSidebarOpen: (open: boolean) => void;
 }
 
 export interface DashboardListItem {

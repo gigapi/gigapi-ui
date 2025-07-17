@@ -2,10 +2,6 @@ import { type ReactNode } from "react";
 import { type PanelProps } from "@/types/dashboard.types";
 import { transformDataForPanel } from "@/lib/dashboard/data-transformers";
 
-export interface BasePanelProps extends PanelProps {
-  children?: ReactNode;
-}
-
 abstract class BasePanel {
   abstract render(props: PanelProps): ReactNode;
 

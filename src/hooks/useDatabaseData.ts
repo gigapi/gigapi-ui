@@ -49,14 +49,12 @@ export function useDatabaseData({
         
         // First check if we have databases from connection state
         if (availableDatabases && availableDatabases.length > 0) {
-          console.log("[useDatabaseData] Using cached databases from connection state:", availableDatabases.length);
           setDatabases(availableDatabases);
           setLoading(false);
           return;
         }
         
         // Otherwise fallback to API call
-        console.log("[useDatabaseData] No cached databases, fetching from API");
         const response = await axios.post(
           `${apiUrl}?format=json`,
           { query: "SHOW DATABASES" }
@@ -91,14 +89,12 @@ export function useDatabaseData({
         // First check cache
         const cachedTables = getCachedTables(database);
         if (cachedTables && cachedTables.length > 0) {
-          console.log(`[useDatabaseData] Using cached tables for ${database}:`, cachedTables.length);
           setTables(cachedTables);
           setLoading(false);
           return;
         }
         
         // Fallback to API if cache miss
-        console.log(`[useDatabaseData] Cache miss for ${database} tables, fetching from API`);
         const response = await axios.post(
           `${apiUrl}?db=${database}&format=json`,
           { query: "SHOW TABLES" }
@@ -133,14 +129,12 @@ export function useDatabaseData({
         // First check cache
         const cachedSchema = getCachedSchema(database, table);
         if (cachedSchema && cachedSchema.length > 0) {
-          console.log(`[useDatabaseData] Using cached schema for ${database}.${table}`);
           setSchema(cachedSchema);
           setLoading(false);
           return;
         }
         
         // Fallback to API if cache miss
-        console.log(`[useDatabaseData] Cache miss for ${database}.${table} schema, fetching from API`);
         const response = await axios.post(
           `${apiUrl}?db=${database}&format=json`,
           { query: `DESCRIBE SELECT * FROM ${table} LIMIT 1` }

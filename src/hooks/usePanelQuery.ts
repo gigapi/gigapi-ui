@@ -121,12 +121,6 @@ export function usePanelQuery({
       // Process query with time variables using the unified processor
       const timeColumn =
         config.fieldMapping?.timeField || config.timeField || selectedTimeField;
-      console.log(`[usePanelQuery] Processing query for panel ${panelId}:`, {
-        originalQuery: config.query,
-        timeRange: dashboard.timeRange,
-        timeColumn,
-        timeZone,
-      });
       const result = QueryProcessor.process({
         database,
         query: config.query,
@@ -143,7 +137,6 @@ export function usePanelQuery({
       });
 
       const { query: processedQuery, errors } = result;
-      console.log(`[usePanelQuery] Processed query:`, processedQuery);
 
       if (errors.length > 0) {
         const error = new Error(errors.join(", "));
@@ -162,9 +155,6 @@ export function usePanelQuery({
 
       // Only cancel if there's an active request
       if (abortControllerRef.current && loadingStatesRef.current.get(panelId)) {
-        console.log(
-          `[usePanelQuery] Cancelling previous request for panel ${panelId}`
-        );
         cancel();
       }
 
@@ -206,10 +196,6 @@ export function usePanelQuery({
             parseErrors
           );
         }
-
-        console.log(
-          `[usePanelQuery] Query successful for panel ${panelId}, got ${records.length} records`
-        );
 
         // Update state
         setPanelData((prev) => new Map(prev).set(panelId, { data: records }));

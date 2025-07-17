@@ -18,7 +18,7 @@ import {
   setHasTimeVariablesAtom,
 } from "@/atoms";
 import { toast } from "sonner";
-// import ChatPanelCompact from "@/components/chat/ChatPanelCompact";
+import ChatPanelCompact from "@/components/chat/ChatPanelCompact";
 import { QueryEditorToolbar, QueryEditorSelectors, MonacoSqlEditor } from "./";
 import { checkForTimeVariables, detectTimeFieldsFromSchema } from "@/lib/";
 
@@ -37,14 +37,6 @@ export default function QueryEditor() {
   const setSelectedTableAction = useSetAtom(setSelectedTableAtom);
   const setSelectedTimeField = useSetAtom(setSelectedTimeFieldAtom);
   const setHasTimeVariables = useSetAtom(setHasTimeVariablesAtom);
-
-  console.log("🔥 QUERY EDITOR RENDER:", {
-    query,
-    isLoading,
-    selectedDb,
-    selectedTable,
-    timestamp: new Date().toISOString(),
-  });
 
   // Use schema to get columns for table
   const getColumnsForTable = (tableName: string) => getColumns(tableName);
@@ -82,30 +74,17 @@ export default function QueryEditor() {
   const handleTimeRangeChange = useCallback(
     (newTimeRange: any) => {
       setTimeRange(newTimeRange);
-      console.log("Time range change:", newTimeRange);
     },
     [setTimeRange]
   );
 
   // Handle running query with timeout protection - NOT using useCallback to avoid stale closures
   const handleRunQuery = async () => {
-    console.log("🔥 RUN QUERY CALLED:", {
-      selectedDb,
-      query,
-      timestamp: new Date().toISOString(),
-    });
-
     // Force sync the editor content before running
     let finalQuery = query;
     if (editorRef.current) {
       const currentEditorContent = editorRef.current.getValue() || "";
-      console.log("🔥 FORCE SYNC EDITOR:", {
-        currentEditorContent,
-        query,
-        different: currentEditorContent !== query,
-      });
       if (currentEditorContent !== query) {
-        console.log("🔥 FORCE SYNC setQuery:", { currentEditorContent });
         setQuery(currentEditorContent);
         finalQuery = currentEditorContent; // Use the editor content immediately
       }
@@ -122,8 +101,6 @@ export default function QueryEditor() {
       toast.error("Please enter a query to execute");
       return;
     }
-
-    console.log("🔥 EXECUTING QUERY:", { finalQuery: trimmedQuery });
     executeQuery();
   };
 
@@ -140,33 +117,18 @@ export default function QueryEditor() {
     (value: string | undefined) => {
       const newQuery = value || "";
 
-      console.log("🔥 EDITOR CHANGE:", {
-        newQuery,
-        length: newQuery.length,
-        timestamp: new Date().toISOString(),
-      });
-
       // Update immediately - the editor is the source of truth
       setQuery(newQuery);
 
       // Check for time variables and update immediately
       const hasTimeVars = checkForTimeVariables(newQuery);
-      console.log("🔥 TIME VARIABLES CHECK:", {
-        hasTimeVars,
-        currentHasTimeVars: hasTimeVariables,
-      });
 
       if (hasTimeVars !== hasTimeVariables) {
-        console.log("🔥 UPDATING hasTimeVariables:", {
-          from: hasTimeVariables,
-          to: hasTimeVars,
-        });
         setHasTimeVariables(hasTimeVars);
       }
 
       // Auto-select first time field if time variables are detected and no field is selected
       if (hasTimeVars && !selectedTimeField && timeFieldOptions.length > 0) {
-        console.log("🔥 AUTO-SELECTING TIME FIELD:", timeFieldOptions[0]);
         setSelectedTimeField(timeFieldOptions[0]);
       }
     },
@@ -182,7 +144,6 @@ export default function QueryEditor() {
 
   // Handle editor mount
   const handleEditorMount = useCallback((editor: any, monaco: any) => {
-    console.log("🔥 EDITOR MOUNT:", { timestamp: new Date().toISOString() });
     editorRef.current = editor;
     monacoRef.current = monaco;
 
@@ -241,23 +202,11 @@ export default function QueryEditor() {
   // Check for time variables on initial mount and when query changes from outside
   useEffect(() => {
     const hasTimeVars = checkForTimeVariables(query);
-    console.log("🔥 INITIAL TIME VARIABLES CHECK:", {
-      query,
-      hasTimeVars,
-      currentHasTimeVars: hasTimeVariables,
-    });
 
     if (hasTimeVars !== hasTimeVariables) {
-      console.log("🔥 INITIAL TIME VARIABLES UPDATE:", {
-        from: hasTimeVariables,
-        to: hasTimeVars,
-      });
       setHasTimeVariables(hasTimeVars);
     }
   }, [query, hasTimeVariables, setHasTimeVariables]);
-
-  // REMOVE the editor sync useEffect - this is what causes the loop!
-  // The editor should be the source of truth, not the query atom
 
   return (
     <div className="flex flex-col gap-3 h-full">
@@ -314,10 +263,30 @@ export default function QueryEditor() {
           />
         </div>
 
-        {/* Chat Panel - Temporarily disabled */}
+        {/* Chat Panel */}
         {showChatPanel && (
-          <div className="w-1/2 h-full flex items-center justify-center bg-muted/30">
-            <p className="text-muted-foreground">Chat panel is being updated</p>
+          <div className="w-1/2 h-full">
+            <ChatPanelCompact
+              query={query}
+              selectedDb={selectedDb}
+              selectedTable={selectedTable}
+              onInsertSuggestion={(suggestion) => {
+                // Insert suggestion at current cursor position or replace selection
+                if (editorRef.current) {
+                  const selection = editorRef.current.getSelection();
+                  const id = { major: 1, minor: 1 };
+                  const text = suggestion;
+                  const op = {
+                    identifier: id,
+                    range: selection,
+                    text: text,
+                    forceMoveMarkers: true,
+                  };
+                  editorRef.current.executeEdits("insert-suggestion", [op]);
+                  editorRef.current.focus();
+                }
+              }}
+            />
           </div>
         )}
       </div>

@@ -1,6 +1,5 @@
 import { type NDJSONRecord } from "@/types/dashboard.types";
 
-export type TimeUnit = "ns" | "us" | "μs" | "ms" | "s";
 
 export type FieldType = {
   type: string;

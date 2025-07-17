@@ -1,12 +1,19 @@
 import { atom } from "jotai";
 import { atomWithStorage } from "jotai/utils";
 import { ArtifactEnhancer } from "@/lib/artifact-intelligence";
-import type { QueryContext } from "@/lib/artifact-intelligence/types";
+import type {
+  QueryContext,
+  SchemaContext,
+} from "@/lib/artifact-intelligence/types";
 import {
   buildCompleteInstructions,
   InstructionBuilder,
 } from "@/lib/ai-instructions";
 import { QuerySanitizer } from "@/lib/query-sanitizer";
+import { SchemaContextBuilder } from "@/lib/schema-context-builder";
+import { ConversationAnalyzer } from "@/lib/conversation-analyzer";
+import { StorageUtils } from "@/lib/storage-utils";
+import { schemaCacheAtom, loadAndCacheTableSchemaAtom } from "./database-atoms";
 import type {
   ChatSession,
   AIConnection,
@@ -27,13 +34,161 @@ const STORAGE_KEYS = {
 } as const;
 
 // ============================================================================
+// Storage Utilities
+// ============================================================================
+
+// Helper function to safely save chat sessions with compression and size limits
+function saveChatSessions(sessions: Record<string, ChatSession>) {
+  // Truncate artifact data to prevent large storage usage
+  const optimizedSessions = Object.fromEntries(
+    Object.entries(sessions).map(([id, session]) => {
+      const optimizedMessages = session.messages.map((message) => {
+        if (message.metadata?.artifacts) {
+          const optimizedArtifacts = message.metadata.artifacts.map(
+            (artifact) => {
+              // Truncate table data if it's too large
+              if (
+                artifact.type === "table" &&
+                artifact.data &&
+                typeof artifact.data === "object" &&
+                "results" in artifact.data &&
+                Array.isArray(artifact.data.results)
+              ) {
+                const truncatedResults = StorageUtils.truncateData(
+                  artifact.data.results,
+                  500 // Limit to 500 rows per artifact
+                );
+                return {
+                  ...artifact,
+                  data: {
+                    ...artifact.data,
+                    results: truncatedResults.data,
+                    metadata: {
+                      ...(artifact.data as any).metadata,
+                      truncated: truncatedResults.truncated,
+                      originalRowCount: artifact.data.results.length,
+                    },
+                  },
+                };
+              }
+              return artifact;
+            }
+          );
+
+          return {
+            ...message,
+            metadata: {
+              ...message.metadata,
+              artifacts: optimizedArtifacts,
+            },
+          };
+        }
+        return message;
+      });
+
+      return [
+        id,
+        {
+          ...session,
+          messages: optimizedMessages,
+        },
+      ];
+    })
+  );
+
+  // Save with compression and size limits
+  const saved = StorageUtils.saveToStorage(
+    STORAGE_KEYS.SESSIONS,
+    optimizedSessions,
+    {
+      maxSizeBytes: 10 * 1024 * 1024, // 10MB limit for chat sessions
+      compress: true,
+      maxRowsPerArtifact: 500,
+    }
+  );
+
+  if (!saved) {
+    console.warn("Failed to save chat sessions - size limit exceeded");
+    // Attempt cleanup and retry
+    const cleanedCount = StorageUtils.cleanupOldSessions(7); // Clean sessions older than 7 days
+    if (cleanedCount > 0) {
+      return StorageUtils.saveToStorage(
+        STORAGE_KEYS.SESSIONS,
+        optimizedSessions,
+        {
+          maxSizeBytes: 10 * 1024 * 1024,
+          compress: true,
+          maxRowsPerArtifact: 500,
+        }
+      );
+    }
+  }
+
+  return saved;
+}
+
+// Helper function to load chat sessions with decompression
+function loadChatSessions(): Record<string, ChatSession> {
+  const sessions = StorageUtils.loadFromStorage<Record<string, ChatSession>>(
+    STORAGE_KEYS.SESSIONS
+  );
+  return sessions || {};
+}
+
+// Storage monitoring and cleanup
+function monitorStorageUsage() {
+  const usage = StorageUtils.getStorageUsage();
+
+  // Log usage information
+  console.log(
+    `📊 Storage Usage: ${usage.used.toLocaleString()} bytes (${usage.percentage.toFixed(
+      1
+    )}%)`
+  );
+
+  // Warn if approaching storage limits
+  if (usage.percentage > 70) {
+    console.warn(
+      `⚠️ Storage usage high: ${usage.percentage.toFixed(
+        1
+      )}% - consider cleaning up old sessions`
+    );
+
+    // Auto-cleanup if over 80%
+    if (usage.percentage > 80) {
+      const cleanedCount = StorageUtils.cleanupOldSessions(14); // Clean sessions older than 2 weeks
+      if (cleanedCount > 0) {
+        console.log(`🧹 Auto-cleaned ${cleanedCount} old sessions`);
+      }
+    }
+  }
+}
+
+// Initialize storage monitoring
+if (typeof window !== "undefined") {
+  // Check storage usage on load
+  monitorStorageUsage();
+
+  // Set up periodic monitoring (every 5 minutes)
+  setInterval(monitorStorageUsage, 5 * 60 * 1000);
+}
+
+// ============================================================================
 // Base Atoms
 // ============================================================================
 
-// Chat sessions stored in localStorage
-export const chatSessionsAtom = atomWithStorage<Record<string, ChatSession>>(
-  STORAGE_KEYS.SESSIONS,
-  {}
+// Chat sessions stored in localStorage with compression and size limits
+const chatSessionsBaseAtom = atom<Record<string, ChatSession>>(
+  loadChatSessions()
+);
+
+export const chatSessionsAtom = atom(
+  (get) => get(chatSessionsBaseAtom),
+  (_get, set, newSessions: Record<string, ChatSession>) => {
+    set(chatSessionsBaseAtom, newSessions);
+    // Save sessions with compression and size limits
+    saveChatSessions(newSessions);
+  }
 );
 
 // AI connections stored in localStorage
@@ -51,6 +206,12 @@ export const globalInstructionsAtom = atomWithStorage<string[]>(
 // Active session ID
 export const activeSessionIdAtom = atomWithStorage<string | null>(
   STORAGE_KEYS.ACTIVE_SESSION,
+  null
+);
+
+// Query Editor Chat Session ID
+export const queryEditorChatSessionIdAtom = atomWithStorage<string | null>(
+  "gigapi_query_editor_chat_session",
   null
 );
 
@@ -73,11 +234,52 @@ export const sessionListAtom = atom((get) => {
   );
 });
 
-// Get all connections (no active state needed)
-export const allConnectionsAtom = atom((get) => {
-  const connections = get(aiConnectionsAtom);
-  return connections;
-});
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+// Convert SchemaCache to SchemaContext format
+function convertSchemaCacheToContext(schemaCache: any): SchemaContext | null {
+  if (!schemaCache || !schemaCache.databases) {
+    return null;
+  }
+
+  const converted: SchemaContext = {
+    databases: {},
+  };
+
+  // Convert each database
+  Object.entries(schemaCache.databases).forEach(
+    ([dbName, dbData]: [string, any]) => {
+      converted.databases[dbName] = {
+        tables: dbData.tables || [],
+        schemas: {},
+      };
+
+      // Convert each table schema
+      if (dbData.schemas) {
+        Object.entries(dbData.schemas).forEach(
+          ([tableName, columns]: [string, any]) => {
+            if (Array.isArray(columns)) {
+              converted.databases[dbName].schemas[tableName] = columns.map(
+                (col: any) => ({
+                  column_name: col.column_name || "",
+                  column_type: col.column_type || "",
+                  // Convert null to undefined for optional fields
+                  key: col.key === null ? undefined : col.key,
+                  null: col.null === null ? undefined : col.null,
+                })
+              );
+            }
+          }
+        );
+      }
+    }
+  );
+
+  return converted;
+}
 
 // ============================================================================
 // Action Atoms
@@ -187,25 +389,61 @@ export const sendMessageAtom = atom(
     try {
       // Get global instructions and schema cache
       const globalInstructions = get(globalInstructionsAtom);
-      const schemaCache = localStorage.getItem("gigapi_schema_cache");
+      let schemaCache = get(schemaCacheAtom);
+
+      // Load schemas for any @mentions in the message
+      if (options.message.includes("@")) {
+        const mentions = SchemaContextBuilder.extractMentions(options.message);
+        console.log("[Chat] Found mentions in user message:", mentions);
+
+        // Load schemas for any table mentions
+        for (const mention of mentions) {
+          if (mention.type === "table" && mention.database && mention.table) {
+            // Check if schema is already cached
+            if (
+              !schemaCache?.databases[mention.database]?.schemas[mention.table]
+            ) {
+              console.log(
+                `[Chat] Loading schema for mentioned table: ${mention.database}.${mention.table}`
+              );
+              try {
+                // Load the schema using the lazy loading atom
+                await set(loadAndCacheTableSchemaAtom, {
+                  database: mention.database,
+                  table: mention.table,
+                });
+                // Refresh schema cache after loading
+                schemaCache = get(schemaCacheAtom);
+                console.log(
+                  `[Chat] Schema loaded for ${mention.database}.${mention.table}`
+                );
+              } catch (error) {
+                console.error(
+                  `[Chat] Failed to load schema for ${mention.database}.${mention.table}:`,
+                  error
+                );
+              }
+            }
+          }
+        }
+      }
 
       // Debug: Log schema cache status
       if (schemaCache) {
-        const parsedSchema = JSON.parse(schemaCache);
-        const databaseInfo = Object.entries(parsedSchema.databases || {}).map(
+        const databaseInfo = Object.entries(schemaCache.databases || {}).map(
           ([dbName, dbData]: [string, any]) => ({
             name: dbName,
             tables: dbData.tables || [],
             tableCount: dbData.tables?.length || 0,
+            schemasLoaded: Object.keys(dbData.schemas || {}).length,
           })
         );
         console.log("📊 Schema cache loaded:", {
           databases: databaseInfo,
           totalDatabases: databaseInfo.length,
-          cacheSize: schemaCache.length,
         });
       } else {
-        console.warn("⚠️ No schema cache found in localStorage");
+        console.warn("⚠️ No schema cache found");
       }
 
       // Get time context from query interface
@@ -214,11 +452,14 @@ export const sendMessageAtom = atom(
       const selectedTable = localStorage.getItem("gigapi_selected_table");
 
       // Build query context for artifact intelligence
+      // Convert schema cache to proper format
+      const schemaContext = convertSchemaCacheToContext(schemaCache);
+
       const queryContext: QueryContext = {
         selectedDatabase: selectedDb || undefined,
         selectedTable: selectedTable || undefined,
         globalInstructions,
-        schemaContext: schemaCache ? JSON.parse(schemaCache) : undefined,
+        schemaContext: schemaContext || undefined,
         timeContext: timeRange
           ? {
               timeRange: JSON.parse(timeRange),
@@ -233,7 +474,7 @@ export const sendMessageAtom = atom(
         session.connection,
         updatedSession.messages,
         globalInstructions,
-        schemaCache ? JSON.parse(schemaCache) : null,
+        schemaCache,
         queryContext,
         options.isAgentic || false,
         (chunk: string) => {
@@ -479,21 +720,6 @@ export const renameSessionAtom = atom(
   }
 );
 
-// Set active connection
-export const setActiveConnectionAtom = atom(
-  null,
-  (get, set, connectionId: string) => {
-    const connections = get(aiConnectionsAtom);
-
-    // Update connections to set the active one
-    const updatedConnections = connections.map((conn) => ({
-      ...conn,
-      isActive: conn.id === connectionId,
-    }));
-
-    set(aiConnectionsAtom, updatedConnections);
-  }
-);
 
 // Delete connection
 export const deleteConnectionAtom = atom(
@@ -613,6 +839,44 @@ You are currently in AGENTIC MODE. This means:
 4. **NEVER include @ symbols** in your SQL queries
 5. **ALWAYS explain your rationale** for each proposed query
 
+## EXACT PROPOSAL FORMAT REQUIRED:
+
+For queries:
+\`\`\`proposal
+{
+  "type": "query_proposal",
+  "title": "Clear descriptive title",
+  "description": "What this query will do",
+  "query": "SELECT * FROM table_name LIMIT 10",
+  "database": "database_name",
+  "rationale": "Why this query is needed",
+  "next_steps": ["what to do next", "other actions"]
+}
+\`\`\`
+
+For charts:
+\`\`\`proposal
+{
+  "type": "chart_proposal",
+  "title": "Chart title",
+  "description": "What this chart shows",
+  "query": "SELECT time, value FROM metrics ORDER BY time",
+  "database": "database_name",
+  "chart_type": "line",
+  "x_axis": "time",
+  "y_axes": ["value"],
+  "rationale": "Why this visualization is useful",
+  "next_steps": ["refinements", "other charts"]
+}
+\`\`\`
+
+## CRITICAL RULES:
+- ALWAYS use "type": "query_proposal" or "type": "chart_proposal"
+- NEVER use "type": "proposal" 
+- ALWAYS include ALL required fields
+- NEVER include @ symbols in queries
+- ALWAYS use actual database names from context
+
 Example: When user asks "summarize @mydb.table", you should respond with:
 - Text explanation of what you'll do
 - A proposal artifact with clean SQL (no @ symbols)
@@ -639,37 +903,89 @@ Example: When user asks "show me sales by month", respond with:
     });
   }
 
-  // Include schema context
-  const isFirstMessage = messages.filter((m) => m.role === "user").length === 1;
-  const lastMessage = messages[messages.length - 1];
-  const hasMentions = lastMessage && lastMessage.content.includes("@");
+  // Convert schema cache to proper format
+  const schemaContext = schemaCache
+    ? convertSchemaCacheToContext(schemaCache)
+    : null;
 
-  if (schemaCache) {
-    let schemaContext: string | null = null;
+  // Include schema context using the new SchemaContextBuilder
+  if (schemaContext) {
+    // ALWAYS analyze conversation for context continuity (not just in agentic mode)
+    const conversationContext =
+      ConversationAnalyzer.analyzeConversation(messages);
 
-    if (isFirstMessage) {
-      schemaContext = buildFullSchemaContext(schemaCache);
-    } else if (hasMentions) {
-      const mentionedItems = extractMentions(lastMessage.content);
-      schemaContext = buildSchemaContext(mentionedItems, schemaCache);
-    } else {
-      schemaContext = buildDatabaseSummary(schemaCache);
-    }
+    const schemaContextString = SchemaContextBuilder.getSchemaContext(
+      messages,
+      schemaContext,
+      {
+        maxColumnsPerTable: 50, // Limit columns to prevent context overflow
+        includeIndices: true,
+        summaryOnly: false,
+        includeRecentContext: true, // Always include recent context for better continuity
+        isAgentic, // Pass agentic mode flag
+      }
+    );
 
-    if (schemaContext) {
+    if (schemaContextString) {
+      // Extract mentions for logging
+      const lastMessage = messages[messages.length - 1];
+      const mentions = lastMessage
+        ? SchemaContextBuilder.extractMentions(lastMessage.content)
+        : [];
+      const isFirstMessage =
+        messages.filter((m) => m.role === "user").length === 1;
+
       console.log("📊 Sending schema context to AI:", {
         isFirstMessage,
-        hasMentions,
-        contextLength: schemaContext.length,
-        contextPreview: schemaContext.substring(0, 500) + "...",
+        isAgentic,
+        lastMessageContent: lastMessage?.content || "",
+        mentionsFound: mentions.length,
+        mentions: mentions.map((m) => ({
+          type: m.type,
+          fullName: m.fullName,
+          database: m.database,
+          table: m.table,
+        })),
+        conversationContext: conversationContext
+          ? {
+              activeTables: conversationContext.activeTables,
+              activeDatabases: conversationContext.activeDatabases,
+              discussionTopic: conversationContext.discussionTopic,
+            }
+          : null,
+        contextLength: schemaContextString.length,
+        contextType:
+          isFirstMessage && mentions.length > 0
+            ? "first_message_with_mentions"
+            : isFirstMessage
+            ? "first_message"
+            : mentions.length > 0
+            ? "mentions"
+            : "summary",
+        contextPreview: schemaContextString.substring(0, 500) + "...",
       });
+
       systemMessages.push({
         role: "system",
-        content: `DATABASE SCHEMA CONTEXT:\n\n${schemaContext}`,
+        content: `DATABASE SCHEMA CONTEXT:\n\n${schemaContextString}`,
       });
+
+      // Add conversation context for better continuity (both modes)
+      if (conversationContext && conversationContext.activeTables.length > 0) {
+        const contextSummary =
+          ConversationAnalyzer.buildContextSummary(conversationContext);
+        if (contextSummary) {
+          systemMessages.push({
+            role: "system",
+            content: `CONVERSATION CONTEXT:\n${contextSummary}\n\nIMPORTANT: When the user says "that", "it", "the schema", or uses other references, they are referring to the entities mentioned above.`,
+          });
+        }
+      }
     } else {
       console.warn("⚠️ No schema context generated for AI");
     }
+  } else {
+    console.warn("⚠️ No schema cache found in localStorage");
   }
 
   // Map messages to AI format
@@ -900,161 +1216,6 @@ Example: When user asks "show me sales by month", respond with:
   onComplete(processedResponse.content, processedResponse.artifacts);
 }
 
-// Extract @mentions from text
-function extractMentions(text: string): string[] {
-  const mentionRegex = /@([a-zA-Z0-9_]+(?:\.[a-zA-Z0-9_]+)?)/g;
-  const matches = text.match(mentionRegex);
-  return matches
-    ? matches.map((m) => {
-        // Remove @ and clean the mention
-        const mention = m.substring(1);
-        if (mention.includes(".")) {
-          // For database.table format, clean the database part
-          const [db, table] = mention.split(".");
-          return `${QuerySanitizer.cleanDatabaseName(db)}.${table}`;
-        }
-        return QuerySanitizer.cleanDatabaseName(mention);
-      })
-    : [];
-}
-
-// Build full schema context for first message
-function buildFullSchemaContext(schemaCache: any): string {
-  if (!schemaCache?.databases) return "";
-
-  const contextParts: string[] = [];
-  contextParts.push("📊 AVAILABLE DATABASES AND TABLES:");
-  contextParts.push("");
-
-  // Add all databases and their tables
-  Object.entries(schemaCache.databases).forEach(
-    ([dbName, dbData]: [string, any]) => {
-      contextParts.push(`Database: ${dbName}`);
-      contextParts.push(
-        `Tables (${dbData.tables.length}): ${dbData.tables.join(", ")}`
-      );
-      contextParts.push("");
-    }
-  );
-
-  contextParts.push("💡 SCHEMA DETAILS:");
-  contextParts.push("");
-
-  // Add detailed schema for each table
-  Object.entries(schemaCache.databases).forEach(
-    ([dbName, dbData]: [string, any]) => {
-      if (dbData.schemas) {
-        Object.entries(dbData.schemas).forEach(
-          ([tableName, columns]: [string, any]) => {
-            if (columns && columns.length > 0) {
-              contextParts.push(`Table: ${dbName}.${tableName}`);
-              contextParts.push("Columns:");
-              columns.forEach((col: any) => {
-                const keyInfo = col.key ? ` [${col.key}]` : "";
-                const nullInfo = col.null === "NO" ? " NOT NULL" : "";
-                contextParts.push(
-                  `  - ${col.column_name} (${col.column_type})${keyInfo}${nullInfo}`
-                );
-              });
-              contextParts.push("");
-            }
-          }
-        );
-      }
-    }
-  );
-
-  return contextParts.join("\n");
-}
-
-// Build schema context for mentioned items
-function buildSchemaContext(
-  mentions: string[],
-  schemaCache: any
-): string | null {
-  if (!mentions.length || !schemaCache?.databases) return null;
-
-  const contextParts: string[] = [];
-
-  mentions.forEach((mention) => {
-    // Check if it's a database mention
-    if (schemaCache.databases[mention]) {
-      const db = schemaCache.databases[mention];
-      contextParts.push(`Database: ${mention}`);
-      contextParts.push(`Tables: ${db.tables.join(", ")}`);
-      contextParts.push("");
-    }
-
-    // Check if it's a table mention (format: database.table)
-    const [dbName, tableName] = mention.split(".");
-    if (
-      dbName &&
-      tableName &&
-      schemaCache.databases[dbName]?.schemas?.[tableName]
-    ) {
-      const columns = schemaCache.databases[dbName].schemas[tableName];
-      contextParts.push(`Table: ${mention}`);
-      contextParts.push("Columns:");
-      columns.forEach((col: any) => {
-        contextParts.push(
-          `  - ${col.column_name} (${col.column_type})${
-            col.key ? ` [${col.key}]` : ""
-          }`
-        );
-      });
-      contextParts.push("");
-    } else if (!mention.includes(".")) {
-      // Check if it's a standalone table name (search in all databases)
-      Object.entries(schemaCache.databases).forEach(
-        ([dbName, dbData]: [string, any]) => {
-          if (dbData.schemas?.[mention]) {
-            const columns = dbData.schemas[mention];
-            contextParts.push(`Table: ${dbName}.${mention}`);
-            contextParts.push("Columns:");
-            columns.forEach((col: any) => {
-              contextParts.push(
-                `  - ${col.column_name} (${col.column_type})${
-                  col.key ? ` [${col.key}]` : ""
-                }`
-              );
-            });
-            contextParts.push("");
-          }
-        }
-      );
-    }
-  });
-
-  return contextParts.length > 0 ? contextParts.join("\n") : null;
-}
-
-// Build database summary for subsequent messages without mentions
-function buildDatabaseSummary(schemaCache: any): string {
-  if (!schemaCache?.databases) return "";
-
-  const contextParts: string[] = [];
-  contextParts.push("📊 AVAILABLE DATABASES AND TABLES:");
-  contextParts.push("");
-
-  // List all databases with their tables
-  Object.entries(schemaCache.databases).forEach(
-    ([dbName, dbData]: [string, any]) => {
-      contextParts.push(`Database: ${dbName}`);
-      if (dbData.tables && dbData.tables.length > 0) {
-        contextParts.push(`Tables: ${dbData.tables.join(", ")}`);
-      }
-      contextParts.push("");
-    }
-  );
-
-  contextParts.push(
-    "💡 Use @database.table to get detailed column schema for specific tables."
-  );
-  contextParts.push("");
-
-  return contextParts.join("\n");
-}
-
 // Helper function to enhance and add artifact
 async function enhanceAndAddArtifact(
   artifact: any,
@@ -1097,7 +1258,6 @@ async function processAIResponse(
 }> {
   const artifacts: any[] = [];
   let thinking = "";
-
 
   // Extract thinking blocks (support both <think> and <thinking> tags)
   const thinkingMatches = content.matchAll(
@@ -1242,33 +1402,62 @@ async function processAIResponse(
   }
 
   // Extract proposal artifacts
-  const proposalMatches = processedContent.matchAll(
-    /\`\`\`proposal\n([\s\S]*?)\`\`\`/g
-  );
+  const proposalRegex = /\`\`\`proposal\n([\s\S]*?)\`\`\`/g;
+  const proposalMatches = Array.from(processedContent.matchAll(proposalRegex));
+
+  console.log("🔍 Processing proposal artifacts:", {
+    matchCount: proposalMatches.length,
+    contentLength: processedContent.length,
+    hasProposalBlocks: processedContent.includes("```proposal"),
+  });
+
   for (const match of proposalMatches) {
     try {
+      console.log("🔍 Raw proposal match:", match[1]);
       let artifact = JSON.parse(match[1]);
-      if ((artifact.type === "query_proposal" || artifact.type === "chart_proposal") && artifact.query) {
+      console.log("🔍 Parsed proposal artifact:", artifact);
+
+      if (
+        (artifact.type === "query_proposal" ||
+          artifact.type === "chart_proposal") &&
+        artifact.query
+      ) {
         // Sanitize the proposal
         artifact = QuerySanitizer.sanitizeQueryArtifact(artifact);
+        console.log("🔍 Sanitized proposal artifact:", artifact);
 
         const proposalArtifact = {
           id: `proposal_${Date.now()}_${Math.random()
             .toString(36)
             .substring(2, 9)}`,
           type: "proposal" as const,
-          title: artifact.title || (artifact.type === "chart_proposal" ? "Chart Proposal" : "Query Proposal"),
+          title:
+            artifact.title ||
+            (artifact.type === "chart_proposal"
+              ? "Chart Proposal"
+              : "Query Proposal"),
           data: artifact,
         };
 
+        console.log("🔍 Final proposal artifact:", proposalArtifact);
+
         // Don't enhance proposal artifacts - they're just proposals
         artifacts.push(proposalArtifact);
+      } else {
+        console.warn("🔍 Proposal artifact missing required fields:", {
+          type: artifact.type,
+          hasQuery: !!artifact.query,
+        });
       }
     } catch (error) {
-      console.error("Failed to parse proposal artifact:", error);
+      console.error(
+        "Failed to parse proposal artifact:",
+        error,
+        "Raw content:",
+        match[1]
+      );
     }
   }
-
 
   // Extract metric artifacts
   const metricMatches = processedContent.matchAll(
@@ -1308,21 +1497,27 @@ async function processAIResponse(
   cleanContent = cleanContent.replace(/\`\`\`insight\n[\s\S]*?\`\`\`/g, "");
   cleanContent = cleanContent.replace(/\`\`\`metric\n[\s\S]*?\`\`\`/g, "");
   cleanContent = cleanContent.replace(/\`\`\`proposal\n[\s\S]*?\`\`\`/g, "");
-  
+
   // Clean up any [object Object] text that the AI might have included
   cleanContent = cleanContent.replace(/\[object Object\]/g, "");
-  
-  // Clean up any actual object strings that might have been included
-  cleanContent = cleanContent.replace(/\{[^}]*"type"\s*:\s*"[^"]*"[^}]*\}/g, (match) => {
-    // Check if this looks like an artifact object that was accidentally included
-    if (match.includes('"query"') || match.includes('"chart_type"') || match.includes('"title"')) {
-      return ""; // Remove it
-    }
-    return match; // Keep other objects
-  });
-  
-  cleanContent = cleanContent.trim();
 
+  // Clean up any actual object strings that might have been included
+  cleanContent = cleanContent.replace(
+    /\{[^}]*"type"\s*:\s*"[^"]*"[^}]*\}/g,
+    (match) => {
+      // Check if this looks like an artifact object that was accidentally included
+      if (
+        match.includes('"query"') ||
+        match.includes('"chart_type"') ||
+        match.includes('"title"')
+      ) {
+        return ""; // Remove it
+      }
+      return match; // Keep other objects
+    }
+  );
+
+  cleanContent = cleanContent.trim();
 
   return {
     content: cleanContent || processedContent, // Fall back to processedContent if nothing left

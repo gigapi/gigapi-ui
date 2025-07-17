@@ -1,5 +1,7 @@
-import React, { useState } from "react";
+import React from "react";
 import { useNavigate } from "react-router-dom";
+import { useAtom } from "jotai";
+import { commandPaletteOpenAtom } from "@/atoms";
 import {
   Command,
   CommandDialog,
@@ -32,7 +34,7 @@ interface Command {
 }
 
 export function CommandPalette() {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useAtom(commandPaletteOpenAtom);
   const navigate = useNavigate();
   const { setTheme } = useTheme();
 
@@ -47,7 +49,7 @@ export function CommandPalette() {
 
     document.addEventListener("keydown", down);
     return () => document.removeEventListener("keydown", down);
-  }, []);
+  }, [setOpen]);
 
   const commands: Command[] = [
     // Navigation

@@ -66,14 +66,3 @@ export interface SmartExecutionSuggestion {
   confidence: number;
   estimated_improvement?: string;
 }
-
-export interface ExecutionPattern {
-  id: string;
-  pattern_type: "successful_query" | "common_error" | "optimization_opportunity";
-  query_pattern: string;
-  database_pattern?: string;
-  success_rate: number;
-  average_execution_time: number;
-  common_modifications: string[];
-  recommendation: string;
-}

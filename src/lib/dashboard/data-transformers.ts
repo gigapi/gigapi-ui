@@ -23,6 +23,29 @@ export interface TransformedData {
 }
 
 /**
+ * Helper function to get time range from records
+ */
+function getTimeRange(records: NDJSONRecord[], timeField: string): { min: number; max: number } {
+  let min = Infinity;
+  let max = -Infinity;
+  
+  for (const record of records) {
+    const timeValue = parseTimeValue(record[timeField]);
+    if (timeValue) {
+      let timestamp = timeValue.getTime();
+      // Handle nanosecond timestamps
+      if (timestamp > 32503680000000) {
+        timestamp = Math.floor(timestamp / 1000000);
+      }
+      if (timestamp < min) min = timestamp;
+      if (timestamp > max) max = timestamp;
+    }
+  }
+  
+  return { min, max };
+}
+
+/**
  * Transform raw NDJSON data for panel rendering using approach
  * Simplified version without legacy support
  */
@@ -136,9 +159,71 @@ function transformForBar(
       const timeValue = parseTimeValue(record[xField]);
       if (!timeValue) continue;
       
-      // For time-based bar charts, keep as timestamp for proper sorting
-      // The chart component will handle formatting
-      xValue = timeValue.getTime();
+      let timestamp = timeValue.getTime();
+      
+      // Handle nanosecond timestamps
+      if (timestamp > 32503680000000) {
+        timestamp = Math.floor(timestamp / 1000000);
+      }
+      
+      // For time-based bar charts, group by day for better aggregation
+      const date = new Date(timestamp);
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      const hour = String(date.getHours()).padStart(2, '0');
+      
+      // Determine grouping interval based on data range and density
+      const timeRange = getTimeRange(records, xField);
+      const rangeMs = timeRange.max - timeRange.min;
+      const dataPointCount = records.length;
+      const minuteMs = 60 * 1000;
+      const hourMs = 60 * minuteMs;
+      const dayMs = 24 * hourMs;
+      
+      // Calculate data density (points per hour)
+      const dataPointsPerHour = rangeMs > 0 ? (dataPointCount / (rangeMs / hourMs)) : 0;
+      
+      if (rangeMs <= hourMs) {
+        // For data within an hour, group by minutes or seconds based on density
+        if (dataPointsPerHour > 100) {
+          // High frequency: group by 10-second intervals
+          const minute = String(date.getMinutes()).padStart(2, '0');
+          const second = String(Math.floor(date.getSeconds() / 10) * 10).padStart(2, '0');
+          xValue = `${year}-${month}-${day} ${hour}:${minute}:${second}`;
+        } else if (dataPointsPerHour > 20) {
+          // Medium frequency: group by minutes
+          const minute = String(date.getMinutes()).padStart(2, '0');
+          xValue = `${year}-${month}-${day} ${hour}:${minute}`;
+        } else {
+          // Low frequency: group by 10-minute intervals
+          const minute = String(Math.floor(date.getMinutes() / 10) * 10).padStart(2, '0');
+          xValue = `${year}-${month}-${day} ${hour}:${minute}`;
+        }
+      } else if (rangeMs <= dayMs) {
+        // For data within a day, choose granularity based on data density
+        if (dataPointsPerHour > 50) {
+          // High frequency: group by 10-minute intervals
+          const minute = String(Math.floor(date.getMinutes() / 10) * 10).padStart(2, '0');
+          xValue = `${year}-${month}-${day} ${hour}:${minute}`;
+        } else if (dataPointsPerHour > 10) {
+          // Medium frequency: group by 30-minute intervals
+          const minute = String(Math.floor(date.getMinutes() / 30) * 30).padStart(2, '0');
+          xValue = `${year}-${month}-${day} ${hour}:${minute}`;
+        } else {
+          // Low frequency: group by hour
+          xValue = `${year}-${month}-${day} ${hour}:00`;
+        }
+      } else if (rangeMs <= 7 * dayMs) {
+        // Group by day for data within a week
+        xValue = `${year}-${month}-${day}`;
+      } else if (rangeMs <= 30 * dayMs) {
+        // Group by day for data within a month
+        xValue = `${year}-${month}-${day}`;
+      } else {
+        // Group by month for longer periods
+        xValue = `${year}-${month}`;
+      }
     } else {
       xValue = String(record[xField] || "Unknown");
     }
@@ -157,7 +242,7 @@ function transformForBar(
       existing.sum += yValue;
       existing.count += 1;
     } else {
-      groupedData.set(String(key), { sum: yValue, count: 1, series: seriesName });
+      groupedData.set(key, { sum: yValue, count: 1, series: seriesName });
     }
 
     seriesSet.add(seriesName);
@@ -178,8 +263,16 @@ function transformForBar(
     if (avgValue > maxValue) maxValue = avgValue;
   }
 
-  // Sort data by x value if not time-based
-  if (!isTimeBasedX) {
+  // Sort data by x value
+  if (isTimeBasedX) {
+    // For time-based data, sort by actual time
+    data.sort((a, b) => {
+      const aTime = new Date(String(a.x)).getTime();
+      const bTime = new Date(String(b.x)).getTime();
+      return aTime - bTime;
+    });
+  } else {
+    // For categorical data, sort alphabetically
     data.sort((a, b) => {
       const aStr = String(a.x);
       const bStr = String(b.x);
@@ -410,47 +503,89 @@ function transformForStat(
   const firstRecord = records[0];
   const fields = Object.keys(firstRecord);
 
-  let field: string;
+  let valueField: string;
+  let groupField: string | undefined;
+  
   if (fieldMapping?.yField) {
-    field = fieldMapping.yField;
+    valueField = fieldMapping.yField;
+    groupField = fieldMapping.seriesField;
   } else {
     const numericFields = SchemaAnalyzer.findNumericFields(firstRecord, fields);
     if (numericFields.length === 0) {
       return { data: [], series: [], metadata: { totalRecords: 0 } };
     }
-    field = numericFields[0];
+    valueField = numericFields[0];
+    
+    // Auto-detect grouping field
+    const stringFields = SchemaAnalyzer.findStringFields(firstRecord, fields);
+    groupField = stringFields.length > 0 ? stringFields[0] : undefined;
   }
-  const values: number[] = [];
 
-  for (const record of records) {
-    const value = parseNumericValue(record[field]);
-    if (value !== null) {
-      values.push(value);
+  const data: ChartDataPoint[] = [];
+  const seriesSet = new Set<string>();
+
+  // Check if we have grouped data
+  if (groupField) {
+    // Group by the series field
+    const groups = new Map<string, number[]>();
+    
+    for (const record of records) {
+      const groupName = String(record[groupField] || "Unknown");
+      const value = parseNumericValue(record[valueField]);
+      
+      if (value !== null) {
+        if (!groups.has(groupName)) {
+          groups.set(groupName, []);
+        }
+        groups.get(groupName)!.push(value);
+      }
     }
+    
+    // Create a stat for each group
+    for (const [groupName, values] of groups.entries()) {
+      if (values.length > 0) {
+        const avg = values.reduce((a, b) => a + b, 0) / values.length;
+        data.push({
+          x: groupName,
+          y: avg,
+          series: groupName
+        });
+        seriesSet.add(groupName);
+      }
+    }
+  } else {
+    // Single stat for all values
+    const values: number[] = [];
+    for (const record of records) {
+      const value = parseNumericValue(record[valueField]);
+      if (value !== null) {
+        values.push(value);
+      }
+    }
+
+    if (values.length === 0) {
+      return { data: [], series: [], metadata: { totalRecords: 0 } };
+    }
+
+    const latest = values[values.length - 1];
+    const avg = values.reduce((a, b) => a + b, 0) / values.length;
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+
+    data.push(
+      { x: "current", y: latest, series: "stats" },
+      { x: "average", y: avg, series: "stats" },
+      { x: "min", y: min, series: "stats" },
+      { x: "max", y: max, series: "stats" }
+    );
+    seriesSet.add("stats");
   }
-
-  if (values.length === 0) {
-    return { data: [], series: [], metadata: { totalRecords: 0 } };
-  }
-
-  const latest = values[values.length - 1];
-  const avg = values.reduce((a, b) => a + b, 0) / values.length;
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-
-  const data: ChartDataPoint[] = [
-    { x: "current", y: latest },
-    { x: "average", y: avg },
-    { x: "min", y: min },
-    { x: "max", y: max },
-  ];
 
   return {
     data,
-    series: ["stats"],
+    series: Array.from(seriesSet),
     metadata: {
       totalRecords: records.length,
-      valueRange: { min, max },
     },
   };
 }
@@ -466,37 +601,83 @@ function transformForGauge(
   const firstRecord = records[0];
   const fields = Object.keys(firstRecord);
 
-  let field: string;
+  let valueField: string;
+  let groupField: string | undefined;
+  
   if (fieldMapping?.yField) {
-    field = fieldMapping.yField;
+    valueField = fieldMapping.yField;
+    groupField = fieldMapping.seriesField;
   } else {
     const numericFields = SchemaAnalyzer.findNumericFields(firstRecord, fields);
     if (numericFields.length === 0) {
       return { data: [], series: [], metadata: { totalRecords: 0 } };
     }
-    field = numericFields[0];
+    valueField = numericFields[0];
+    
+    // Auto-detect grouping field
+    const stringFields = SchemaAnalyzer.findStringFields(firstRecord, fields);
+    groupField = stringFields.length > 0 ? stringFields[0] : undefined;
   }
-  let latestValue: number | null = null;
 
-  // Get latest non-null value
-  for (let i = records.length - 1; i >= 0; i--) {
-    const value = parseNumericValue(records[i][field]);
-    if (value !== null) {
-      latestValue = value;
-      break;
+  const data: ChartDataPoint[] = [];
+  const seriesSet = new Set<string>();
+
+  // Check if we have grouped data
+  if (groupField) {
+    // Group by the series field
+    const groups = new Map<string, number[]>();
+    
+    for (const record of records) {
+      const groupName = String(record[groupField] || "Unknown");
+      const value = parseNumericValue(record[valueField]);
+      
+      if (value !== null) {
+        if (!groups.has(groupName)) {
+          groups.set(groupName, []);
+        }
+        groups.get(groupName)!.push(value);
+      }
     }
-  }
+    
+    // Create a gauge for each group (using average or latest)
+    for (const [groupName, values] of groups.entries()) {
+      if (values.length > 0) {
+        // Use average value for gauges when grouped
+        const avg = values.reduce((a, b) => a + b, 0) / values.length;
+        data.push({
+          x: groupName,
+          y: avg,
+          series: groupName
+        });
+        seriesSet.add(groupName);
+      }
+    }
+  } else {
+    // Single gauge for latest value
+    let latestValue: number | null = null;
 
-  if (latestValue === null) {
-    return { data: [], series: [], metadata: { totalRecords: 0 } };
+    // Get latest non-null value
+    for (let i = records.length - 1; i >= 0; i--) {
+      const value = parseNumericValue(records[i][valueField]);
+      if (value !== null) {
+        latestValue = value;
+        break;
+      }
+    }
+
+    if (latestValue === null) {
+      return { data: [], series: [], metadata: { totalRecords: 0 } };
+    }
+
+    data.push({ x: "gauge", y: latestValue, series: "gauge" });
+    seriesSet.add("gauge");
   }
 
   return {
-    data: [{ x: "gauge", y: latestValue }],
-    series: ["gauge"],
+    data,
+    series: Array.from(seriesSet),
     metadata: {
       totalRecords: records.length,
-      valueRange: { min: latestValue, max: latestValue },
     },
   };
 }

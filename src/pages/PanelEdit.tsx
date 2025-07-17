@@ -3,9 +3,9 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useAtom, useSetAtom } from "jotai";
 import { useDashboardSafely } from "@/atoms";
 import {
-  apiUrlAtom,
   availableDatabasesAtom,
   schemaAtom,
+  autoCompleteSchemaAtom,
   loadSchemaForDbAtom,
   setSelectedDbAtom,
   selectedTableAtom,
@@ -52,19 +52,7 @@ export default function PanelEdit(props?: PanelEditProps) {
   const dashboardId = props?.dashboardId || routeDashboardId;
   const panelId = props?.panelId || routePanelId;
 
-  console.log("🔥 PANEL EDIT RENDER:", {
-    dashboardId,
-    panelId,
-    props: !!props,
-    timestamp: new Date().toISOString(),
-  });
-
   const dashboardContext = useDashboardSafely();
-
-  console.log("🔥 DASHBOARD CONTEXT:", {
-    hasContext: !!dashboardContext,
-    timestamp: new Date().toISOString(),
-  });
 
   if (!dashboardContext) {
     return (
@@ -85,10 +73,10 @@ export default function PanelEdit(props?: PanelEditProps) {
     getPanelById,
   } = dashboardContext;
 
-  const [apiUrl] = useAtom(apiUrlAtom);
   const [availableDatabases] = useAtom(availableDatabasesAtom);
   const [selectedTable] = useAtom(selectedTableAtom);
   const [schema] = useAtom(schemaAtom);
+  const [autoCompleteSchema] = useAtom(autoCompleteSchemaAtom);
   const loadSchemaForDb = useSetAtom(loadSchemaForDbAtom);
   const setSelectedDb = useSetAtom(setSelectedDbAtom);
 
@@ -104,19 +92,6 @@ export default function PanelEdit(props?: PanelEditProps) {
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
   const isNewPanel = !panelId;
-
-  console.log("🔥 PANEL EDIT STATE:", {
-    currentDashboard: !!currentDashboard,
-    apiUrl,
-    availableDatabases: availableDatabases.length,
-    schema: Object.keys(schema).length,
-    localConfig: !!localConfig,
-    isLoadingPanel,
-    isExecuting,
-    queryError,
-    isNewPanel,
-    timestamp: new Date().toISOString(),
-  });
 
   // Helper function to extract table name from SQL query
   const extractTableFromQuery = (query: string): string | null => {
@@ -161,7 +136,7 @@ export default function PanelEdit(props?: PanelEditProps) {
     if (isNewPanel) {
       // Create new panel with structure
       const newPanel = PanelFactory.createPanel({
-        type: "timeseries",
+        type: "table",
         title: "New Panel",
         database: availableDatabases[0] || "",
         table: selectedTable || undefined,
@@ -583,6 +558,9 @@ export default function PanelEdit(props?: PanelEditProps) {
                       previewData &&
                       previewData.length > 0 ? (
                         <PanelDataProvider
+                          key={`${localConfig.type}-${
+                            localConfig.id || "preview"
+                          }`}
                           panelId={panelId || "preview"}
                           config={
                             {
@@ -883,7 +861,7 @@ export default function PanelEdit(props?: PanelEditProps) {
                       <MonacoSqlEditor
                         query={localConfig?.query || ""}
                         isLoading={isExecuting}
-                        schema={schema}
+                        schema={autoCompleteSchema}
                         selectedDb={localConfig?.database || ""}
                         onChange={handleQueryChange}
                         onMount={() => {}}

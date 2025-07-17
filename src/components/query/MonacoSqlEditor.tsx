@@ -265,10 +265,6 @@ export default function MonacoSqlEditor({
       monacoRef.current = monacoInstance;
 
       if (query && query !== editor.getValue()) {
-        console.log("🔥 MONACO SETTING INITIAL VALUE:", {
-          query,
-          currentValue: editor.getValue(),
-        });
         editor.setValue(query);
       }
 
@@ -329,10 +325,6 @@ export default function MonacoSqlEditor({
       query !== undefined &&
       query !== editorRef.current.getValue()
     ) {
-      console.log("🔥 SYNCING EXTERNAL QUERY CHANGE:", {
-        query,
-        currentValue: editorRef.current.getValue(),
-      });
       editorRef.current.setValue(query);
     }
   }, [query]);
@@ -399,10 +391,6 @@ export default function MonacoSqlEditor({
         defaultValue={query || ""}
         theme={editorTheme}
         onChange={(value) => {
-          console.log("🔥 MONACO EDITOR onChange:", {
-            value,
-            timestamp: new Date().toISOString(),
-          });
           onChange(value);
         }}
         onMount={handleEditorDidMount}

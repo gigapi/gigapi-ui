@@ -68,15 +68,6 @@ function ChartRendererComponent({
       return null;
     }
     const transformed = transformDataForPanel(data, config);
-    if (transformed && transformed.data.length > 0) {
-      console.log('[ChartRenderer] Data transformation result:', {
-        panelId: config.id,
-        inputRecords: data.length,
-        outputPoints: transformed.data.length,
-        series: transformed.series,
-        fieldMapping: config.fieldMapping,
-      });
-    }
     return transformed;
   }, [data, config]);
 
@@ -125,7 +116,20 @@ function ChartRendererComponent({
       if (!seriesData.has(seriesName)) {
         seriesData.set(seriesName, []);
       }
-      const xValue = point.x instanceof Date ? point.x.getTime() : point.x;
+      let xValue = point.x instanceof Date ? point.x.getTime() : point.x;
+      
+      // Handle string timestamps (from bar chart aggregation)
+      if (typeof xValue === "string" && isTimeData) {
+        const parsedTime = new Date(xValue).getTime();
+        if (!isNaN(parsedTime)) {
+          xValue = parsedTime;
+        }
+      }
+      
+      // Handle nanosecond timestamps
+      if (typeof xValue === "number" && xValue > 32503680000000) {
+        xValue = Math.floor(xValue / 1000000); // Convert nanoseconds to milliseconds
+      }
       seriesData.get(seriesName)!.push([xValue, point.y]);
     });
 
@@ -146,8 +150,18 @@ function ChartRendererComponent({
         trigger: "axis" as const,
         confine: true,
         appendToBody: true, // Render tooltip in body to avoid z-index issues
-        renderMode: 'html', // Use HTML mode for better positioning
-        position: function(point: number[], params: any, dom: HTMLElement, rect: any, size: any) {
+        renderMode: "html", // Use HTML mode for better positioning
+        position: function (point: number[], size: any) {
+          // Handle undefined point parameter
+          if (!point || !Array.isArray(point) || point.length < 2) {
+            return [10, 10]; // Default position
+          }
+          
+          // Handle undefined size parameter
+          if (!size || !size.viewSize || !size.contentSize) {
+            return [point[0] + 15, point[1] - 15]; // Simple offset
+          }
+          
           // Smart positioning to avoid blocking content
           const x = point[0];
           const y = point[1];
@@ -155,26 +169,26 @@ function ChartRendererComponent({
           const viewHeight = size.viewSize[1];
           const boxWidth = size.contentSize[0];
           const boxHeight = size.contentSize[1];
-          
+
           // Position tooltip to avoid edges and blocking interaction
           let posX = x + 15;
           let posY = y - boxHeight - 15;
-          
+
           // Adjust if tooltip would go off right edge
           if (posX + boxWidth > viewWidth) {
             posX = x - boxWidth - 15;
           }
-          
+
           // Adjust if tooltip would go off top edge
           if (posY < 0) {
             posY = y + 15;
           }
-          
+
           // Adjust if tooltip would go off bottom edge
           if (posY + boxHeight > viewHeight) {
             posY = viewHeight - boxHeight - 5;
           }
-          
+
           return [posX, posY];
         },
         backgroundColor: isDarkMode
@@ -186,9 +200,9 @@ function ChartRendererComponent({
           color: isDarkMode ? "#e0e0e0" : "#333333",
           fontSize: 12,
         },
-        extraCssText: 'z-index: 9999; pointer-events: none;', // High z-index and no pointer events
+        extraCssText: "z-index: 9999; pointer-events: none;", // High z-index and no pointer events
         axisPointer: {
-          type: (type === "bar") ? "shadow" as const : "line" as const,
+          type: type === "bar" ? ("shadow" as const) : ("line" as const),
           snap: false,
           animation: false,
           label: {
@@ -233,9 +247,17 @@ function ChartRendererComponent({
           }
 
           // Format tooltip
-          const time = isTimeData
-            ? formatTime(params[0].value[0])
-            : params[0].value[0];
+          let time;
+          if (isTimeData) {
+            let timestamp = params[0].value[0];
+            // Handle nanosecond timestamps
+            if (timestamp > 32503680000000) {
+              timestamp = Math.floor(timestamp / 1000000);
+            }
+            time = formatTime(timestamp);
+          } else {
+            time = params[0].value[0];
+          }
           let tooltip = `<div style="margin-bottom: 6px;"><strong>${time}</strong></div>`;
 
           const orderedParams = [...params].sort((a, b) => {
@@ -248,7 +270,7 @@ function ChartRendererComponent({
             const seriesName = param.seriesName;
             // Skip hidden series
             if (hiddenSeries.has(seriesName)) return;
-            
+
             const value = param.value[1];
             const color = param.color;
             const unit = fieldConfig?.unit || "";
@@ -261,7 +283,7 @@ function ChartRendererComponent({
           });
 
           return tooltip;
-        }
+        },
       };
     };
 
@@ -286,7 +308,7 @@ function ChartRendererComponent({
             trigger: "item",
             confine: true,
             appendToBody: true, // Render tooltip in body for pie charts too
-            renderMode: 'html',
+            renderMode: "html",
             backgroundColor: isDarkMode
               ? "rgba(30, 30, 30, 0.9)"
               : "rgba(255, 255, 255, 0.95)",
@@ -296,7 +318,7 @@ function ChartRendererComponent({
               color: isDarkMode ? "#e0e0e0" : "#333333",
               fontSize: 12,
             },
-            extraCssText: 'z-index: 9999; pointer-events: none;', // High z-index and no pointer events
+            extraCssText: "z-index: 9999; pointer-events: none;", // High z-index and no pointer events
             formatter: (param: any) => {
               const unit = fieldConfig?.unit || "";
               const decimals = fieldConfig?.decimals ?? 2;
@@ -349,14 +371,14 @@ function ChartRendererComponent({
       case "bar":
       case "scatter": {
         // Determine chart type and styling
-        let chartType = 'line';
+        let chartType = "line";
         let areaStyle: any = undefined;
-        
-        if (type === 'bar') {
-          chartType = 'bar';
-        } else if (type === 'scatter') {
-          chartType = 'scatter';
-        } else if (type === 'area') {
+
+        if (type === "bar") {
+          chartType = "bar";
+        } else if (type === "scatter") {
+          chartType = "scatter";
+        } else if (type === "area") {
           areaStyle = { opacity: fieldConfig?.custom?.fillOpacity || 0.1 };
         }
 
@@ -366,38 +388,39 @@ function ChartRendererComponent({
             name,
             type: chartType,
             data: data.sort((a, b) => (a[0] as number) - (b[0] as number)),
-            smooth: fieldConfig?.custom?.lineInterpolation === 'smooth',
+            smooth: fieldConfig?.custom?.lineInterpolation === "smooth",
             areaStyle,
             color: seriesColorMap.get(name),
             lineStyle: { width: fieldConfig?.custom?.lineWidth || 2 },
-            symbol: chartType === 'scatter' ? 'circle' : 'none',
+            symbol: chartType === "scatter" ? "circle" : "none",
             symbolSize: fieldConfig?.custom?.pointSize || 4,
-            emphasis: { 
-              focus: 'series', // Highlight the entire series on hover
-              blurScope: 'coordinateSystem' // Blur other series in the same coordinate system
+            emphasis: {
+              focus: "series", // Highlight the entire series on hover
+              blurScope: "coordinateSystem", // Blur other series in the same coordinate system
             },
             blur: {
               lineStyle: {
-                opacity: 0.25 // Make non-hovered series more transparent
+                opacity: 0.25, // Make non-hovered series more transparent
               },
               itemStyle: {
-                opacity: 0.25
-              }
+                opacity: 0.25,
+              },
             },
-            tooltip: { show: true }
+            tooltip: { show: true },
           };
-          
+
           // Add bar-specific configuration
-          if (chartType === 'bar') {
+          if (chartType === "bar") {
             if (isTimeData) {
               // For time-based bars, use fixed width
               seriesConfig.barWidth = Math.min(20, 400 / data.length);
             } else {
               // For categorical bars, use percentage
-              seriesConfig.barWidth = sortedSeriesEntries.length > 1 ? '30%' : '60%';
+              seriesConfig.barWidth =
+                sortedSeriesEntries.length > 1 ? "30%" : "60%";
             }
           }
-          
+
           return seriesConfig;
         });
 
@@ -405,123 +428,190 @@ function ChartRendererComponent({
           ...baseConfig,
           tooltip: getUnifiedTooltip(),
           legend: {
-            show: sortedSeriesEntries.length > 1 && options?.legend?.showLegend !== false,
-            type: 'scroll',
-            orient: options?.legend?.placement === 'right' ? 'vertical' : 'horizontal',
-            bottom: options?.legend?.placement === 'bottom' ? 0 : undefined,
-            right: options?.legend?.placement === 'right' ? 0 : undefined,
-            textStyle: { fontSize: 12, color: isDarkMode ? '#b0b0b0' : '#666666' },
-            selectedMode: 'multiple', // Enable interactive legend selection
+            show:
+              sortedSeriesEntries.length > 1 &&
+              options?.legend?.showLegend !== false,
+            type: "scroll",
+            orient:
+              options?.legend?.placement === "right"
+                ? "vertical"
+                : "horizontal",
+            bottom: options?.legend?.placement === "bottom" ? 0 : undefined,
+            right: options?.legend?.placement === "right" ? 0 : undefined,
+            textStyle: {
+              fontSize: 12,
+              color: isDarkMode ? "#b0b0b0" : "#666666",
+            },
+            selectedMode: "multiple", // Enable interactive legend selection
             animation: true,
-            animationDuration: 100
+            animationDuration: 100,
           },
           grid: {
-            left: '3%',
-            right: isTimeData && !isEditMode ? '8%' : '4%',
-            bottom: sortedSeriesEntries.length > 1 ? '15%' : '8%',
-            top: isTimeData && !isEditMode ? '12%' : '8%',
-            containLabel: true
+            left: "3%",
+            right: isTimeData && !isEditMode ? "8%" : "4%",
+            bottom: sortedSeriesEntries.length > 1 ? "15%" : "8%",
+            top: isTimeData && !isEditMode ? "12%" : "8%",
+            containLabel: true,
           },
           xAxis: {
-            type: isTimeData ? 'time' : 'category',
-            boundaryGap: chartType === 'bar',
-            axisLine: { lineStyle: { color: isDarkMode ? '#424242' : '#e0e0e0' } },
-            splitLine: { lineStyle: { color: isDarkMode ? '#2a2a2a' : '#f5f5f5' } },
-            axisLabel: { 
-              fontSize: 11, 
-              color: isDarkMode ? '#b0b0b0' : '#666666',
-              formatter: isTimeData ? (value: any) => {
-                // ECharts passes different value types for different chart types
-                const timestamp = typeof value === 'string' ? new Date(value).getTime() : value;
-                const date = new Date(timestamp);
-                
-                if (isNaN(date.getTime())) {
-                  return value; // Fallback if parsing fails
-                }
-                
-                const hours = String(date.getHours()).padStart(2, '0');
-                const minutes = String(date.getMinutes()).padStart(2, '0');
-                const seconds = String(date.getSeconds()).padStart(2, '0');
-                
-                // Show date if span is more than a day
-                const xValues = chartData.map(d => {
-                  if (typeof d.x === 'number') return d.x;
-                  if (d.x instanceof Date) return d.x.getTime();
-                  return new Date(d.x).getTime();
-                });
-                const dataSpan = Math.max(...xValues) - Math.min(...xValues);
-                
-                if (dataSpan > 24 * 60 * 60 * 1000) {
-                  const month = String(date.getMonth() + 1).padStart(2, '0');
-                  const day = String(date.getDate()).padStart(2, '0');
-                  return `${month}-${day} ${hours}:${minutes}`;
-                }
-                
-                return `${hours}:${minutes}:${seconds}`;
-              } : undefined
-            }
-          },
-          yAxis: {
-            type: 'value',
-            min: fieldConfig.min,
-            max: fieldConfig.max,
-            axisLine: { lineStyle: { color: isDarkMode ? '#424242' : '#e0e0e0' } },
-            splitLine: { lineStyle: { color: isDarkMode ? '#2a2a2a' : '#f5f5f5' } },
+            type: isTimeData ? "time" : "category",
+            boundaryGap: chartType === "bar",
+            axisLine: {
+              lineStyle: { color: isDarkMode ? "#424242" : "#e0e0e0" },
+            },
+            splitLine: {
+              lineStyle: { color: isDarkMode ? "#2a2a2a" : "#f5f5f5" },
+            },
             axisLabel: {
               fontSize: 11,
-              color: isDarkMode ? '#b0b0b0' : '#666666',
+              color: isDarkMode ? "#b0b0b0" : "#666666",
+              formatter: isTimeData
+                ? (value: any) => {
+                    // ECharts passes different value types for different chart types
+                    let timestamp =
+                      typeof value === "string"
+                        ? new Date(value).getTime()
+                        : value;
+
+                    // Handle nanosecond timestamps (common in ClickHouse)
+                    // If timestamp is larger than year 3000 in milliseconds, assume it's nanoseconds
+                    if (timestamp > 32503680000000) {
+                      timestamp = Math.floor(timestamp / 1000000); // Convert nanoseconds to milliseconds
+                    }
+
+                    const date = new Date(timestamp);
+
+                    if (isNaN(date.getTime())) {
+                      return value; // Fallback if parsing fails
+                    }
+
+                    const hours = String(date.getHours()).padStart(2, "0");
+                    const minutes = String(date.getMinutes()).padStart(2, "0");
+                    const seconds = String(date.getSeconds()).padStart(2, "0");
+
+                    // Show date if span is more than a day
+                    const xValues = chartData.map((d) => {
+                      let val: number;
+                      if (typeof d.x === "number") {
+                        val = d.x;
+                      } else if (d.x instanceof Date) {
+                        val = d.x.getTime();
+                      } else {
+                        val = new Date(d.x).getTime();
+                      }
+                      // Handle nanosecond timestamps in data span calculation
+                      if (val > 32503680000000) {
+                        val = Math.floor(val / 1000000);
+                      }
+                      return val;
+                    });
+                    const dataSpan =
+                      Math.max(...xValues) - Math.min(...xValues);
+
+                    // Dynamic formatting based on data span
+                    if (dataSpan > 24 * 60 * 60 * 1000) {
+                      // More than a day - show date and time
+                      const month = String(date.getMonth() + 1).padStart(2, "0");
+                      const day = String(date.getDate()).padStart(2, "0");
+                      return `${month}-${day} ${hours}:${minutes}`;
+                    } else if (dataSpan > 2 * 60 * 60 * 1000) {
+                      // More than 2 hours - show hours and minutes
+                      return `${hours}:${minutes}`;
+                    } else if (dataSpan > 10 * 60 * 1000) {
+                      // More than 10 minutes - show hours, minutes, and seconds
+                      return `${hours}:${minutes}:${seconds}`;
+                    } else {
+                      // Less than 10 minutes - show precise time with seconds
+                      return `${hours}:${minutes}:${seconds}`;
+                    }
+                  }
+                : undefined,
+            },
+          },
+          yAxis: {
+            type: "value",
+            min: fieldConfig.min,
+            max: fieldConfig.max,
+            axisLine: {
+              lineStyle: { color: isDarkMode ? "#424242" : "#e0e0e0" },
+            },
+            splitLine: {
+              lineStyle: { color: isDarkMode ? "#2a2a2a" : "#f5f5f5" },
+            },
+            axisLabel: {
+              fontSize: 11,
+              color: isDarkMode ? "#b0b0b0" : "#666666",
               formatter: (value: number) => {
-                const unit = fieldConfig.unit || '';
+                const unit = fieldConfig.unit || "";
                 const decimals = fieldConfig.decimals ?? 1;
-                if (Math.abs(value) >= 1000000) return (value / 1000000).toFixed(decimals) + 'M' + unit;
-                if (Math.abs(value) >= 1000) return (value / 1000).toFixed(decimals) + 'K' + unit;
+                if (Math.abs(value) >= 1000000)
+                  return (value / 1000000).toFixed(decimals) + "M" + unit;
+                if (Math.abs(value) >= 1000)
+                  return (value / 1000).toFixed(decimals) + "K" + unit;
                 return value.toFixed(decimals) + unit;
-              }
-            }
+              },
+            },
           },
           series: chartSeries,
           // Time range selection for time series (brush)
-          brush: isTimeData && !isEditMode && onTimeRangeUpdate ? {
-            brushMode: 'lineX',
-            xAxisIndex: 0,
-            brushStyle: {
-              borderWidth: 1,
-              color: 'rgba(59, 130, 246, 0.1)',
-              borderColor: 'rgba(59, 130, 246, 0.4)'
-            },
-            removeOnClick: true
-          } : undefined,
-          toolbox: isTimeData && !isEditMode && onTimeRangeUpdate ? {
-            show: true,
-            right: '8px',
-            top: '8px',
-            itemSize: 10,
-            feature: {
-              brush: {
-                type: ['lineX'],
-                title: {
-                  lineX: 'Select time range'
+          brush:
+            isTimeData && !isEditMode && onTimeRangeUpdate
+              ? {
+                  brushMode: "lineX",
+                  xAxisIndex: 0,
+                  brushStyle: {
+                    borderWidth: 1,
+                    color: "rgba(59, 130, 246, 0.1)",
+                    borderColor: "rgba(59, 130, 246, 0.4)",
+                  },
+                  removeOnClick: true,
                 }
-              }
-            },
-            iconStyle: {
-              borderColor: isDarkMode ? '#666' : '#999',
-              color: isDarkMode ? '#999' : '#666'
-            }
-          } : undefined,
-          dataZoom: isTimeData ? [{
-            type: 'inside',
-            xAxisIndex: 0,
-            filterMode: 'filter',
-            disabled: isEditMode
-          }] : undefined
+              : undefined,
+          toolbox:
+            isTimeData && !isEditMode && onTimeRangeUpdate
+              ? {
+                  show: true,
+                  right: "8px",
+                  top: "8px",
+                  itemSize: 10,
+                  feature: {
+                    brush: {
+                      type: ["lineX"],
+                      title: {
+                        lineX: "Select time range",
+                      },
+                    },
+                  },
+                  iconStyle: {
+                    borderColor: isDarkMode ? "#666" : "#999",
+                    color: isDarkMode ? "#999" : "#666",
+                  },
+                }
+              : undefined,
+          dataZoom: isTimeData
+            ? [
+                {
+                  type: "inside",
+                  xAxisIndex: 0,
+                  filterMode: "filter",
+                  disabled: isEditMode,
+                },
+              ]
+            : undefined,
         };
       }
 
       default:
         return null;
     }
-  }, [transformedData, config, isDarkMode, isEditMode, hiddenSeries, onTimeRangeUpdate]);
+  }, [
+    transformedData,
+    config,
+    isDarkMode,
+    isEditMode,
+    hiddenSeries,
+    onTimeRangeUpdate,
+  ]);
 
   // Initialize chart
   useEffect(() => {
@@ -537,15 +627,13 @@ function ChartRendererComponent({
         renderer: "canvas",
         useDirtyRect: true, // Improve performance
       });
-      
+
       // Ensure chart interactions are properly enabled
-      chartInstance.current.getZr().on('click', () => {
+      chartInstance.current.getZr().on("click", () => {
         // This ensures click events propagate properly
       });
-      
-      console.log('[ChartRenderer] Chart instance initialized');
     } catch (error) {
-      console.error('[ChartRenderer] Failed to initialize chart:', error);
+      console.error("[ChartRenderer] Failed to initialize chart:", error);
     }
 
     return () => {
@@ -560,25 +648,27 @@ function ChartRendererComponent({
   useEffect(() => {
     if (!chartInstance.current || !chartOption) {
       if (!chartInstance.current) {
-        console.warn('[ChartRenderer] Chart instance not available');
+        console.warn("[ChartRenderer] Chart instance not available");
       }
       return;
     }
-    
+
     try {
       // Use notMerge to ensure legend selection state is properly updated
       chartInstance.current.setOption(chartOption, {
         notMerge: false,
         lazyUpdate: true,
-        replaceMerge: ['series'] // Replace series to avoid stale data
+        replaceMerge: ["series"], // Replace series to avoid stale data
       });
-      
-      // Force refresh to ensure interactive elements work
-      chartInstance.current.resize();
-      
-      console.log('[ChartRenderer] Chart option set successfully');
+
+      // Force refresh to ensure interactive elements work (delayed to avoid main process conflict)
+      setTimeout(() => {
+        if (chartInstance.current) {
+          chartInstance.current.resize();
+        }
+      }, 0);
     } catch (error) {
-      console.error('[ChartRenderer] Failed to set chart option:', error);
+      console.error("[ChartRenderer] Failed to set chart option:", error);
     }
   }, [chartOption]);
 
@@ -596,17 +686,23 @@ function ChartRendererComponent({
       setHiddenSeries(newHiddenSeries);
     };
 
-    chartInstance.current.on('legendselectchanged', handleLegendSelectChanged);
+    chartInstance.current.on("legendselectchanged", handleLegendSelectChanged);
 
     return () => {
-      chartInstance.current?.off('legendselectchanged', handleLegendSelectChanged);
+      chartInstance.current?.off(
+        "legendselectchanged",
+        handleLegendSelectChanged
+      );
     };
   }, []);
 
   // Handle resize
   useEffect(() => {
     const resizeChart = () => {
-      chartInstance.current?.resize();
+      // Delay resize to avoid main process conflicts
+      setTimeout(() => {
+        chartInstance.current?.resize();
+      }, 0);
     };
 
     const resizeObserver = new ResizeObserver(resizeChart);
@@ -687,18 +783,22 @@ function ChartRendererComponent({
   );
 }
 
-
 // Memoize the component to prevent unnecessary re-renders
-export const ChartRenderer = memo(ChartRendererComponent, (prevProps, nextProps) => {
-  // Custom comparison function to optimize re-renders
-  return (
-    prevProps.config.id === nextProps.config.id &&
-    prevProps.config.query === nextProps.config.query &&
-    prevProps.data === nextProps.data &&
-    prevProps.isEditMode === nextProps.isEditMode &&
-    prevProps.height === nextProps.height &&
-    prevProps.width === nextProps.width &&
-    JSON.stringify(prevProps.config.fieldMapping) === JSON.stringify(nextProps.config.fieldMapping) &&
-    JSON.stringify(prevProps.config.options) === JSON.stringify(nextProps.config.options)
-  );
-});
+export const ChartRenderer = memo(
+  ChartRendererComponent,
+  (prevProps, nextProps) => {
+    // Custom comparison function to optimize re-renders
+    return (
+      prevProps.config.id === nextProps.config.id &&
+      prevProps.config.query === nextProps.config.query &&
+      prevProps.data === nextProps.data &&
+      prevProps.isEditMode === nextProps.isEditMode &&
+      prevProps.height === nextProps.height &&
+      prevProps.width === nextProps.width &&
+      JSON.stringify(prevProps.config.fieldMapping) ===
+        JSON.stringify(nextProps.config.fieldMapping) &&
+      JSON.stringify(prevProps.config.options) ===
+        JSON.stringify(nextProps.config.options)
+    );
+  }
+);

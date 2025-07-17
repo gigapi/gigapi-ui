@@ -194,54 +194,6 @@ export const QUERY_TEMPLATES: Record<string, QueryTemplate> = {
   },
 };
 
-/**
- * Get templates by category
- */
-export function getTemplatesByCategory(category: QueryTemplate['category']): QueryTemplate[] {
-  return Object.values(QUERY_TEMPLATES).filter(template => template.category === category);
-}
-
-/**
- * Search templates by tags or keywords
- */
-export function searchTemplates(query: string): QueryTemplate[] {
-  const searchTerm = query.toLowerCase();
-  return Object.values(QUERY_TEMPLATES).filter(template => 
-    template.name.toLowerCase().includes(searchTerm) ||
-    template.description.toLowerCase().includes(searchTerm) ||
-    template.tags.some(tag => tag.toLowerCase().includes(searchTerm))
-  );
-}
-
-/**
- * Fill template with provided parameters
- */
-export function fillTemplate(template: QueryTemplate, params: Record<string, string>): string {
-  let query = template.pattern;
-  
-  // Replace required fields
-  template.requiredFields.forEach(field => {
-    const value = params[field];
-    if (value) {
-      query = query.replace(new RegExp(`\\{${field}\\}`, 'g'), value);
-    }
-  });
-  
-  // Replace optional fields
-  template.optionalFields.forEach(field => {
-    const value = params[field];
-    if (value) {
-      query = query.replace(new RegExp(`\\{${field}\\}`, 'g'), value);
-    }
-  });
-  
-  // Set default values for common optional fields
-  if (query.includes('{limit}')) {
-    query = query.replace(/{limit}/g, params.limit || '100');
-  }
-  
-  return query;
-}
 
 /**
  * Get template suggestions based on user intent
@@ -299,38 +251,3 @@ export function getTemplateSuggestions(userMessage: string): QueryTemplate[] {
   return suggestions.slice(0, 3); // Return top 3 suggestions
 }
 
-/**
- * Validate template parameters
- */
-export function validateTemplateParams(template: QueryTemplate, params: Record<string, string>): {
-  isValid: boolean;
-  missingFields: string[];
-  suggestions: string[];
-} {
-  const missingFields: string[] = [];
-  const suggestions: string[] = [];
-  
-  // Check required fields
-  template.requiredFields.forEach(field => {
-    if (!params[field]) {
-      missingFields.push(field);
-    }
-  });
-  
-  // Add suggestions for missing fields
-  if (missingFields.includes('table')) {
-    suggestions.push('Specify the table name to query');
-  }
-  if (missingFields.includes('time_field')) {
-    suggestions.push('Specify the time column (e.g., timestamp, created_at)');
-  }
-  if (missingFields.includes('metric_field')) {
-    suggestions.push('Specify the metric to analyze (e.g., value, count, duration)');
-  }
-  
-  return {
-    isValid: missingFields.length === 0,
-    missingFields,
-    suggestions,
-  };
-}

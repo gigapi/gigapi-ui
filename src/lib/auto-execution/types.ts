@@ -9,5 +9,4 @@ export type {
   AutoExecutionEvent,
   SmartExecutionSuggestion,
   ResultFeedback,
-  ExecutionPattern,
 } from "@/types/auto-execution.types";

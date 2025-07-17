@@ -37,6 +37,7 @@ export default function ProposalArtifact({
   const [showNextSteps, setShowNextSteps] = useState(false);
   const proposal = artifact.data as ProposalArtifact;
 
+
   const handleApprove = () => {
     onApprove(artifact.id);
   };

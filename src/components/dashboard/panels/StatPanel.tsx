@@ -5,6 +5,17 @@ import { TrendingUp, TrendingDown, Minus, Calculator, Target, BarChart3 } from "
 import { cn } from "@/lib/utils/class-utils";
 
 function StatPanel({ config, data }: PanelProps) {
+  // Check if we have multiple series (grouped data)
+  const hasMultipleSeries = useMemo(() => {
+    if (!data || data.length === 0) return false;
+    const series = new Set(data.map(d => d.series));
+    return series.size > 1 || (series.size === 1 && !series.has('stats'));
+  }, [data]);
+
+  // If we have multiple series, render multiple stat panels
+  if (hasMultipleSeries) {
+    return <MultiStatPanel config={config} data={data} />;
+  }
   const statData = useMemo(() => {
     if (!data || data.length === 0) return null;
 
@@ -277,6 +288,78 @@ function StatPanel({ config, data }: PanelProps) {
             <div className="font-mono">{formatValue(statData.stdDev)}</div>
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// Component for multiple stats (grouped data)
+function MultiStatPanel({ config, data }: PanelProps) {
+  const groupedStats = useMemo(() => {
+    if (!data || data.length === 0) return [];
+    
+    // Group data by series
+    const groups = new Map<string, any[]>();
+    data.forEach(d => {
+      const series = d.series || 'default';
+      if (!groups.has(series)) {
+        groups.set(series, []);
+      }
+      groups.get(series)!.push(d);
+    });
+    
+    return Array.from(groups.entries());
+  }, [data]);
+
+  const formatValue = (value: number): string => {
+    const fieldConfig = config.fieldConfig?.defaults || {};
+    const decimals = fieldConfig.decimals ?? 2;
+    const unit = fieldConfig.unit || "";
+
+    let formattedValue: string;
+
+    if (Math.abs(value) >= 1e9) {
+      formattedValue = (value / 1e9).toFixed(decimals) + "B";
+    } else if (Math.abs(value) >= 1e6) {
+      formattedValue = (value / 1e6).toFixed(decimals) + "M";
+    } else if (Math.abs(value) >= 1e3) {
+      formattedValue = (value / 1e3).toFixed(decimals) + "K";
+    } else {
+      formattedValue = value.toFixed(decimals);
+    }
+
+    return formattedValue + unit;
+  };
+
+  return (
+    <div className="h-full p-3">
+      <div className={cn(
+        "grid gap-3 h-full",
+        groupedStats.length === 1 ? "grid-cols-1" :
+        groupedStats.length === 2 ? "grid-cols-2" :
+        groupedStats.length === 3 ? "grid-cols-3" :
+        groupedStats.length === 4 ? "grid-cols-2 grid-rows-2" :
+        "grid-cols-3 grid-rows-2"
+      )}>
+        {groupedStats.map(([series, values]) => {
+          // Get the value (should be single value per series in stat transformation)
+          const value = values[0]?.y || 0;
+          const label = values[0]?.x || series;
+          
+          return (
+            <div
+              key={series}
+              className="flex flex-col items-center justify-center text-center border rounded-lg p-3 bg-card"
+            >
+              <div className="text-xs text-muted-foreground font-medium mb-1">
+                {label}
+              </div>
+              <div className="text-xl sm:text-2xl font-bold">
+                {formatValue(value)}
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
