@@ -81,29 +81,40 @@ export function UnifiedSelector({
   const [isOpen, setIsOpen] = useState(false);
 
   // Get the appropriate data based on selector type
-  const options = useMemo(() => {
+  const { options, timeFieldsMetadata } = useMemo(() => {
+    const metadata: Record<string, { timeUnit?: string }> = {};
+    let optionsList: string[] = [];
+    
     switch (type) {
       case "database":
-        return availableDatabases || [];
+        optionsList = availableDatabases || [];
+        break;
 
       case "table":
-        if (!database) return [];
+        if (!database) {
+          optionsList = [];
+          break;
+        }
 
         // For artifact context, use schema override
         if (schemaOverride?.[database]) {
           const dbTables = schemaOverride[database];
-          return Array.isArray(dbTables)
+          optionsList = Array.isArray(dbTables)
             ? dbTables
                 .map((t) => (typeof t === "string" ? t : t.tableName))
                 .filter(Boolean)
             : [];
+        } else {
+          // For query context, use availableTables directly (it's already loaded for the selected database)
+          optionsList = availableTables || [];
         }
-
-        // For query context, use availableTables directly (it's already loaded for the selected database)
-        return availableTables || [];
+        break;
 
       case "timeField":
-        if (!database || !table) return [];
+        if (!database || !table) {
+          optionsList = [];
+          break;
+        }
 
         // For artifact context with schema override
         if (schemaOverride?.[database]) {
@@ -111,9 +122,13 @@ export function UnifiedSelector({
           const tableSchemaOverride = dbSchema.find(
             (t) => t.tableName === table
           );
-          if (!tableSchemaOverride?.columns) return [];
+          if (!tableSchemaOverride?.columns) {
+            optionsList = [];
+            break;
+          }
 
           const timeFields: string[] = [];
+          
           tableSchemaOverride.columns.forEach((column: ColumnSchema) => {
             if (!column.columnName) return;
 
@@ -132,24 +147,36 @@ export function UnifiedSelector({
               column.columnName === "__timestamp"
             ) {
               timeFields.push(column.columnName);
+              if (column.timeUnit) {
+                metadata[column.columnName] = { timeUnit: column.timeUnit };
+              }
             }
           });
 
-          return timeFields.sort((a, b) =>
+          optionsList = timeFields.sort((a, b) =>
             a === "__timestamp" ? -1 : b === "__timestamp" ? 1 : 0
           );
+          break;
         }
 
         // For query context, use tableSchema atom (from DESCRIBE query)
         if (!tableSchema || !Array.isArray(tableSchema)) {
-          return [];
+          optionsList = [];
+          break;
         }
 
-        const timeFields: string[] = [];
+        interface TimeFieldInfo {
+          name: string;
+          timeUnit?: string;
+        }
+        
+        const timeFields: TimeFieldInfo[] = [];
+        
         tableSchema.forEach((column: any) => {
           // Handle the API response format: {"column_name":"method","column_type":"VARCHAR",...}
           const columnName = column.column_name || column.columnName;
           const columnType = column.column_type || column.dataType;
+          const timeUnit = column.timeUnit;
 
           if (!columnName || typeof columnName !== "string") return;
 
@@ -162,18 +189,26 @@ export function UnifiedSelector({
             columnType?.toLowerCase().includes("timestamp") ||
             columnType?.toLowerCase().includes("datetime")
           ) {
-            timeFields.push(columnName);
+            timeFields.push({ name: columnName, timeUnit });
+            if (timeUnit) {
+              metadata[columnName] = { timeUnit };
+            }
           }
         });
 
         // Prioritize __timestamp if it exists
-        return timeFields.sort((a, b) =>
-          a === "__timestamp" ? -1 : b === "__timestamp" ? 1 : 0
-        );
+        optionsList = timeFields
+          .sort((a, b) =>
+            a.name === "__timestamp" ? -1 : b.name === "__timestamp" ? 1 : 0
+          )
+          .map(field => field.name);
+        break;
 
       default:
-        return [];
+        optionsList = [];
     }
+    
+    return { options: optionsList, timeFieldsMetadata: metadata };
   }, [
     type,
     availableDatabases,
@@ -282,7 +317,14 @@ export function UnifiedSelector({
             ) : (
               filteredOptions.map((option) => (
                 <SelectItem key={option} value={option}>
-                  {option}
+                  <div className="flex items-center justify-between w-full">
+                    <span>{option}</span>
+                    {type === "timeField" && timeFieldsMetadata[option]?.timeUnit && (
+                      <span className="text-xs text-muted-foreground ml-2">
+                        ({timeFieldsMetadata[option].timeUnit})
+                      </span>
+                    )}
+                  </div>
                 </SelectItem>
               ))
             )}
@@ -364,12 +406,19 @@ export function UnifiedSelector({
                       value === option && "bg-accent text-accent-foreground"
                     )}
                   >
-                    <div className="flex items-center gap-2">
-                      {option}
-                      {type === "timeField" && option === "__timestamp" && (
-                        <Badge variant="secondary" className="text-xs">
-                          Default
-                        </Badge>
+                    <div className="flex items-center justify-between w-full">
+                      <div className="flex items-center gap-2">
+                        <span>{option}</span>
+                        {type === "timeField" && option === "__timestamp" && (
+                          <Badge variant="secondary" className="text-xs">
+                            Default
+                          </Badge>
+                        )}
+                      </div>
+                      {type === "timeField" && timeFieldsMetadata[option]?.timeUnit && (
+                        <span className="text-xs text-muted-foreground">
+                          {timeFieldsMetadata[option].timeUnit}
+                        </span>
                       )}
                     </div>
                   </button>

@@ -1,7 +1,3 @@
-/**
- * Panel Factory - Creates new panels with structure
- */
-
 import { v4 as uuidv4 } from "uuid";
 import {
   type PanelConfig,
@@ -169,11 +165,6 @@ class PanelFactory {
           axisPlacement: "hidden",
         };
         break;
-
-      case "gauge":
-        baseConfig.defaults.min = 0;
-        baseConfig.defaults.max = 100;
-        break;
     }
 
     return baseConfig;
@@ -200,9 +191,6 @@ class PanelFactory {
     // Customize based on panel type
     switch (type) {
       case "stat":
-      case "gauge":
-        baseOptions.legend!.showLegend = false;
-        break;
 
       case "table":
         baseOptions.tooltip!.mode = "none";
@@ -231,10 +219,6 @@ class PanelFactory {
 
       case "stat":
         // Generic stat query - user selects value field
-        return `SELECT * FROM ${tableName} WHERE $__timeFilter`;
-
-      case "gauge":
-        // Generic gauge query - user selects value field
         return `SELECT * FROM ${tableName} WHERE $__timeFilter`;
 
       case "table":

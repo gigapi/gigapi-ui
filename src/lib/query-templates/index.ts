@@ -14,7 +14,7 @@ export interface QueryTemplate {
   example: string;
   tags: string[];
   useTimeFilter: boolean;
-  suggestedChartType: 'timeseries' | 'bar' | 'pie' | 'gauge' | 'stat' | 'table';
+  suggestedChartType: 'timeseries' | 'bar' | 'pie' | 'stat' | 'table';
 }
 
 export const QUERY_TEMPLATES: Record<string, QueryTemplate> = {

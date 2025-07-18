@@ -461,7 +461,112 @@ export class QueryProcessor {
   }
 
   /**
+   * Detect time unit for a column based on name, type, and optional sample values
+   * This is the main public method for time unit detection
+   */
+  static detectTimeUnitForColumn(
+    columnName: string,
+    dataType?: string,
+    sampleValues?: number[]
+  ): TimeUnit {
+    // First try to detect from column name patterns
+    const unitFromName = this.detectTimeUnitFromColumnName(columnName);
+    if (unitFromName) return unitFromName;
+
+    // Then try to detect from data type
+    const unitFromType = this.detectTimeUnitFromDataType(columnName, dataType);
+    if (unitFromType) return unitFromType;
+
+    // If we have sample values, analyze them
+    if (sampleValues && sampleValues.length > 0) {
+      return this.inferTimeUnitFromSampleValues(sampleValues);
+    }
+
+    // Default fallback
+    return "ms";
+  }
+
+  /**
+   * Detect time unit from column name patterns
+   */
+  private static detectTimeUnitFromColumnName(columnName: string): TimeUnit | null {
+    const lowerName = columnName.toLowerCase();
+
+    // Check for explicit time unit suffixes (highest priority)
+    if (lowerName.endsWith("_ns") || lowerName.includes("_ns_")) {
+      return "ns";
+    } else if (lowerName.endsWith("_us") || lowerName.endsWith("_μs") || lowerName.includes("_us_")) {
+      return "us";
+    } else if (lowerName.endsWith("_ms") || lowerName.includes("_ms_")) {
+      return "ms";
+    } else if (lowerName.endsWith("_s") && !lowerName.endsWith("_ms")) {
+      return "s";
+    }
+
+    // Special case for __timestamp (commonly nanoseconds in time-series databases)
+    if (lowerName === "__timestamp") {
+      return "ns";
+    }
+
+    return null;
+  }
+
+  /**
+   * Detect time unit from data type and column context
+   */
+  private static detectTimeUnitFromDataType(
+    columnName: string,
+    dataType?: string
+  ): TimeUnit | null {
+    if (!dataType) return null;
+
+    const lowerName = columnName.toLowerCase();
+    const lowerType = dataType.toLowerCase();
+
+    // Handle explicit timestamp types
+    if (lowerType.includes("timestamp") || lowerType.includes("datetime")) {
+      return "ms"; // Database native timestamp types are typically milliseconds
+    }
+
+    // For BIGINT columns that look like time fields
+    if (
+      lowerType === "bigint" ||
+      lowerType === "int64" ||
+      lowerType === "uint64" ||
+      lowerType === "long"
+    ) {
+      if (
+        lowerName.includes("time") ||
+        lowerName.includes("timestamp") ||
+        lowerName === "__timestamp"
+      ) {
+        // BIGINT time fields are commonly high precision (nanoseconds)
+        return "ns";
+      }
+
+      if (
+        lowerName.includes("date") ||
+        lowerName === "created_at" ||
+        lowerName === "updated_at"
+      ) {
+        // Created/updated timestamps are often milliseconds
+        return "ms";
+      }
+    }
+
+    // For regular integer types
+    if (lowerType.includes("int") && !lowerType.includes("bigint")) {
+      if (lowerName.includes("time") || lowerName.includes("timestamp")) {
+        return "s"; // Regular integers for time are typically Unix seconds
+      }
+    }
+
+    return null;
+  }
+
+  /**
    * Infer time unit from column name and data type
+   * @deprecated Use detectTimeUnitForColumn instead
    */
   private static inferTimeUnitFromColumnName(
     columnName: string,
@@ -617,4 +722,12 @@ export function checkForTimeVariables(query: string): boolean {
 
 export function detectTimeFieldsFromSchema(columns: ColumnSchema[]): string[] {
   return QueryProcessor.detectTimeFieldsFromSchema(columns);
+}
+
+export function detectTimeUnitForColumn(
+  columnName: string,
+  dataType?: string,
+  sampleValues?: number[]
+): TimeUnit {
+  return QueryProcessor.detectTimeUnitForColumn(columnName, dataType, sampleValues);
 }

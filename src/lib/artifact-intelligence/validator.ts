@@ -183,7 +183,7 @@ export class ArtifactValidator {
     }
 
     const chartType = data.type || data.chartType;
-    const validChartTypes = ['timeseries', 'bar', 'pie', 'gauge', 'stat'];
+    const validChartTypes = ['timeseries', 'bar', 'pie', 'stat'];
     if (chartType && !validChartTypes.includes(chartType)) {
       errors.push({
         type: 'syntax',
@@ -208,7 +208,7 @@ export class ArtifactValidator {
           field: 'fieldMapping.yField'
         });
       }
-    } else if (chartType !== 'gauge' && chartType !== 'stat') {
+    } else if (chartType !== 'stat') {
       errors.push({
         type: 'syntax',
         message: 'Charts require fieldMapping configuration',

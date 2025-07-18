@@ -3,6 +3,7 @@
  */
 
 import type { Dashboard, PanelConfig } from "@/types/dashboard.types";
+import { v4 as uuidv4 } from "uuid";
 
 export const getStorageImplementation = () => {
   return {
@@ -36,7 +37,7 @@ export const getStorageImplementation = () => {
       const importData = JSON.parse(jsonData);
       const { dashboard } = importData;
 
-      const newId = crypto.randomUUID();
+      const newId = uuidv4();
 
       // Handle both old format (separate panels) and new format (embedded panels)
       let panels: PanelConfig[] = [];
@@ -55,7 +56,7 @@ export const getStorageImplementation = () => {
         name: `${dashboard.name} (Imported)`,
         panels: panels.map((panel: PanelConfig) => ({
           ...panel,
-          id: crypto.randomUUID(),
+          id: uuidv4(),
         })),
         metadata: {
           ...dashboard.metadata,

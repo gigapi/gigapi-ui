@@ -4,6 +4,7 @@ import axios from "axios";
 import { QueryProcessor } from "@/lib/query-processor";
 import { toast } from "sonner";
 import parseNDJSON from "@/lib/parsers/ndjson";
+import { v4 as uuidv4 } from "uuid";
 
 // Define the structure for query history items
 export interface QueryHistoryItem {
@@ -141,11 +142,19 @@ export const executeQueryAtom = atom(null, async (get, set) => {
       // Get time field details from schema
       let timeFieldDetails = null;
       if (selectedTimeField && tableSchema) {
-        timeFieldDetails = tableSchema.find(
+        const columnData = tableSchema.find(
           (col) =>
             col.column_name === selectedTimeField ||
             col.columnName === selectedTimeField
         );
+        
+        if (columnData) {
+          timeFieldDetails = {
+            columnName: columnData.column_name || columnData.columnName,
+            dataType: columnData.column_type || columnData.dataType,
+            timeUnit: columnData.timeUnit,
+          };
+        }
       }
 
       // Process the query
@@ -246,7 +255,7 @@ export const executeQueryAtom = atom(null, async (get, set) => {
 
     // Add to history with full context
     const historyItem: QueryHistoryItem = {
-      id: crypto.randomUUID(),
+      id: uuidv4(),
       query,
       processedQuery: hasTimeVariables ? processedQuery : undefined,
       database: selectedDb,
@@ -299,7 +308,7 @@ export const executeQueryAtom = atom(null, async (get, set) => {
 
     // Add failed query to history with full context
     const historyItem: QueryHistoryItem = {
-      id: crypto.randomUUID(),
+      id: uuidv4(),
       query,
       database: selectedDb,
       db: selectedDb, // Alias for backward compatibility

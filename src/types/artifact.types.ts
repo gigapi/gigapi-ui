@@ -27,7 +27,7 @@ export interface ChartArtifact extends BaseArtifact {
   data: {
     query: string;
     database: string;
-    chartType: 'timeseries' | 'bar' | 'pie' | 'line' | 'scatter' | 'heatmap' | 'gauge' | 'stat';
+    chartType: 'timeseries' | 'bar' | 'pie' | 'line' | 'scatter' | 'heatmap' | 'stat';
     fieldMapping: {
       xField?: string;
       yField?: string | string[];

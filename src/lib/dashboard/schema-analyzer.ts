@@ -141,12 +141,30 @@ export class SchemaAnalyzer {
       if (typeLower === "timestamp_s") {
         return { type: "INTEGER", format: "Time (s)" };
       }
-      if (typeLower.includes("bigint")) {
+      if (typeLower.includes("bigint") || typeLower === "int64" || typeLower === "uint64") {
+        // Enhanced BIGINT timestamp detection
         if (
           fieldLower.includes("time") ||
           fieldLower.includes("timestamp") ||
-          fieldName === "__timestamp"
+          fieldLower.includes("date") ||
+          fieldName === "__timestamp" ||
+          fieldLower.endsWith("_at") ||
+          fieldLower.endsWith("_ts") ||
+          fieldLower.endsWith("_ns") ||
+          fieldLower.endsWith("_ms") ||
+          fieldLower.endsWith("_us")
         ) {
+          // Try to infer time unit from field name
+          if (fieldLower.endsWith("_ns") || fieldName === "__timestamp") {
+            return { type: "BIGINT", format: "Time (ns)" };
+          } else if (fieldLower.endsWith("_us") || fieldLower.endsWith("_μs")) {
+            return { type: "BIGINT", format: "Time (μs)" };
+          } else if (fieldLower.endsWith("_ms")) {
+            return { type: "BIGINT", format: "Time (ms)" };
+          } else if (fieldLower.endsWith("_s")) {
+            return { type: "BIGINT", format: "Time (s)" };
+          }
+          // Default to nanoseconds for BIGINT timestamps
           return { type: "BIGINT", format: "Time (ns)" };
         }
         return { type: "BIGINT" };

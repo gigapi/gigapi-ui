@@ -83,9 +83,6 @@ export function transformDataForPanel(
     case "stat":
       return transformForStat(records, config);
 
-    case "gauge":
-      return transformForGauge(records, config);
-
     case "table":
       return transformForTable(records);
 
@@ -579,98 +576,6 @@ function transformForStat(
       { x: "max", y: max, series: "stats" }
     );
     seriesSet.add("stats");
-  }
-
-  return {
-    data,
-    series: Array.from(seriesSet),
-    metadata: {
-      totalRecords: records.length,
-    },
-  };
-}
-
-/**
- * Transform data for gauge panels (latest value)
- */
-function transformForGauge(
-  records: NDJSONRecord[],
-  config: PanelConfig
-): TransformedData {
-  const fieldMapping = config.fieldMapping;
-  const firstRecord = records[0];
-  const fields = Object.keys(firstRecord);
-
-  let valueField: string;
-  let groupField: string | undefined;
-  
-  if (fieldMapping?.yField) {
-    valueField = fieldMapping.yField;
-    groupField = fieldMapping.seriesField;
-  } else {
-    const numericFields = SchemaAnalyzer.findNumericFields(firstRecord, fields);
-    if (numericFields.length === 0) {
-      return { data: [], series: [], metadata: { totalRecords: 0 } };
-    }
-    valueField = numericFields[0];
-    
-    // Auto-detect grouping field
-    const stringFields = SchemaAnalyzer.findStringFields(firstRecord, fields);
-    groupField = stringFields.length > 0 ? stringFields[0] : undefined;
-  }
-
-  const data: ChartDataPoint[] = [];
-  const seriesSet = new Set<string>();
-
-  // Check if we have grouped data
-  if (groupField) {
-    // Group by the series field
-    const groups = new Map<string, number[]>();
-    
-    for (const record of records) {
-      const groupName = String(record[groupField] || "Unknown");
-      const value = parseNumericValue(record[valueField]);
-      
-      if (value !== null) {
-        if (!groups.has(groupName)) {
-          groups.set(groupName, []);
-        }
-        groups.get(groupName)!.push(value);
-      }
-    }
-    
-    // Create a gauge for each group (using average or latest)
-    for (const [groupName, values] of groups.entries()) {
-      if (values.length > 0) {
-        // Use average value for gauges when grouped
-        const avg = values.reduce((a, b) => a + b, 0) / values.length;
-        data.push({
-          x: groupName,
-          y: avg,
-          series: groupName
-        });
-        seriesSet.add(groupName);
-      }
-    }
-  } else {
-    // Single gauge for latest value
-    let latestValue: number | null = null;
-
-    // Get latest non-null value
-    for (let i = records.length - 1; i >= 0; i--) {
-      const value = parseNumericValue(records[i][valueField]);
-      if (value !== null) {
-        latestValue = value;
-        break;
-      }
-    }
-
-    if (latestValue === null) {
-      return { data: [], series: [], metadata: { totalRecords: 0 } };
-    }
-
-    data.push({ x: "gauge", y: latestValue, series: "gauge" });
-    seriesSet.add("gauge");
   }
 
   return {

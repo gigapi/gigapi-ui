@@ -69,7 +69,7 @@ export class ArtifactOptimizer {
     // Don't add limit to aggregation queries or charts that need all data
     if (queryLower.includes('group by') || 
         queryLower.includes('limit') ||
-        ('type' in data && ['pie', 'gauge', 'stat'].includes(data.type || data.chartType || ''))) {
+        ('type' in data && ['pie', 'stat'].includes(data.type || data.chartType || ''))) {
       return query;
     }
     

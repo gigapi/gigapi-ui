@@ -4,7 +4,6 @@ import {
 } from "@/types/dashboard.types";
 import { ChartRenderer } from "../../shared/ChartRenderer";
 import StatPanel from "./StatPanel";
-import GaugePanel from "./GaugePanel";
 import TablePanel from "./TablePanel";
 import { withPanelWrapper } from "./BasePanel";
 
@@ -56,13 +55,6 @@ export const PANEL_TYPES: Record<PanelType, PanelTypeDefinition> = {
     name: "Stat",
     description: "Display single value statistics",
     component: StatPanel,
-  },
-
-  gauge: {
-    type: "gauge",
-    name: "Gauge",
-    description: "Circular gauge for displaying values within a range",
-    component: GaugePanel,
   },
 
   table: {

@@ -3,7 +3,7 @@ import { atomWithStorage } from "jotai/utils";
 import axios from "axios";
 import { toast } from "sonner";
 import { selectedTimeFieldAtom, setSelectedTimeFieldAtom } from "./time-atoms";
-import { detectTimeFieldsFromSchema } from "@/lib/query-processor";
+import { detectTimeFieldsFromSchema, detectTimeUnitForColumn } from "@/lib/query-processor";
 
 // ============================================================================
 // Schema Cache Types
@@ -16,6 +16,7 @@ interface ColumnSchema {
   default: any;
   key: string | null;
   extra: string | null;
+  timeUnit?: string; // Added time unit for timestamp columns
 }
 
 interface SchemaCache {
@@ -272,17 +273,35 @@ export const setSelectedTableAtom = atom(
       });
 
       // Transform schema to use consistent property names
-      const transformedSchema = schema.map((col: any) => ({
-        columnName: col.column_name || col.name,
-        dataType: col.column_type || col.type || "unknown",
-        // Preserve original properties for compatibility
-        column_name: col.column_name,
-        column_type: col.column_type,
-        null: col.null,
-        default: col.default,
-        key: col.key,
-        extra: col.extra,
-      }));
+      const transformedSchema = schema.map((col: any) => {
+        const columnName = col.column_name || col.name;
+        const dataType = col.column_type || col.type || "unknown";
+        
+        // Detect time unit for potential time columns
+        let timeUnit;
+        const lowerName = columnName.toLowerCase();
+        if (
+          lowerName.includes("time") ||
+          lowerName.includes("date") ||
+          lowerName.includes("timestamp") ||
+          columnName === "__timestamp"
+        ) {
+          timeUnit = detectTimeUnitForColumn(columnName, dataType);
+        }
+
+        return {
+          columnName,
+          dataType,
+          timeUnit,
+          // Preserve original properties for compatibility
+          column_name: col.column_name,
+          column_type: col.column_type,
+          null: col.null,
+          default: col.default,
+          key: col.key,
+          extra: col.extra,
+        };
+      });
 
       set(tableSchemaAtom, transformedSchema);
 
@@ -392,17 +411,35 @@ export const loadTablesForCurrentDbAtom = atom(null, async (get, set) => {
         });
 
         // Transform schema to use consistent property names
-        const transformedSchema = schema.map((col: any) => ({
-          columnName: col.column_name || col.name,
-          dataType: col.column_type || col.type || "unknown",
-          // Preserve original properties for compatibility
-          column_name: col.column_name,
-          column_type: col.column_type,
-          null: col.null,
-          default: col.default,
-          key: col.key,
-          extra: col.extra,
-        }));
+        const transformedSchema = schema.map((col: any) => {
+          const columnName = col.column_name || col.name;
+          const dataType = col.column_type || col.type || "unknown";
+          
+          // Detect time unit for potential time columns
+          let timeUnit;
+          const lowerName = columnName.toLowerCase();
+          if (
+            lowerName.includes("time") ||
+            lowerName.includes("date") ||
+            lowerName.includes("timestamp") ||
+            columnName === "__timestamp"
+          ) {
+            timeUnit = detectTimeUnitForColumn(columnName, dataType);
+          }
+
+          return {
+            columnName,
+            dataType,
+            timeUnit,
+            // Preserve original properties for compatibility
+            column_name: col.column_name,
+            column_type: col.column_type,
+            null: col.null,
+            default: col.default,
+            key: col.key,
+            extra: col.extra,
+          };
+        });
 
         set(tableSchemaAtom, transformedSchema);
       } catch (error) {
@@ -471,17 +508,37 @@ export const initializeDatabaseAtom = atom(null, async (get, set) => {
           const cachedSchema = getCachedSchema(currentDb, selectedTable);
           if (cachedSchema) {
             // Transform cached schema to use consistent property names
-            const transformedSchema = cachedSchema.map((col: any) => ({
-              columnName: col.column_name || col.name,
-              dataType: col.column_type || col.type || "unknown",
-              // Preserve original properties for compatibility
-              column_name: col.column_name,
-              column_type: col.column_type,
-              null: col.null,
-              default: col.default,
-              key: col.key,
-              extra: col.extra,
-            }));
+            const transformedSchema = cachedSchema.map((col: any) => {
+              const columnName = col.column_name || col.name;
+              const dataType = col.column_type || col.type || "unknown";
+              
+              // Use cached time unit if available, otherwise detect it
+              const timeUnit = col.timeUnit || (() => {
+                const lowerName = columnName.toLowerCase();
+                if (
+                  lowerName.includes("time") ||
+                  lowerName.includes("date") ||
+                  lowerName.includes("timestamp") ||
+                  columnName === "__timestamp"
+                ) {
+                  return detectTimeUnitForColumn(columnName, dataType);
+                }
+                return undefined;
+              })();
+
+              return {
+                columnName,
+                dataType,
+                timeUnit,
+                // Preserve original properties for compatibility
+                column_name: col.column_name,
+                column_type: col.column_type,
+                null: col.null,
+                default: col.default,
+                key: col.key,
+                extra: col.extra,
+              };
+            });
             set(tableSchemaAtom, transformedSchema);
           }
         }
@@ -670,6 +727,29 @@ export const loadAndCacheTableSchemaAtom = atom(
 
       const schema = response.data.results || [];
 
+      // Add time unit information to schema before caching
+      const schemaWithTimeUnits = schema.map((col: any) => {
+        const columnName = col.column_name || col.name;
+        const dataType = col.column_type || col.type || "unknown";
+        
+        // Detect time unit for potential time columns
+        let timeUnit;
+        const lowerName = columnName.toLowerCase();
+        if (
+          lowerName.includes("time") ||
+          lowerName.includes("date") ||
+          lowerName.includes("timestamp") ||
+          columnName === "__timestamp"
+        ) {
+          timeUnit = detectTimeUnitForColumn(columnName, dataType);
+        }
+
+        return {
+          ...col,
+          timeUnit
+        };
+      });
+
       // Update cache with the new schema
       if (cache) {
         const updatedCache = {
@@ -680,7 +760,7 @@ export const loadAndCacheTableSchemaAtom = atom(
               ...cache.databases[database],
               schemas: {
                 ...cache.databases[database]?.schemas,
-                [table]: schema,
+                [table]: schemaWithTimeUnits,
               },
             },
           },
@@ -689,7 +769,7 @@ export const loadAndCacheTableSchemaAtom = atom(
         set(schemaCacheAtom, updatedCache);
       }
 
-      return schema;
+      return schemaWithTimeUnits;
     } catch (error) {
       console.error(
         `[SchemaCache] Failed to load schema for ${database}.${table}:`,
@@ -775,10 +855,34 @@ export const forceReloadCurrentTableSchemaAtom = atom(
 
       const schema = response.data.results || [];
 
+      // Add time unit information to schema before caching
+      const schemaWithTimeUnits = schema.map((col: any) => {
+        const columnName = col.column_name || col.name;
+        const dataType = col.column_type || col.type || "unknown";
+        
+        // Detect time unit for potential time columns
+        let timeUnit;
+        const lowerName = columnName.toLowerCase();
+        if (
+          lowerName.includes("time") ||
+          lowerName.includes("date") ||
+          lowerName.includes("timestamp") ||
+          columnName === "__timestamp"
+        ) {
+          timeUnit = detectTimeUnitForColumn(columnName, dataType);
+        }
+
+        return {
+          ...col,
+          timeUnit
+        };
+      });
+
       // Transform and set the schema
-      const transformedSchema = schema.map((col: any) => ({
+      const transformedSchema = schemaWithTimeUnits.map((col: any) => ({
         columnName: col.column_name || col.name,
         dataType: col.column_type || col.type || "unknown",
+        timeUnit: col.timeUnit,
         // Preserve original properties for compatibility
         column_name: col.column_name,
         column_type: col.column_type,
@@ -800,7 +904,7 @@ export const forceReloadCurrentTableSchemaAtom = atom(
               ...cache.databases[database],
               schemas: {
                 ...cache.databases[database]?.schemas,
-                [table]: schema,
+                [table]: schemaWithTimeUnits,
               },
             },
           },

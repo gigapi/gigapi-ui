@@ -7,6 +7,7 @@ import type {
   PanelConfig,
   PanelLayout,
 } from "@/types/dashboard.types";
+import { v4 as uuidv4 } from "uuid";
 
 // Re-export types that other modules need
 export type { Dashboard, PanelConfig } from "@/types/dashboard.types";
@@ -267,7 +268,7 @@ export const createDashboardAtom = atom(
     try {
       const newDashboard: Dashboard = {
         ...dashboardData,
-        id: crypto.randomUUID(),
+        id: uuidv4(),
         panels: dashboardData.panels || [],
         metadata: {
           ...dashboardData.metadata,
@@ -302,7 +303,7 @@ export const addPanelAtom = atom(
     try {
       const panelWithId: PanelConfig = {
         ...panelData,
-        id: panelData.id || crypto.randomUUID(),
+        id: panelData.id || uuidv4(),
       } as PanelConfig;
 
       // Get current dashboards
@@ -616,7 +617,7 @@ export function useDashboard() {
 
     const newPanel = {
       ...panelToDuplicate,
-      id: crypto.randomUUID(),
+      id: uuidv4(),
       title: `${panelToDuplicate.title} (Copy)`,
     };
 

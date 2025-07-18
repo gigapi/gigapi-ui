@@ -361,69 +361,6 @@ export function PanelConfigurationForm({
                 </div>
               </div>
 
-              {/* Panel-Specific Settings */}
-              {config.type === "gauge" && (
-                <div className="space-y-3">
-                  <h4 className="text-sm font-medium text-foreground">
-                    Gauge Settings
-                  </h4>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="space-y-2">
-                      <Label
-                        htmlFor="gauge-min"
-                        className="text-sm font-medium"
-                      >
-                        Min Value
-                      </Label>
-                      <Input
-                        id="gauge-min"
-                        type="number"
-                        value={config.fieldConfig?.defaults?.min || ""}
-                        onChange={(e) =>
-                          onConfigChange({
-                            fieldConfig: {
-                              ...config.fieldConfig,
-                              defaults: {
-                                ...config.fieldConfig?.defaults,
-                                min: parseFloat(e.target.value) || 0,
-                              },
-                            },
-                          })
-                        }
-                        placeholder="0"
-                        className="h-9"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label
-                        htmlFor="gauge-max"
-                        className="text-sm font-medium"
-                      >
-                        Max Value
-                      </Label>
-                      <Input
-                        id="gauge-max"
-                        type="number"
-                        value={config.fieldConfig?.defaults?.max || ""}
-                        onChange={(e) =>
-                          onConfigChange({
-                            fieldConfig: {
-                              ...config.fieldConfig,
-                              defaults: {
-                                ...config.fieldConfig?.defaults,
-                                max: parseFloat(e.target.value) || 100,
-                              },
-                            },
-                          })
-                        }
-                        placeholder="100"
-                        className="h-9"
-                      />
-                    </div>
-                  </div>
-                </div>
-              )}
-
               {config.type === "stat" && (
                 <div className="space-y-3">
                   <h4 className="text-sm font-medium text-foreground">
