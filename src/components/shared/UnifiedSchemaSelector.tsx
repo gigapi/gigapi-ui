@@ -1,13 +1,4 @@
-/**
- * @deprecated This component has been replaced by UnifiedSchemaSelector.
- * Please use UnifiedSchemaSelector from @/components/shared/UnifiedSchemaSelector instead.
- * 
- * Migration guide:
- * - Replace `context="query"` with `dataSource="atoms"`
- * - Replace `context="dashboard"` with `dataSource="cache"`
- * - All other props remain the same
- */
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import {
   Select,
   SelectContent,
@@ -32,202 +23,87 @@ import {
   Loader2,
 } from "lucide-react";
 import { cn } from "@/lib/utils/class-utils";
-import { useAtom } from "jotai";
-import {
-  availableDatabasesAtom,
-  availableTablesAtom,
-  schemaAtom,
-  tableSchemaAtom,
-} from "@/atoms";
-import { SchemaAnalyzer } from "@/lib/dashboard/schema-analyzer";
-import type { TableSchema, ColumnSchema } from "@/types";
+import { useSchemaData, type DataSource } from "@/hooks/useSchemaData";
 
 // Types for the unified selector
 export type SelectorType = "database" | "table" | "timeField";
-export type SelectorContext = "query" | "dashboard" | "artifact";
 export type SelectorStyle = "select" | "popover";
 
-interface UnifiedSelectorProps {
+interface UnifiedSchemaSelectorProps {
   type: SelectorType;
-  context: SelectorContext;
-  style?: SelectorStyle;
   value?: string;
   onChange: (value: string) => void;
   className?: string;
   disabled?: boolean;
   placeholder?: string;
+  // Context
+  dataSource?: DataSource;
   // For table selector
   database?: string;
   // For time field selector
   table?: string;
   // Optional schema override (for artifact context)
-  schemaOverride?: Record<string, TableSchema[]>;
+  schemaOverride?: Record<string, any>;
   // Optional label (null = no label, undefined = default label, string = custom label)
   label?: string | null;
   // Show icon in trigger
   showIcon?: boolean;
+  // Style variant
+  style?: SelectorStyle;
 }
 
-export function UnifiedSelector({
+export function UnifiedSchemaSelector({
   type,
-  style = "select",
   value,
   onChange,
   className,
   disabled = false,
   placeholder,
+  dataSource = "atoms",
   database,
   table,
   schemaOverride,
   label,
   showIcon = true,
-}: UnifiedSelectorProps) {
-  const [availableDatabases] = useAtom(availableDatabasesAtom);
-  const [availableTables] = useAtom(availableTablesAtom);
-  const [schema] = useAtom(schemaAtom);
-  const [tableSchema] = useAtom(tableSchemaAtom);
+  style = "select",
+}: UnifiedSchemaSelectorProps) {
   const [searchTerm, setSearchTerm] = useState("");
   const [isOpen, setIsOpen] = useState(false);
 
-  // Get the appropriate data based on selector type
-  const { options, timeFieldsMetadata } = useMemo(() => {
-    const metadata: Record<string, { timeUnit?: string }> = {};
-    let optionsList: string[] = [];
-    
-    switch (type) {
-      case "database":
-        optionsList = availableDatabases || [];
-        break;
-
-      case "table":
-        if (!database) {
-          optionsList = [];
-          break;
-        }
-
-        // For artifact context, use schema override
-        if (schemaOverride?.[database]) {
-          const dbTables = schemaOverride[database];
-          optionsList = Array.isArray(dbTables)
-            ? dbTables
-                .map((t) => (typeof t === "string" ? t : t.tableName))
-                .filter(Boolean)
-            : [];
-        } else {
-          // For query context, use availableTables directly (it's already loaded for the selected database)
-          optionsList = availableTables || [];
-        }
-        break;
-
-      case "timeField":
-        if (!database || !table) {
-          optionsList = [];
-          break;
-        }
-
-        // For artifact context with schema override
-        if (schemaOverride?.[database]) {
-          const dbSchema = schemaOverride[database];
-          const tableSchemaOverride = dbSchema.find(
-            (t) => t.tableName === table
-          );
-          if (!tableSchemaOverride?.columns) {
-            optionsList = [];
-            break;
-          }
-
-          const timeFields: string[] = [];
-          
-          tableSchemaOverride.columns.forEach((column: ColumnSchema) => {
-            if (!column.columnName) return;
-
-            const fieldType = SchemaAnalyzer.analyzeFieldType(
-              column.columnName,
-              null,
-              column.dataType
-            );
-
-            if (
-              fieldType.semantic === "timestamp" ||
-              fieldType.format?.includes("Time") ||
-              column.columnName.toLowerCase().includes("time") ||
-              column.columnName.toLowerCase().includes("date") ||
-              column.columnName.toLowerCase().includes("timestamp") ||
-              column.columnName === "__timestamp"
-            ) {
-              timeFields.push(column.columnName);
-              if (column.timeUnit) {
-                metadata[column.columnName] = { timeUnit: column.timeUnit };
-              }
-            }
-          });
-
-          optionsList = timeFields.sort((a, b) =>
-            a === "__timestamp" ? -1 : b === "__timestamp" ? 1 : 0
-          );
-          break;
-        }
-
-        // For query context, use tableSchema atom (from DESCRIBE query)
-        if (!tableSchema || !Array.isArray(tableSchema)) {
-          optionsList = [];
-          break;
-        }
-
-        interface TimeFieldInfo {
-          name: string;
-          timeUnit?: string;
-        }
-        
-        const timeFields: TimeFieldInfo[] = [];
-        
-        tableSchema.forEach((column: any) => {
-          // Handle the API response format: {"column_name":"method","column_type":"VARCHAR",...}
-          const columnName = column.column_name || column.columnName;
-          const columnType = column.column_type || column.dataType;
-          const timeUnit = column.timeUnit;
-
-          if (!columnName || typeof columnName !== "string") return;
-
-          // Simple time field detection based on your API response
-          if (
-            columnName.toLowerCase().includes("time") ||
-            columnName.toLowerCase().includes("date") ||
-            columnName.toLowerCase().includes("timestamp") ||
-            columnName === "__timestamp" ||
-            columnType?.toLowerCase().includes("timestamp") ||
-            columnType?.toLowerCase().includes("datetime")
-          ) {
-            timeFields.push({ name: columnName, timeUnit });
-            if (timeUnit) {
-              metadata[columnName] = { timeUnit };
-            }
-          }
-        });
-
-        // Prioritize __timestamp if it exists
-        optionsList = timeFields
-          .sort((a, b) =>
-            a.name === "__timestamp" ? -1 : b.name === "__timestamp" ? 1 : 0
-          )
-          .map(field => field.name);
-        break;
-
-      default:
-        optionsList = [];
-    }
-    
-    return { options: optionsList, timeFieldsMetadata: metadata };
-  }, [
-    type,
-    availableDatabases,
-    availableTables,
-    schema,
+  // Get schema data using the unified hook
+  const { databases, tables, timeFields, isLoading, error } = useSchemaData({
+    dataSource,
     database,
     table,
     schemaOverride,
-    tableSchema,
-  ]);
+  });
+
+  // Get options based on selector type
+  const options = useMemo(() => {
+    switch (type) {
+      case "database":
+        return databases;
+      case "table":
+        return tables;
+      case "timeField":
+        return timeFields.map(field => field.name);
+      default:
+        return [];
+    }
+  }, [type, databases, tables, timeFields]);
+
+  // Get time field metadata for display
+  const timeFieldsMetadata = useMemo(() => {
+    const metadata: Record<string, { timeUnit?: string }> = {};
+    if (type === "timeField") {
+      timeFields.forEach(field => {
+        if (field.timeUnit) {
+          metadata[field.name] = { timeUnit: field.timeUnit };
+        }
+      });
+    }
+    return metadata;
+  }, [type, timeFields]);
 
   // Filter options based on search term
   const filteredOptions = useMemo(() => {
@@ -251,8 +127,11 @@ export function UnifiedSelector({
 
   // Get placeholder based on type and context
   const getPlaceholder = () => {
-    // Always prioritize custom placeholder if provided
     if (placeholder) return placeholder;
+
+    if (isLoading) {
+      return `Loading ${type}s...`;
+    }
 
     switch (type) {
       case "database":
@@ -267,6 +146,7 @@ export function UnifiedSelector({
 
   // Get label based on type
   const getLabel = () => {
+    if (label === null) return null;
     if (label) return label;
 
     switch (type) {
@@ -280,40 +160,52 @@ export function UnifiedSelector({
   };
 
   // Handle selection
-  const handleSelect = (selectedValue: string) => {
+  const handleSelect = useCallback((selectedValue: string) => {
     onChange(selectedValue);
     setIsOpen(false);
     setSearchTerm("");
-  };
+  }, [onChange]);
+
+  // Check if selector should be disabled
+  const isDisabled = disabled || 
+    isLoading ||
+    (type === "table" && !database) ||
+    (type === "timeField" && !table);
+
+  const displayLabel = getLabel();
 
   // Render select style
   if (style === "select") {
     return (
       <div className={cn("space-y-1.5", className)}>
-        {label !== null && (
+        {displayLabel !== null && (
           <label className="text-sm font-medium text-muted-foreground">
-            {getLabel()}
+            {displayLabel}
           </label>
         )}
         <Select
           value={value}
           onValueChange={onChange}
-          disabled={
-            disabled ||
-            (type === "table" && !database) ||
-            (type === "timeField" && !table)
-          }
+          disabled={isDisabled}
         >
           <SelectTrigger
             className={cn("w-full", !value && "text-muted-foreground")}
           >
             <div className="flex items-center gap-2">
-              {showIcon && getIcon()}
+              {isLoading ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                showIcon && getIcon()
+              )}
               <SelectValue placeholder={getPlaceholder()} />
             </div>
           </SelectTrigger>
           <SelectContent>
-            {filteredOptions.length === 0 ? (
+            {error ? (
+              <div className="py-2 px-3 text-sm text-destructive text-center">
+                Error loading {type}s
+              </div>
+            ) : filteredOptions.length === 0 ? (
               <div className="py-2 px-3 text-sm text-muted-foreground text-center">
                 {type === "table" && !database
                   ? "Select a database first"
@@ -346,9 +238,9 @@ export function UnifiedSelector({
   // Render popover style (with search)
   return (
     <div className={cn("space-y-1.5", className)}>
-      {label !== null && (
+      {displayLabel !== null && (
         <label className="text-sm font-medium text-muted-foreground">
-          {getLabel()}
+          {displayLabel}
         </label>
       )}
       <Popover open={isOpen} onOpenChange={setIsOpen}>
@@ -359,25 +251,18 @@ export function UnifiedSelector({
             aria-expanded={isOpen}
             className={cn(
               "w-full justify-between",
-              !value &&
-                !placeholder?.includes("Loading") &&
-                "text-muted-foreground",
-              disabled && placeholder?.includes("Loading") && "opacity-100"
+              !value && "text-muted-foreground"
             )}
-            disabled={
-              disabled ||
-              (type === "table" && !database) ||
-              (type === "timeField" && !table)
-            }
+            disabled={isDisabled}
           >
             <div className="flex items-center gap-2 truncate">
-              {disabled && placeholder?.includes("Loading") ? (
+              {isLoading ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
                 showIcon && getIcon()
               )}
               <span className="truncate">
-                {value || getPlaceholder() || "Select time field"}
+                {value || getPlaceholder()}
               </span>
             </div>
             <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
@@ -396,7 +281,11 @@ export function UnifiedSelector({
             </div>
           </div>
           <div className="max-h-[300px] overflow-y-auto">
-            {filteredOptions.length === 0 ? (
+            {error ? (
+              <div className="py-6 text-center text-sm text-destructive">
+                Error loading {type}s
+              </div>
+            ) : filteredOptions.length === 0 ? (
               <div className="py-6 text-center text-sm text-muted-foreground">
                 {searchTerm
                   ? "No results found"

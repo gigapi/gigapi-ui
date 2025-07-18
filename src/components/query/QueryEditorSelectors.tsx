@@ -1,6 +1,6 @@
 import { useCallback } from "react";
 import { useAtom } from "jotai";
-import { UnifiedSelector } from "@/components/shared/DbTableTimeSelector";
+import { UnifiedSchemaSelector } from "@/components/shared/UnifiedSchemaSelector";
 import TimeRangeSelector from "@/components/TimeRangeSelector";
 import { schemaLoadingAtom } from "@/atoms";
 import type { TimeRange, ColumnSchema } from "@/types/utils.types";
@@ -90,9 +90,9 @@ export default function QueryEditorSelectors({
         {/* Table Selector */}
         <div className="flex items-center gap-1.5">
           <span className="text-xs text-muted-foreground">FROM</span>
-          <UnifiedSelector
+          <UnifiedSchemaSelector
             type="table"
-            context="query"
+            dataSource="atoms"
             style="popover"
             value={selectedTable || ""}
             onChange={onTableChange}
@@ -107,9 +107,9 @@ export default function QueryEditorSelectors({
         {selectedTable && (
           <div className="flex items-center gap-1.5 ml-2">
             <span className="text-xs text-muted-foreground">TIME BY</span>
-            <UnifiedSelector
+            <UnifiedSchemaSelector
               type="timeField"
-              context="query"
+              dataSource="atoms"
               style="popover"
               value={selectedTimeField || ""}
               onChange={handleTimeFieldChange}
@@ -145,9 +145,9 @@ export default function QueryEditorSelectors({
           <div className="flex items-center gap-1.5 min-w-0 flex-1">
             <span className="text-xs text-muted-foreground flex-shrink-0">FROM</span>
             <div className="min-w-0 flex-1">
-              <UnifiedSelector
+              <UnifiedSchemaSelector
                 type="table"
-                context="query"
+                dataSource="atoms"
                 style="popover"
                 value={selectedTable || ""}
                 onChange={onTableChange}
@@ -166,9 +166,9 @@ export default function QueryEditorSelectors({
                 TIME BY
               </span>
               <div className="min-w-0 flex-1">
-                <UnifiedSelector
+                <UnifiedSchemaSelector
                   type="timeField"
-                  context="query"
+                  dataSource="atoms"
                   style="popover"
                   value={selectedTimeField || ""}
                   onChange={handleTimeFieldChange}

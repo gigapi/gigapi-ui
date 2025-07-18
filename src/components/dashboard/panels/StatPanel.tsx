@@ -8,9 +8,40 @@ function StatPanel({ config, data }: PanelProps) {
   // Check if we have multiple series (grouped data)
   const hasMultipleSeries = useMemo(() => {
     if (!data || data.length === 0) return false;
+    
+    // Check if we have a group by field in the field mapping
+    const groupByField = config.fieldMapping?.seriesField;
+    if (groupByField && data.length > 1) {
+      // Check if all records have different values for the group field
+      const groupValues = new Set(data.map(d => d[groupByField]));
+      return groupValues.size > 1;
+    }
+    
+    // For aggregated queries without explicit grouping, check if we have multiple rows
+    // This handles cases like "SELECT AVG(temperature), season FROM weather GROUP BY season"
+    if (data.length > 1) {
+      // Check if this looks like aggregated data (single numeric field with different group values)
+      const firstRecord = data[0];
+      const fields = Object.keys(firstRecord);
+      const numericFields = fields.filter(field => {
+        const value = firstRecord[field];
+        return typeof value === 'number' || (typeof value === 'string' && !isNaN(Number(value)));
+      });
+      const stringFields = fields.filter(field => {
+        const value = firstRecord[field];
+        return typeof value === 'string' && isNaN(Number(value));
+      });
+      
+      // If we have exactly one numeric field and at least one string field, it's likely grouped data
+      if (numericFields.length === 1 && stringFields.length >= 1) {
+        return true;
+      }
+    }
+    
+    // Legacy check for series field
     const series = new Set(data.map(d => d.series));
     return series.size > 1 || (series.size === 1 && !series.has('stats'));
-  }, [data]);
+  }, [data, config]);
 
   // If we have multiple series, render multiple stat panels
   if (hasMultipleSeries) {
@@ -205,10 +236,10 @@ function StatPanel({ config, data }: PanelProps) {
 
   return (
     <div className="h-full flex flex-col p-3">
-      {/* Header with field name and stat mode */}
+      {/* Header with field name */}
       <div className="text-center mb-2">
-        <div className="text-xs text-muted-foreground font-medium">
-          {statData.displayLabel} • {statData.fieldName}
+        <div className="text-sm text-muted-foreground font-medium">
+          {statData.fieldName}
         </div>
       </div>
 
@@ -298,10 +329,63 @@ function MultiStatPanel({ config, data }: PanelProps) {
   const groupedStats = useMemo(() => {
     if (!data || data.length === 0) return [];
     
-    // Group data by series
+    
+    // Check if we have a specific group by field
+    const groupByField = config.fieldMapping?.seriesField;
+    
+    if (groupByField) {
+      // Group by specified field
+      const groups = new Map<string, any[]>();
+      data.forEach(d => {
+        const groupKey = String(d[groupByField] || 'Unknown');
+        if (!groups.has(groupKey)) {
+          groups.set(groupKey, []);
+        }
+        groups.get(groupKey)!.push(d);
+      });
+      return Array.from(groups.entries());
+    }
+    
+    // For aggregated queries, each row is its own "group"
+    // This handles queries like "SELECT AVG(temperature), season FROM weather GROUP BY season"
+    const firstRecord = data[0];
+    const fields = Object.keys(firstRecord);
+    
+    // Find the value field (numeric) and label field (string)
+    const valueField = config.fieldMapping?.yField || fields.find(field => {
+      const value = firstRecord[field];
+      return typeof value === 'number' || (typeof value === 'string' && !isNaN(Number(value)));
+    });
+    
+    const labelField = fields.find(field => {
+      const value = firstRecord[field];
+      return typeof value === 'string' && isNaN(Number(value)) && field !== 'series';
+    });
+    
+    if (valueField && labelField) {
+      // Each row becomes a separate stat
+      const result = data.map(record => {
+        const label = String(record[labelField] || 'Unknown');
+        return [label, [record]] as [string, typeof data];
+      });
+      return result;
+    }
+    
+    // If no grouping field found, show single stat with field name
+    // This handles simple queries without GROUP BY
+    if (data.length === 1) {
+      const numericField = fields.find(field => {
+        const value = firstRecord[field];
+        return typeof value === 'number' || (typeof value === 'string' && !isNaN(Number(value)));
+      });
+      const valueField = config.fieldMapping?.yField || numericField;
+      return [[valueField || 'Value', data]];
+    }
+    
+    // Fallback to series-based grouping
     const groups = new Map<string, any[]>();
     data.forEach(d => {
-      const series = d.series || 'default';
+      const series = d.series || 'Value';
       if (!groups.has(series)) {
         groups.set(series, []);
       }
@@ -309,7 +393,7 @@ function MultiStatPanel({ config, data }: PanelProps) {
     });
     
     return Array.from(groups.entries());
-  }, [data]);
+  }, [data, config]);
 
   const formatValue = (value: number): string => {
     const fieldConfig = config.fieldConfig?.defaults || {};
@@ -332,30 +416,38 @@ function MultiStatPanel({ config, data }: PanelProps) {
   };
 
   return (
-    <div className="h-full p-3">
+    <div className="h-full p-4">
       <div className={cn(
-        "grid gap-3 h-full",
+        "grid gap-4 h-full",
         groupedStats.length === 1 ? "grid-cols-1" :
         groupedStats.length === 2 ? "grid-cols-2" :
         groupedStats.length === 3 ? "grid-cols-3" :
         groupedStats.length === 4 ? "grid-cols-2 grid-rows-2" :
         "grid-cols-3 grid-rows-2"
       )}>
-        {groupedStats.map(([series, values]) => {
-          // Get the value (should be single value per series in stat transformation)
-          const value = values[0]?.y || 0;
-          const label = values[0]?.x || series;
+        {groupedStats.map(([label, records]) => {
+          // Find the value field
+          const firstRecord = records[0];
+          const valueField = config.fieldMapping?.yField || Object.keys(firstRecord).find(field => {
+            const value = firstRecord[field];
+            return typeof value === 'number' || (typeof value === 'string' && !isNaN(Number(value)));
+          });
+          
+          if (!valueField) return null;
+          
+          // Get the value from the first record (for aggregated queries, there's only one record per group)
+          const value = parseFloat(String(firstRecord[valueField]));
           
           return (
             <div
-              key={series}
-              className="flex flex-col items-center justify-center text-center border rounded-lg p-3 bg-card"
+              key={label}
+              className="flex flex-col items-center justify-center text-center border rounded-lg p-4 bg-card"
             >
-              <div className="text-xs text-muted-foreground font-medium mb-1">
+              <div className="text-sm text-muted-foreground font-medium mb-2">
                 {label}
               </div>
-              <div className="text-xl sm:text-2xl font-bold">
-                {formatValue(value)}
+              <div className="text-2xl sm:text-3xl font-semibold">
+                {formatValue(isNaN(value) ? 0 : value)}
               </div>
             </div>
           );

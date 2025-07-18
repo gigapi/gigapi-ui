@@ -25,7 +25,7 @@ import {
 } from "@/components/dashboard/PanelDataProvider";
 import { DashboardTimeFilter } from "@/components/dashboard/DashboardTimeFilter";
 import { PanelConfigurationForm } from "@/components/dashboard/PanelConfigurationForm";
-import { DashboardUnifiedSelector } from "@/components/dashboard/DashboardUnifiedSelector";
+import { UnifiedSchemaSelector } from "@/components/shared/UnifiedSchemaSelector";
 import { type PanelConfig } from "@/types/dashboard.types";
 import { toast } from "sonner";
 import Loader from "@/components/shared/Loader";
@@ -273,9 +273,16 @@ export default function PanelEdit(props?: PanelEditProps) {
           // Auto-suggest mappings
           const suggestedMapping: any = {};
 
+          // Check if this is likely a GROUP BY query result
+          // (multiple rows with exactly one numeric field and one or more string fields)
+          const isGroupByResult = data.length > 1 && 
+            numericFields.length === 1 && 
+            stringFields.length >= 1;
+
           if (timeFields.length > 0) {
             suggestedMapping.xField = timeFields[0];
-          } else if (stringFields.length > 0) {
+          } else if (stringFields.length > 0 && !isGroupByResult) {
+            // Only use string field as X if not a GROUP BY result
             suggestedMapping.xField = stringFields[0];
           }
 
@@ -284,21 +291,38 @@ export default function PanelEdit(props?: PanelEditProps) {
           }
 
           // For series field, prefer non-time string fields
-          if (stringFields.length > 0) {
-            const seriesCandidate =
-              stringFields.find((field) => {
-                const lower = field.toLowerCase();
-                return (
-                  lower.includes("location") ||
-                  lower.includes("region") ||
-                  lower.includes("zone") ||
-                  lower.includes("name") ||
-                  lower.includes("type") ||
-                  lower.includes("category")
-                );
-              }) || stringFields[0];
+          // For GROUP BY queries, always set the string field as series
+          if (stringFields.length > 0 && isGroupByResult) {
+            // For GROUP BY results, find the best string field for grouping
+            // Exclude fields that look like aggregated values
+            const groupingFields = stringFields.filter((field) => {
+              const lower = field.toLowerCase();
+              // Exclude fields that are likely aggregated values
+              return !lower.includes("avg(") && 
+                     !lower.includes("sum(") && 
+                     !lower.includes("count(") && 
+                     !lower.includes("max(") && 
+                     !lower.includes("min(");
+            });
 
-            suggestedMapping.seriesField = seriesCandidate;
+            if (groupingFields.length > 0) {
+              const seriesCandidate =
+                groupingFields.find((field) => {
+                  const lower = field.toLowerCase();
+                  return (
+                    lower.includes("location") ||
+                    lower.includes("region") ||
+                    lower.includes("zone") ||
+                    lower.includes("name") ||
+                    lower.includes("type") ||
+                    lower.includes("category") ||
+                    lower.includes("season") ||
+                    lower.includes("group")
+                  );
+                }) || groupingFields[0];
+
+              suggestedMapping.seriesField = seriesCandidate;
+            }
           }
 
           if (Object.keys(suggestedMapping).length > 0) {
@@ -555,8 +579,7 @@ export default function PanelEdit(props?: PanelEditProps) {
                     <div className="h-full rounded-lg border bg-background shadow-sm overflow-hidden">
                       {localConfig.type &&
                       currentDashboard &&
-                      previewData &&
-                      previewData.length > 0 ? (
+                      previewData !== null ? (
                         <PanelDataProvider
                           key={`${localConfig.type}-${
                             localConfig.id || "preview"
@@ -571,6 +594,7 @@ export default function PanelEdit(props?: PanelEditProps) {
                           dashboard={currentDashboard}
                           autoRefresh={false}
                           refreshTrigger={refreshTrigger}
+                          externalData={previewData}
                         >
                           <EnhancedPanel
                             panelId={panelId || "preview"}
@@ -613,7 +637,7 @@ export default function PanelEdit(props?: PanelEditProps) {
                                   Fix the query error to see the panel preview
                                 </p>
                               </div>
-                            ) : !currentData?.data?.length ? (
+                            ) : previewData === null ? (
                               <div className="space-y-3">
                                 <div className="w-12 h-12 rounded-full bg-orange-100 flex items-center justify-center mx-auto">
                                   <AlertCircle className="h-6 w-6 text-orange-600" />
@@ -675,8 +699,9 @@ export default function PanelEdit(props?: PanelEditProps) {
                           <Label className="text-sm font-medium text-muted-foreground whitespace-nowrap">
                             Database:
                           </Label>
-                          <DashboardUnifiedSelector
+                          <UnifiedSchemaSelector
                             type="database"
+                            dataSource="cache"
                             value={localConfig?.database || ""}
                             onChange={(value) =>
                               handleConfigChange({
@@ -697,8 +722,9 @@ export default function PanelEdit(props?: PanelEditProps) {
                             <Label className="text-sm font-medium text-muted-foreground whitespace-nowrap">
                               Table:
                             </Label>
-                            <DashboardUnifiedSelector
+                            <UnifiedSchemaSelector
                               type="table"
+                              dataSource="cache"
                               database={localConfig?.database}
                               value={localConfig?.table || ""}
                               onChange={(value) => {
@@ -784,8 +810,9 @@ export default function PanelEdit(props?: PanelEditProps) {
                             <Label className="text-sm font-medium text-muted-foreground whitespace-nowrap">
                               Time Field:
                             </Label>
-                            <DashboardUnifiedSelector
+                            <UnifiedSchemaSelector
                               type="timeField"
+                              dataSource="cache"
                               database={localConfig?.database}
                               table={localConfig?.table}
                               value={localConfig?.timeField || ""}
@@ -802,10 +829,10 @@ export default function PanelEdit(props?: PanelEditProps) {
                         )}
 
                         {/* Query Status */}
-                        {previewData && (
+                        {previewData !== null && (
                           <div className="flex items-center gap-2 text-xs text-muted-foreground">
                             <div className="w-2 h-2 rounded-full bg-green-500"></div>
-                            {previewData.length} rows returned
+                            {Array.isArray(previewData) ? previewData.length : 0} rows returned
                           </div>
                         )}
 

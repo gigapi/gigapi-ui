@@ -13,7 +13,7 @@ import {
   type Dashboard,
   type NDJSONRecord,
 } from "@/types/dashboard.types";
-import { type TransformedData } from "@/lib/dashboard/data-transformers";
+import { type TransformedData, transformDataForPanel } from "@/lib/dashboard/data-transformers";
 import { PanelRenderer } from "./PanelRenderer";
 import Loader from "@/components/shared/Loader";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -45,6 +45,7 @@ interface PanelDataProviderProps {
   children: React.ReactNode;
   autoRefresh?: boolean;
   refreshTrigger?: number; // External trigger to force refresh
+  externalData?: NDJSONRecord[] | null; // Optional external data to use instead of fetching
 }
 
 export function PanelDataProvider({
@@ -54,6 +55,7 @@ export function PanelDataProvider({
   children,
   autoRefresh = true,
   refreshTrigger,
+  externalData,
 }: PanelDataProviderProps) {
   const { data, transformedData, loading, error, execute } = usePanelQuery({
     panelId,
@@ -71,6 +73,9 @@ export function PanelDataProvider({
 
   // Single effect to handle all execution triggers
   useEffect(() => {
+    // Skip query execution if external data is provided
+    if (externalData !== undefined) return;
+    
     if (!autoRefresh) return;
 
     const shouldExecute = config.query && config.query.trim();
@@ -91,12 +96,23 @@ export function PanelDataProvider({
       // Use ref to avoid dependency on execute
       executeRef.current({ force: !!refreshTrigger });
     }
-  }, [panelId, config.query, dashboard.timeRange, refreshTrigger, autoRefresh]);
+  }, [panelId, config.query, dashboard.timeRange, refreshTrigger, autoRefresh, externalData]);
+
+  // Use external data if provided, otherwise use query data
+  const effectiveData = externalData !== undefined ? externalData : data;
+  
+  // Transform external data if provided
+  const effectiveTransformedData = externalData !== undefined && externalData !== null
+    ? transformDataForPanel(externalData, config)
+    : transformedData;
+  
+  // Override loading state if using external data
+  const effectiveLoading = externalData !== undefined ? false : loading;
 
   const contextValue: PanelDataContextValue = {
-    data,
-    transformedData,
-    loading,
+    data: effectiveData,
+    transformedData: effectiveTransformedData,
+    loading: effectiveLoading,
     error,
     execute,
   };

@@ -215,6 +215,14 @@ export const queryEditorChatSessionIdAtom = atomWithStorage<string | null>(
   null
 );
 
+// Active abort controllers for streaming messages
+export const activeAbortControllersAtom = atom<Map<string, AbortController>>(
+  new Map()
+);
+
+// Track which message is being edited
+export const editingMessageIdAtom = atom<string | null>(null);
+
 // ============================================================================
 // Derived Atoms
 // ============================================================================
@@ -321,6 +329,56 @@ export const createSessionAtom = atom(
   }
 );
 
+// Cancel streaming message
+export const cancelMessageAtom = atom(
+  null,
+  (get, set, sessionId: string) => {
+    const abortControllers = get(activeAbortControllersAtom);
+    const controller = abortControllers.get(sessionId);
+    
+    if (controller) {
+      // Abort the fetch request
+      controller.abort();
+      
+      // Remove from active controllers
+      const newControllers = new Map(abortControllers);
+      newControllers.delete(sessionId);
+      set(activeAbortControllersAtom, newControllers);
+      
+      // Update the session to remove streaming flag from the last message
+      const sessions = get(chatSessionsAtom);
+      const session = sessions[sessionId];
+      if (session && session.messages.length > 0) {
+        const lastMessage = session.messages[session.messages.length - 1];
+        if (lastMessage.metadata?.isStreaming) {
+          const updatedMessages = [...session.messages];
+          updatedMessages[updatedMessages.length - 1] = {
+            ...lastMessage,
+            metadata: {
+              ...lastMessage.metadata,
+              isStreaming: false,
+              wasCancelled: true,
+            },
+          };
+          
+          set(chatSessionsAtom, {
+            ...sessions,
+            [sessionId]: {
+              ...session,
+              messages: updatedMessages,
+              updatedAt: new Date().toISOString(),
+            },
+          });
+        }
+      }
+      
+      return true;
+    }
+    
+    return false;
+  }
+);
+
 // Send message with streaming support
 export const sendMessageAtom = atom(
   null,
@@ -385,6 +443,13 @@ export const sendMessageAtom = atom(
     let isInThinkingBlock = false;
     let accumulatedThinking = "";
     let accumulatedContent = "";
+
+    // Create abort controller for this request
+    const abortController = new AbortController();
+    const abortControllers = get(activeAbortControllersAtom);
+    const newControllers = new Map(abortControllers);
+    newControllers.set(options.sessionId, abortController);
+    set(activeAbortControllersAtom, newControllers);
 
     try {
       // Get global instructions and schema cache
@@ -615,9 +680,29 @@ export const sendMessageAtom = atom(
               },
             });
           }
-        }
+        },
+        abortController.signal
       );
+      
+      // Clean up abort controller after successful completion
+      const currentControllers = get(activeAbortControllersAtom);
+      const updatedControllers = new Map(currentControllers);
+      updatedControllers.delete(options.sessionId);
+      set(activeAbortControllersAtom, updatedControllers);
     } catch (error) {
+      // Clean up abort controller
+      const currentControllers = get(activeAbortControllersAtom);
+      const updatedControllers = new Map(currentControllers);
+      updatedControllers.delete(options.sessionId);
+      set(activeAbortControllersAtom, updatedControllers);
+
+      // Check if the error is due to abort
+      if (error instanceof Error && error.name === 'AbortError') {
+        // Don't show error message for cancelled requests
+        console.log('Message streaming was cancelled');
+        return;
+      }
+
       // Remove the streaming message and add error message
       const currentSessions = get(chatSessionsAtom);
       const currentSession = currentSessions[options.sessionId];
@@ -697,6 +782,319 @@ export const deleteSessionAtom = atom(null, (get, set, sessionId: string) => {
     set(activeSessionIdAtom, sessionList.length > 0 ? sessionList[0] : null);
   }
 });
+
+// Edit message
+export const editMessageAtom = atom(
+  null,
+  async (get, set, options: { sessionId: string; messageId: string; newContent: string }) => {
+    const { sessionId, messageId, newContent } = options;
+    const sessions = get(chatSessionsAtom);
+    const session = sessions[sessionId];
+
+    if (!session) {
+      throw new Error("Session not found");
+    }
+
+    const messageIndex = session.messages.findIndex((m) => m.id === messageId);
+    if (messageIndex === -1) {
+      throw new Error("Message not found");
+    }
+
+    const message = session.messages[messageIndex];
+    if (message.role !== "user") {
+      throw new Error("Only user messages can be edited");
+    }
+
+    // Update the message content
+    const updatedMessages = [...session.messages];
+    updatedMessages[messageIndex] = {
+      ...message,
+      content: newContent,
+      metadata: {
+        ...message.metadata,
+        edited: true,
+        editedAt: new Date().toISOString(),
+      },
+    };
+
+    // Remove all messages after the edited message (to regenerate responses)
+    const messagesBeforeEdit = updatedMessages.slice(0, messageIndex + 1);
+
+    // Update session
+    set(chatSessionsAtom, {
+      ...sessions,
+      [sessionId]: {
+        ...session,
+        messages: messagesBeforeEdit,
+        updatedAt: new Date().toISOString(),
+      },
+    });
+
+    // Clear editing state
+    set(editingMessageIdAtom, null);
+
+    // Return the edited message for regeneration
+    return updatedMessages[messageIndex];
+  }
+);
+
+// Regenerate from message
+export const regenerateFromMessageAtom = atom(
+  null,
+  async (get, set, options: { sessionId: string; messageId: string; isAgentic?: boolean }) => {
+    const { sessionId, messageId, isAgentic } = options;
+    const sessions = get(chatSessionsAtom);
+    const session = sessions[sessionId];
+
+    if (!session) {
+      throw new Error("Session not found");
+    }
+
+    if (!session.connection) {
+      throw new Error("No connection configured for this session");
+    }
+
+    const messageIndex = session.messages.findIndex((m) => m.id === messageId);
+    if (messageIndex === -1) {
+      throw new Error("Message not found");
+    }
+
+    const message = session.messages[messageIndex];
+    if (message.role !== "user") {
+      throw new Error("Only user messages can be regenerated from");
+    }
+
+    // Remove all messages after this message
+    const messagesUpToThis = session.messages.slice(0, messageIndex + 1);
+
+    // Create assistant message placeholder for streaming
+    const assistantMessageId = `msg_${Date.now()}_assistant`;
+    const assistantMessage: ChatMessage = {
+      id: assistantMessageId,
+      role: "assistant",
+      content: "",
+      timestamp: new Date().toISOString(),
+      metadata: { isStreaming: true, thinking: "" },
+    };
+
+    // Update session to remove subsequent messages and add streaming placeholder
+    const streamingSession = {
+      ...session,
+      messages: [...messagesUpToThis, assistantMessage],
+      updatedAt: new Date().toISOString(),
+    };
+
+    set(chatSessionsAtom, {
+      ...sessions,
+      [sessionId]: streamingSession,
+    });
+
+    // Track thinking state
+    let isInThinkingBlock = false;
+    let accumulatedThinking = "";
+    let accumulatedContent = "";
+
+    // Create abort controller for this request
+    const abortController = new AbortController();
+    const abortControllers = get(activeAbortControllersAtom);
+    const newControllers = new Map(abortControllers);
+    newControllers.set(sessionId, abortController);
+    set(activeAbortControllersAtom, newControllers);
+
+    try {
+      // Get global instructions and schema cache
+      const globalInstructions = get(globalInstructionsAtom);
+      let schemaCache = get(schemaCacheAtom);
+
+      // Get time context from query interface
+      const timeRange = localStorage.getItem("gigapi_time_range");
+      const selectedDb = localStorage.getItem("gigapi_selected_db");
+      const selectedTable = localStorage.getItem("gigapi_selected_table");
+
+      // Build query context for artifact intelligence
+      const schemaContext = convertSchemaCacheToContext(schemaCache);
+
+      const queryContext: QueryContext = {
+        selectedDatabase: selectedDb || undefined,
+        selectedTable: selectedTable || undefined,
+        globalInstructions,
+        schemaContext: schemaContext || undefined,
+        timeContext: timeRange
+          ? {
+              timeRange: JSON.parse(timeRange),
+              timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+              interval: undefined,
+            }
+          : undefined,
+      };
+
+      // Send to AI with streaming (using messages up to the edited one)
+      await sendToAIStreaming(
+        session.connection,
+        messagesUpToThis,
+        globalInstructions,
+        schemaCache,
+        queryContext,
+        isAgentic || false,
+        (chunk: string) => {
+          // Process chunk for thinking blocks (same logic as sendMessageAtom)
+          if (isInThinkingBlock) {
+            const thinkingEndMatch = chunk.match(/<\/think>/);
+            if (thinkingEndMatch && thinkingEndMatch.index !== undefined) {
+              accumulatedThinking += chunk.substring(0, thinkingEndMatch.index);
+              const afterThinking = chunk.substring(
+                thinkingEndMatch.index + thinkingEndMatch[0].length
+              );
+              isInThinkingBlock = false;
+              if (afterThinking) {
+                processChunkForThinking(afterThinking);
+              }
+            } else {
+              accumulatedThinking += chunk;
+            }
+          } else {
+            processChunkForThinking(chunk);
+          }
+
+          function processChunkForThinking(text: string) {
+            const thinkingStartMatch = text.match(/<think>/);
+            if (thinkingStartMatch && thinkingStartMatch.index !== undefined) {
+              const beforeThinking = text.substring(0, thinkingStartMatch.index);
+              const afterThinking = text.substring(
+                thinkingStartMatch.index + thinkingStartMatch[0].length
+              );
+              accumulatedContent += beforeThinking;
+              isInThinkingBlock = true;
+              if (afterThinking) {
+                if (isInThinkingBlock) {
+                  accumulatedThinking += afterThinking;
+                } else {
+                  processChunkForThinking(afterThinking);
+                }
+              }
+            } else {
+              accumulatedContent += text;
+            }
+          }
+
+          // Update the streaming message with current content
+          const currentSessions = get(chatSessionsAtom);
+          const currentSession = currentSessions[sessionId];
+          const messages = [...currentSession.messages];
+          const lastMessageIndex = messages.length - 1;
+
+          if (
+            lastMessageIndex >= 0 &&
+            messages[lastMessageIndex].id === assistantMessageId
+          ) {
+            messages[lastMessageIndex] = {
+              ...messages[lastMessageIndex],
+              content: accumulatedContent,
+              metadata: {
+                ...messages[lastMessageIndex].metadata,
+                isStreaming: true,
+                thinking: accumulatedThinking,
+              },
+            };
+
+            set(chatSessionsAtom, {
+              ...currentSessions,
+              [sessionId]: {
+                ...currentSession,
+                messages,
+                updatedAt: new Date().toISOString(),
+              },
+            });
+          }
+        },
+        (finalContent: string, artifacts?: any[]) => {
+          // Finalize the message
+          const currentSessions = get(chatSessionsAtom);
+          const currentSession = currentSessions[sessionId];
+          const messages = [...currentSession.messages];
+          const lastMessageIndex = messages.length - 1;
+
+          if (
+            lastMessageIndex >= 0 &&
+            messages[lastMessageIndex].id === assistantMessageId
+          ) {
+            const processedContent = finalContent
+              .replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/g, "")
+              .trim();
+
+            messages[lastMessageIndex] = {
+              ...messages[lastMessageIndex],
+              content: processedContent,
+              metadata: {
+                ...messages[lastMessageIndex].metadata,
+                isStreaming: false,
+                thinking: accumulatedThinking || undefined,
+                artifacts: artifacts,
+              },
+            };
+
+            set(chatSessionsAtom, {
+              ...currentSessions,
+              [sessionId]: {
+                ...currentSession,
+                messages,
+                updatedAt: new Date().toISOString(),
+              },
+            });
+          }
+        },
+        abortController.signal
+      );
+      
+      // Clean up abort controller after successful completion
+      const currentControllers = get(activeAbortControllersAtom);
+      const updatedControllers = new Map(currentControllers);
+      updatedControllers.delete(sessionId);
+      set(activeAbortControllersAtom, updatedControllers);
+    } catch (error) {
+      // Clean up abort controller
+      const currentControllers = get(activeAbortControllersAtom);
+      const updatedControllers = new Map(currentControllers);
+      updatedControllers.delete(sessionId);
+      set(activeAbortControllersAtom, updatedControllers);
+
+      // Check if the error is due to abort
+      if (error instanceof Error && error.name === 'AbortError') {
+        console.log('Message streaming was cancelled');
+        return;
+      }
+
+      // Remove the streaming message and add error message
+      const currentSessions = get(chatSessionsAtom);
+      const currentSession = currentSessions[sessionId];
+      const messages = currentSession.messages.filter(
+        (m) => m.id !== assistantMessageId
+      );
+
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      const errorMessage: ChatMessage = {
+        id: `msg_${Date.now()}_error`,
+        role: "assistant",
+        content: `I encountered an error: ${errorMsg}`,
+        timestamp: new Date().toISOString(),
+        metadata: {
+          error: errorMsg,
+        },
+      };
+
+      set(chatSessionsAtom, {
+        ...currentSessions,
+        [sessionId]: {
+          ...currentSession,
+          messages: [...messages, errorMessage],
+          updatedAt: new Date().toISOString(),
+        },
+      });
+
+      throw error;
+    }
+  }
+);
 
 // Rename session
 export const renameSessionAtom = atom(
@@ -806,7 +1204,8 @@ async function sendToAIStreaming(
   queryContext: QueryContext,
   isAgentic: boolean = false,
   onChunk: (chunk: string) => void,
-  onComplete: (finalContent: string, artifacts?: any[]) => void
+  onComplete: (finalContent: string, artifacts?: any[]) => void,
+  abortSignal?: AbortSignal
 ): Promise<void> {
   // Build system messages (same as sendToAI)
   const systemMessages = [];
@@ -1067,6 +1466,7 @@ Example: When user asks "show me sales by month", respond with:
     method: "POST",
     headers,
     body: JSON.stringify(requestBody),
+    signal: abortSignal,
   });
 
   if (!response.ok) {

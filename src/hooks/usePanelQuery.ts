@@ -180,6 +180,7 @@ export function usePanelQuery({
           },
           {
             signal: abortControllerRef.current!.signal,
+            responseType: 'text', // Ensure we get raw text for NDJSON parsing
           }
         );
 

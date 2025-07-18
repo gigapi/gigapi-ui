@@ -1,6 +1,12 @@
 /**
- * Dashboard-specific UnifiedSelector that uses cached data when available
- * Falls back to API calls only when cache is empty
+ * @deprecated This component has been replaced by UnifiedSchemaSelector.
+ * Please use UnifiedSchemaSelector from @/components/shared/UnifiedSchemaSelector instead.
+ * 
+ * Migration guide:
+ * - Use `dataSource="cache"` prop for dashboard context
+ * - All other props remain the same
+ * 
+ * This component uses cached data when available and falls back to API calls only when cache is empty.
  */
 import { useMemo } from "react";
 import {

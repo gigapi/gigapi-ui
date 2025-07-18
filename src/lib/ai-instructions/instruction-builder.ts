@@ -15,6 +15,7 @@ import {
   CONTEXT_PRESERVATION_INSTRUCTIONS,
   AGENTIC_CONTEXT_PRESERVATION,
 } from "./context-preservation-instructions";
+import { DUCKDB_INSTRUCTIONS, DUCKDB_EXAMPLES } from "./duckdb-instructions";
 import { getTemplateSuggestions, type QueryTemplate } from "../query-templates";
 
 export interface InstructionOptions {
@@ -68,6 +69,10 @@ export class InstructionBuilder {
     // SQL instructions for query generation
     if (includeSQL) {
       this.instructions.push(SQL_INSTRUCTIONS);
+      // Always include DuckDB instructions when SQL is included
+      this.instructions.push(DUCKDB_INSTRUCTIONS);
+      // Add examples for better understanding
+      this.instructions.push(DUCKDB_EXAMPLES);
     }
 
     // Chart instructions for visualizations

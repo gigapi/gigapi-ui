@@ -204,6 +204,7 @@ export interface PanelLink {
 export type PanelType =
   | "timeseries"
   | "stat"
+  | "gauge"
   | "table"
   | "bar"
   | "line"

@@ -234,9 +234,10 @@ export default function ArtifactRenderer({
     endOperation,
   ]);
 
-  // Auto-execute on mount
+  // Auto-execute on mount only for non-query/chart artifacts
+  // Query and chart artifacts are handled by ChatArtifactEnhanced
   useEffect(() => {
-    if (query && database) {
+    if (query && database && artifact.type !== "query" && artifact.type !== "chart") {
       executeQuery();
     }
   }, []);

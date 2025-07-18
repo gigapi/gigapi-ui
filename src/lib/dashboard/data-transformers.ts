@@ -83,6 +83,9 @@ export function transformDataForPanel(
     case "stat":
       return transformForStat(records, config);
 
+    case "gauge":
+      return transformForStat(records, config); // Gauge uses same transformation as stat
+
     case "table":
       return transformForTable(records);
 

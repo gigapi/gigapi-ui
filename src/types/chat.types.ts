@@ -42,6 +42,9 @@ export interface ChatMessage {
     isStreaming?: boolean;
     thinking?: string; // Hidden thinking/reasoning content
     isAgentic?: boolean; // Whether this message was sent in agentic mode
+    edited?: boolean; // Whether this message has been edited
+    editedAt?: string; // When the message was edited
+    wasCancelled?: boolean; // Whether this message was cancelled
   };
 }
 

@@ -31,7 +31,7 @@ import {
   cacheProgressAtom,
   openCommandPaletteAtom,
 } from "@/atoms";
-import { UnifiedSelector } from "@/components/shared/DbTableTimeSelector";
+import { UnifiedSchemaSelector } from "@/components/shared/UnifiedSchemaSelector";
 import { toast } from "sonner";
 
 import {
@@ -170,9 +170,9 @@ export default function AppHeader({
           <>
             {/* Desktop Database Controls */}
             <div className="hidden md:flex items-center gap-3">
-              <UnifiedSelector
+              <UnifiedSchemaSelector
                 type="database"
-                context="query"
+                dataSource="atoms"
                 style="select"
                 value={selectedDb || ""}
                 onChange={setSelectedDb}
@@ -264,9 +264,9 @@ export default function AppHeader({
                   <div className="space-y-4">
                     <div className="space-y-2">
                       <h4 className="font-medium">Database Connection</h4>
-                      <UnifiedSelector
+                      <UnifiedSchemaSelector
                         type="database"
-                        context="query"
+                        dataSource="atoms"
                         style="select"
                         value={selectedDb || ""}
                         onChange={setSelectedDb}

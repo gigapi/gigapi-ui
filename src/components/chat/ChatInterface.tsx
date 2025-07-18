@@ -6,6 +6,7 @@ import rehypeKatex from "rehype-katex";
 import rehypeHighlight from "rehype-highlight";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Bot,
   Copy,
@@ -14,10 +15,19 @@ import {
   ChevronDown,
   ChevronUp,
   Check,
+  Pencil,
+  StopCircle,
 } from "lucide-react";
 import { toast } from "sonner";
-import { useSetAtom } from "jotai";
-import { updateSessionConnectionAtom } from "@/atoms/chat-atoms";
+import { useSetAtom, useAtomValue, useAtom } from "jotai";
+import {
+  updateSessionConnectionAtom,
+  cancelMessageAtom,
+  activeAbortControllersAtom,
+  editingMessageIdAtom,
+  editMessageAtom,
+  regenerateFromMessageAtom,
+} from "@/atoms/chat-atoms";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import ArtifactRendererWrapper from "./artifacts/ArtifactRendererWrapper";
 import LazyArtifact from "./artifacts/LazyArtifact";
@@ -26,6 +36,12 @@ import type { ChatSession, ChatMessage } from "@/types/chat.types";
 import "katex/dist/katex.min.css";
 import "highlight.js/styles/github-dark.css";
 import Logo from "/logo.svg";
+import {
+  Tooltip,
+  TooltipProvider,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 interface ChatInterfaceProps {
   session: ChatSession;
@@ -37,14 +53,22 @@ export default function ChatInterface({
   onSendMessage,
 }: ChatInterfaceProps) {
   const [inputMessage, setInputMessage] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
   const [isAgentic, setIsAgentic] = useState(false);
   const [expandedThinking, setExpandedThinking] = useState<Set<string>>(
     new Set()
   );
   const updateSessionConnection = useSetAtom(updateSessionConnectionAtom);
+  const cancelMessage = useSetAtom(cancelMessageAtom);
+  const activeAbortControllers = useAtomValue(activeAbortControllersAtom);
+  const [editingMessageId, setEditingMessageId] = useAtom(editingMessageIdAtom);
+  const editMessage = useSetAtom(editMessageAtom);
+  const regenerateFromMessage = useSetAtom(regenerateFromMessageAtom);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
+  const [editingContent, setEditingContent] = useState("");
+
+  // Derive loading state from active abort controllers
+  const isLoading = activeAbortControllers.has(session.id);
 
   // Virtual scrolling setup
   const messageEstimateSize = useMemo(() => {
@@ -101,7 +125,6 @@ export default function ChatInterface({
 
     const messageToSend = inputMessage.trim();
     setInputMessage("");
-    setIsLoading(true);
 
     try {
       await onSendMessage(messageToSend, isAgentic);
@@ -109,9 +132,53 @@ export default function ChatInterface({
       setInputMessage(messageToSend); // Restore message on error
       toast.error("Failed to send message");
       console.error("Failed to send message:", err);
-    } finally {
-      setIsLoading(false);
     }
+  };
+
+  const handleCancelMessage = async () => {
+    try {
+      const wasCancelled = await cancelMessage(session.id);
+      if (wasCancelled) {
+        toast.success("Message cancelled");
+      }
+    } catch (err) {
+      console.error("Failed to cancel message:", err);
+    }
+  };
+
+  const handleEditMessage = (messageId: string, content: string) => {
+    setEditingMessageId(messageId);
+    setEditingContent(content);
+  };
+
+  const handleSaveEdit = async (messageId: string) => {
+    try {
+      await editMessage({
+        sessionId: session.id,
+        messageId,
+        newContent: editingContent,
+      });
+
+      // Automatically regenerate response
+      await regenerateFromMessage({
+        sessionId: session.id,
+        messageId,
+        isAgentic,
+      });
+
+      toast.success("Message edited and response regenerated");
+    } catch (err) {
+      toast.error("Failed to edit message");
+      console.error("Failed to edit message:", err);
+    } finally {
+      setEditingMessageId(null);
+      setEditingContent("");
+    }
+  };
+
+  const handleCancelEdit = () => {
+    setEditingMessageId(null);
+    setEditingContent("");
   };
 
   const [copiedCode, setCopiedCode] = useState<string>("");
@@ -158,17 +225,71 @@ export default function ChatInterface({
           <div className="flex-1 min-w-0">
             <div>
               {/* Role label */}
-              <div className="text-xs font-semibold text-foreground/70 mb-1">
-                {isUser ? "You" : "Assistant"}
+              <div className="flex items-center gap-2 text-xs font-semibold text-foreground/70 mb-1">
+                <span>{isUser ? "You" : "Assistant"}</span>
+                {message.metadata?.edited && (
+                  <span className="text-xs font-normal text-muted-foreground">
+                    (edited)
+                  </span>
+                )}
               </div>
 
               {/* Message content */}
               <div className="">
                 <div className="text-[15px] leading-[1.8]">
                   {isUser ? (
-                    <p className="whitespace-pre-wrap text-foreground/90">
-                      {message.content}
-                    </p>
+                    editingMessageId === message.id ? (
+                      <div className="space-y-2">
+                        <Textarea
+                          value={editingContent}
+                          onChange={(e) => setEditingContent(e.target.value)}
+                          className="min-h-[80px] text-[15px] leading-[1.8]"
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" && !e.shiftKey) {
+                              e.preventDefault();
+                              handleSaveEdit(message.id);
+                            } else if (e.key === "Escape") {
+                              handleCancelEdit();
+                            }
+                          }}
+                          autoFocus
+                        />
+                        <div className="flex gap-2">
+                          <Button
+                            size="sm"
+                            onClick={() => handleSaveEdit(message.id)}
+                            disabled={!editingContent.trim()}
+                          >
+                            Save & Regenerate
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={handleCancelEdit}
+                          >
+                            Cancel
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="group/message relative">
+                        <p className="whitespace-pre-wrap text-foreground/90">
+                          {message.content}
+                        </p>
+                        {!isLoading && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="absolute -right-8 top-0 opacity-0 group-hover/message:opacity-100 transition-opacity h-6 w-6 p-0"
+                            onClick={() =>
+                              handleEditMessage(message.id, message.content)
+                            }
+                          >
+                            <Pencil className="w-3 h-3" />
+                          </Button>
+                        )}
+                      </div>
+                    )
                   ) : (
                     <div className="prose prose-sm dark:prose-invert max-w-none prose-p:text-[15px] prose-p:leading-[1.8] prose-p:text-foreground/90 prose-headings:text-foreground prose-strong:text-foreground prose-code:text-foreground prose-pre:bg-transparent prose-pre:p-0 prose-table:text-sm prose-td:p-2 prose-th:p-2 prose-th:text-left prose-th:font-semibold relative">
                       {message.content ? (
@@ -206,18 +327,21 @@ export default function ChatInterface({
                                 const isInline = !className || !match;
                                 // Extract text content from children properly
                                 const extractText = (node: any): string => {
-                                  if (typeof node === 'string') return node;
-                                  if (Array.isArray(node)) return node.map(extractText).join('');
-                                  if (node?.props?.children) return extractText(node.props.children);
+                                  if (typeof node === "string") return node;
+                                  if (Array.isArray(node))
+                                    return node.map(extractText).join("");
+                                  if (node?.props?.children)
+                                    return extractText(node.props.children);
                                   return String(node);
                                 };
-                                const codeString = extractText(children).replace(
-                                  /\n$/,
-                                  ""
-                                );
+                                const codeString = extractText(
+                                  children
+                                ).replace(/\n$/, "");
                                 const codeId = `code-${
                                   message.id
-                                }-${Math.random().toString(36).substring(2, 11)}`;
+                                }-${Math.random()
+                                  .toString(36)
+                                  .substring(2, 11)}`;
 
                                 return !isInline ? (
                                   <div className="my-4 relative group">
@@ -334,6 +458,27 @@ export default function ChatInterface({
                 </div>
               </div>
 
+              {/* Cancel button for streaming messages */}
+              {isStreaming &&
+                !isUser &&
+                activeAbortControllers.has(session.id) && (
+                  <div
+                    className="cursor-pointer w-8 h-8 border-1 flex items-center justify-center p-1 rounded-full mt-2"
+                    onClick={handleCancelMessage}
+                  >
+                    <TooltipProvider delayDuration={0}>
+                      <Tooltip>
+                        <TooltipTrigger>
+                          <StopCircle className="text-red-500 w-6 h-6" />
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p className="text-xs">Cancel Message</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  </div>
+                )}
+
               {/* Thinking toggle */}
               {message.metadata?.thinking && (
                 <div className="mt-4">
@@ -380,6 +525,7 @@ export default function ChatInterface({
                   <LazyArtifact
                     artifactId={artifact.id}
                     artifactType={artifact.type}
+                    artifactContent={JSON.stringify(artifact.data)}
                     estimatedHeight={artifact.type === "table" ? 600 : 400}
                   >
                     <ArtifactRendererWrapper

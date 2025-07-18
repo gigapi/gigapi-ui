@@ -510,28 +510,22 @@ export default function ChatArtifactEnhanced({
     session.id,
   ]);
 
-  // Auto-execute on mount only if no persisted data
+  // Use cached data if available, but don't auto-execute
   useEffect(() => {
-    if (query && database && !persistedData) {
-      log(
-        artifact.id,
-        "info",
-        "Auto-executing query on mount (no cached data)"
-      );
-      executeQuery();
-    } else if (persistedData) {
+    if (persistedData) {
       log(artifact.id, "info", "Using cached data from previous execution", {
         rowCount: persistedData.length,
         executionTime: persistedExecutionTime,
       });
+    } else {
+      log(artifact.id, "info", "No cached data available - click play to execute query");
     }
   }, []);
 
-  // Re-execute when time range changes
+  // Don't auto-execute when time range changes - let user control execution
   useEffect(() => {
     if (query && database && data.length > 0) {
-      log(artifact.id, "info", "Re-executing query due to time range change");
-      executeQuery();
+      log(artifact.id, "info", "Time range changed - click play to re-execute with new range");
     }
   }, [selectedTimeRange]);
 
@@ -1087,11 +1081,34 @@ export default function ChatArtifactEnhanced({
               </div>
             ) : data.length === 0 ? (
               <div className="flex items-center justify-center h-full">
-                <div className="text-center">
-                  <BarChart3 className="w-8 h-8 sm:w-10 sm:h-10 text-muted-foreground mx-auto mb-4" />
-                  <p className="text-sm text-muted-foreground">
-                    No data to display
-                  </p>
+                <div className="text-center items-center mt-12">
+                  {!persistedData && !executionTime ? (
+                    <>
+                      <Play className="w-8 h-8 sm:w-10 sm:h-10 text-muted-foreground mx-auto mb-4" />
+                      <p className="text-sm text-muted-foreground mb-2">
+                        Query not executed yet
+                      </p>
+                      <p className="text-xs text-muted-foreground mb-4">
+                        Click the play button above to run this query
+                      </p>
+                      <Button
+                        variant="default"
+                        size="sm"
+                        onClick={executeQuery}
+                        disabled={isLoading}
+                      >
+                        <Play className="w-3 h-3 mr-2" />
+                        Execute Query
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <BarChart3 className="w-8 h-8 sm:w-10 sm:h-10 text-muted-foreground mx-auto mb-4" />
+                      <p className="text-sm text-muted-foreground">
+                        No data returned
+                      </p>
+                    </>
+                  )}
                 </div>
               </div>
             ) : isChartArtifact && panelConfig ? (
