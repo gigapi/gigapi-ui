@@ -10,7 +10,6 @@ const packageJson = JSON.parse(
 )
 
 export default defineConfig({
-  base: '/ui/',
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {

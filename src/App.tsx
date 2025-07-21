@@ -68,7 +68,7 @@ function AppInitializer() {
 // Main app with router - only shown when connected
 function AppWithRouter() {
   return (
-    <Router basename="/ui/">
+    <Router>
       <SidebarProvider
         style={
           {
