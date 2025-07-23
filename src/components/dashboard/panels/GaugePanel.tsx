@@ -12,95 +12,151 @@ function SingleGaugePanel({ config, data }: PanelProps) {
   const gaugeData = useMemo(() => {
     if (!data || data.length === 0) return null;
 
-    // Use field mapping if available
-    const fieldMapping = config.fieldMapping;
-    let valueField: string;
-
-    if (fieldMapping?.yField) {
-      valueField = fieldMapping.yField;
-    } else {
-      // Auto-detect numeric field
-      const firstRecord = data[0];
-      const numericFields = Object.keys(firstRecord).filter((key) => {
-        const value = firstRecord[key];
-        return (
-          typeof value === "number" ||
-          (typeof value === "string" && !isNaN(Number(value)))
-        );
-      });
-
-      if (numericFields.length === 0) return null;
-      valueField = numericFields[0];
-    }
-
-    // Extract values for calculations
-    const values: number[] = [];
-    for (const record of data) {
-      const value = parseFloat(String(record[valueField]));
-      if (!isNaN(value)) {
-        values.push(value);
-      }
-    }
-
-    if (values.length === 0) return null;
-
-    const current = values[values.length - 1];
-    const min = Math.min(...values);
-    const max = Math.max(...values);
-    const avg = values.reduce((sum, val) => sum + val, 0) / values.length;
-
-    // Determine which value to display based on stat mode
-    const statMode = config.options?.stat?.mode || "current";
+    // Check if data has standard chart format with x, y properties
+    const hasChartFormat = data.length > 0 && data[0].hasOwnProperty('y');
+    
     let displayValue: number;
-
-    switch (statMode) {
-      case "average":
-        displayValue = avg;
-        break;
-      case "min":
-        displayValue = min;
-        break;
-      case "max":
-        displayValue = max;
-        break;
-      case "current":
-      default:
-        displayValue = current;
-        break;
-    }
-
-    // Get thresholds from field config
-    const fieldConfig = config.fieldConfig?.defaults;
-    let minThreshold = 0;
-    let maxThreshold = 100;
-    let thresholds: Array<{ value: number; color: string }> = [];
-
-    if (fieldConfig?.thresholds?.steps) {
-      const steps = fieldConfig.thresholds.steps;
-      if (steps.length >= 2) {
-        minThreshold = steps[0].value ?? 0;
-        maxThreshold = steps[steps.length - 1].value ?? 100;
-
-        // Build color ranges for the gauge
-        thresholds = steps.map((step, index) => ({
-          value:
-            ((step.value ?? 0) - minThreshold) / (maxThreshold - minThreshold),
-          color: step.color || getDefaultColor(index),
-        }));
+    let fieldName: string = "";
+    
+    if (hasChartFormat && typeof data[0].y === 'number') {
+      // Handle pre-processed data (from MultiGaugePanel or stat data)
+      const values = data.map(d => d.y).filter(v => typeof v === 'number');
+      if (values.length === 0) return null;
+      
+      // Use config title if available, otherwise use series name
+      fieldName = config.title || (data[0].series && data[0].series !== 'stats' ? data[0].series : config.fieldMapping?.yField || "value");
+      
+      // Calculate display value based on stat mode
+      const statMode = config.options?.stat?.mode || "current";
+      
+      if (data.length === 1) {
+        // Single value
+        displayValue = values[0];
+      } else {
+        // Multiple values - calculate based on stat mode
+        const current = values[values.length - 1];
+        const min = Math.min(...values);
+        const max = Math.max(...values);
+        const avg = values.reduce((sum, val) => sum + val, 0) / values.length;
+        
+        switch (statMode) {
+          case "average":
+            displayValue = avg;
+            break;
+          case "min":
+            displayValue = min;
+            break;
+          case "max":
+            displayValue = max;
+            break;
+          case "current":
+          default:
+            displayValue = current;
+            break;
+        }
       }
     } else {
-      // Auto-calculate range based on data
-      const range = max - min;
-      minThreshold = min - range * 0.1;
-      maxThreshold = max + range * 0.1;
+      // Handle regular data
+      const fieldMapping = config.fieldMapping;
+      let valueField: string;
+
+      if (fieldMapping?.yField) {
+        valueField = fieldMapping.yField;
+      } else {
+        // Auto-detect numeric field
+        const firstRecord = data[0];
+        const numericFields = Object.keys(firstRecord).filter((key) => {
+          const value = firstRecord[key];
+          return (
+            typeof value === "number" ||
+            (typeof value === "string" && !isNaN(Number(value)))
+          );
+        });
+
+        if (numericFields.length === 0) return null;
+        valueField = numericFields[0];
+      }
+
+      // Extract values for calculations
+      const values: number[] = [];
+      for (const record of data) {
+        const value = parseFloat(String(record[valueField]));
+        if (!isNaN(value)) {
+          values.push(value);
+        }
+      }
+
+      if (values.length === 0) return null;
+
+      const current = values[values.length - 1];
+      const min = Math.min(...values);
+      const max = Math.max(...values);
+      const avg = values.reduce((sum, val) => sum + val, 0) / values.length;
+
+      // Determine which value to display based on stat mode
+      const statMode = config.options?.stat?.mode || "current";
+
+      switch (statMode) {
+        case "average":
+          displayValue = avg;
+          break;
+        case "min":
+          displayValue = min;
+          break;
+        case "max":
+          displayValue = max;
+          break;
+        case "current":
+        default:
+          displayValue = current;
+          break;
+      }
+      
+      fieldName = valueField;
+    }
+
+    // Get field config for unit and decimals
+    const fieldConfig = config.fieldConfig?.defaults;
+    
+    // Always use 0-100 scale for simplicity
+    const minValue = 0;
+    const maxValue = 100;
+    
+    // Calculate the actual data range for mapping
+    let dataMin = 0;
+    let dataMax = 100;
+    
+    if (fieldConfig?.min !== undefined && fieldConfig?.max !== undefined) {
+      dataMin = fieldConfig.min;
+      dataMax = fieldConfig.max;
+    } else {
+      // Auto-calculate based on the display value
+      // Always include 0 in the range for better visualization
+      if (displayValue < 0) {
+        dataMin = displayValue * 1.2;
+        dataMax = 0;
+      } else if (displayValue <= 1) {
+        dataMin = 0;
+        dataMax = 1;
+      } else if (displayValue <= 100) {
+        dataMin = 0;
+        dataMax = 100;
+      } else if (displayValue <= 1000) {
+        dataMin = 0;
+        dataMax = Math.ceil(displayValue / 100) * 100; // Round up to nearest 100
+      } else {
+        dataMin = 0;
+        dataMax = Math.ceil(displayValue / 1000) * 1000; // Round up to nearest 1000
+      }
     }
 
     return {
       value: displayValue,
-      min: minThreshold,
-      max: maxThreshold,
-      thresholds,
-      fieldName: valueField,
+      min: minValue,
+      max: maxValue,
+      dataMin: dataMin,
+      dataMax: dataMax,
+      fieldName: fieldName,
       unit: fieldConfig?.unit || "",
       decimals: fieldConfig?.decimals ?? 2,
     };
@@ -109,76 +165,93 @@ function SingleGaugePanel({ config, data }: PanelProps) {
   const chartOptions = useMemo(() => {
     if (!gaugeData) return {};
 
-    const normalizedValue =
-      ((gaugeData.value - gaugeData.min) / (gaugeData.max - gaugeData.min)) *
-      100;
+    // Map the actual value to 0-100 range
+    const normalizedValue = ((gaugeData.value - gaugeData.dataMin) / (gaugeData.dataMax - gaugeData.dataMin)) * 100;
+    
+    // Clamp to 0-100
+    const clampedValue = Math.max(0, Math.min(100, normalizedValue));
 
-    // Modern gradient colors that work in both themes
+    // Simple color logic based on percentage
     let progressGradient;
-
-    if (gaugeData.thresholds.length > 0) {
-      // Use configured thresholds
-      let currentColor = gaugeData.thresholds[0].color;
-      for (let i = gaugeData.thresholds.length - 1; i >= 0; i--) {
-        if (normalizedValue / 100 >= gaugeData.thresholds[i].value) {
-          currentColor = gaugeData.thresholds[i].color;
-          break;
-        }
-      }
-      progressGradient = currentColor;
+    
+    if (clampedValue < 33) {
+      // Green for low values
+      progressGradient = {
+        type: "linear",
+        x: 0,
+        y: 0,
+        x2: 0,
+        y2: 1,
+        colorStops: [
+          { offset: 0, color: "#10b981" },
+          { offset: 1, color: "#059669" },
+        ],
+      };
+    } else if (clampedValue < 66) {
+      // Yellow/amber for medium values
+      progressGradient = {
+        type: "linear",
+        x: 0,
+        y: 0,
+        x2: 0,
+        y2: 1,
+        colorStops: [
+          { offset: 0, color: "#f59e0b" },
+          { offset: 1, color: "#d97706" },
+        ],
+      };
     } else {
-      // Beautiful gradients based on value
-      if (normalizedValue >= 80) {
-        progressGradient = {
-          type: "linear",
-          x: 0,
-          y: 0,
-          x2: 1,
-          y2: 0,
-          colorStops: [
-            { offset: 0, color: "#ef4444" },
-            { offset: 1, color: "#dc2626" },
-          ],
-        };
-      } else if (normalizedValue >= 60) {
-        progressGradient = {
-          type: "linear",
-          x: 0,
-          y: 0,
-          x2: 1,
-          y2: 0,
-          colorStops: [
-            { offset: 0, color: "#f59e0b" },
-            { offset: 1, color: "#d97706" },
-          ],
-        };
-      } else {
-        progressGradient = {
-          type: "linear",
-          x: 0,
-          y: 0,
-          x2: 1,
-          y2: 0,
-          colorStops: [
-            { offset: 0, color: "#10b981" },
-            { offset: 1, color: "#059669" },
-          ],
-        };
-      }
+      // Red for high values
+      progressGradient = {
+        type: "linear",
+        x: 0,
+        y: 0,
+        x2: 0,
+        y2: 1,
+        colorStops: [
+          { offset: 0, color: "#ef4444" },
+          { offset: 1, color: "#dc2626" },
+        ],
+      };
     }
 
-    const gaugeMin = gaugeData.min;
-    const gaugeMax = gaugeData.max;
     const gaugeDecimals = gaugeData.decimals;
     const gaugeUnit = gaugeData.unit;
 
-    // Use theme CSS variables - these automatically adapt to light/dark mode
+    // Use theme CSS variables with better visibility
     const textColor = "hsl(var(--foreground))";
     const subtextColor = "hsl(var(--muted-foreground))";
-    const trackColor = "hsl(var(--muted))";
+    const trackColor = "hsl(var(--muted) / 0.5)"; // More visible in both themes
 
     return {
       backgroundColor: "transparent",
+      tooltip: {
+        trigger: "item",
+        formatter: function() {
+          const value = gaugeData.value;
+          let formattedValue: string;
+          
+          if (Math.abs(value) >= 1e9) {
+            formattedValue = (value / 1e9).toFixed(gaugeDecimals) + "B";
+          } else if (Math.abs(value) >= 1e6) {
+            formattedValue = (value / 1e6).toFixed(gaugeDecimals) + "M";
+          } else if (Math.abs(value) >= 1e3) {
+            formattedValue = (value / 1e3).toFixed(gaugeDecimals) + "k";
+          } else {
+            formattedValue = value.toFixed(gaugeDecimals);
+          }
+          
+          return `<div style="padding: 8px;">
+            <div style="font-weight: 600; margin-bottom: 4px;">${formatFieldName(gaugeData.fieldName)}</div>
+            <div style="font-size: 20px; font-weight: 300;">${formattedValue}${gaugeUnit ? ' ' + gaugeUnit : ''}</div>
+          </div>`;
+        },
+        backgroundColor: "rgba(0, 0, 0, 0.8)",
+        borderColor: "transparent",
+        textStyle: {
+          color: "#fff",
+        },
+      },
       series: [
         {
           type: "gauge",
@@ -186,8 +259,8 @@ function SingleGaugePanel({ config, data }: PanelProps) {
           endAngle: -20,
           min: 0,
           max: 100,
-          center: ["50%", "60%"],
-          radius: "85%",
+          center: ["50%", "55%"],
+          radius: "80%",
           axisLine: {
             roundCap: true,
             lineStyle: {
@@ -231,36 +304,33 @@ function SingleGaugePanel({ config, data }: PanelProps) {
             color: subtextColor,
             fontSize: 11,
             formatter: function (value: number) {
-              const actualValue =
-                gaugeMin + (value / 100) * (gaugeMax - gaugeMin);
-              if (Math.abs(actualValue) >= 1000) {
-                return Math.round(actualValue / 1000) + "k";
-              }
-              return Math.round(actualValue).toString();
+              // Show 0-100 on the gauge
+              return value.toString();
             },
           },
           pointer: {
             show: true,
-            width: 8,
-            length: "60%",
-            offsetCenter: [0, "0%"],
+            width: 6,
+            length: "70%",
+            offsetCenter: [0, "-5%"],
             itemStyle: {
-              color: "auto",
-              borderColor: "#000",
-              borderWidth: 0,
-              shadowBlur: 5,
-              shadowColor: "rgba(0, 0, 0, 0.2)",
+              color: progressGradient.colorStops[0].color,
+              borderColor: progressGradient.colorStops[0].color,
+              borderWidth: 1,
+              shadowBlur: 8,
+              shadowColor: "rgba(0, 0, 0, 0.3)",
             },
           },
           anchor: {
             show: true,
             showAbove: true,
-            size: 25,
+            size: 20,
             itemStyle: {
-              borderWidth: 10,
+              color: progressGradient.colorStops[0].color,
+              borderWidth: 8,
               borderColor: "hsl(var(--background))",
-              shadowBlur: 8,
-              shadowColor: "rgba(0, 0, 0, 0.1)",
+              shadowBlur: 10,
+              shadowColor: "rgba(0, 0, 0, 0.2)",
             },
           },
           title: {
@@ -268,10 +338,10 @@ function SingleGaugePanel({ config, data }: PanelProps) {
           },
           detail: {
             valueAnimation: true,
-            offsetCenter: [0, "-10%"],
-            formatter: function (value: number) {
-              const actualValue =
-                gaugeMin + (value / 100) * (gaugeMax - gaugeMin);
+            offsetCenter: [0, "0%"],
+            formatter: function () {
+              // Always show the actual value (not the normalized percentage)
+              const actualValue = gaugeData.value;
               let formattedValue: string;
 
               if (Math.abs(actualValue) >= 1e9) {
@@ -307,7 +377,7 @@ function SingleGaugePanel({ config, data }: PanelProps) {
           },
           data: [
             {
-              value: normalizedValue,
+              value: clampedValue,
             },
           ],
         },
@@ -316,11 +386,11 @@ function SingleGaugePanel({ config, data }: PanelProps) {
         {
           type: "text",
           left: "center",
-          bottom: "15%",
+          bottom: "20%",
           style: {
-            text: gaugeData.fieldName,
+            text: formatFieldName(gaugeData.fieldName),
             textAlign: "center",
-            fontSize: 14,
+            fontSize: 16,
             fontWeight: 500,
             fill: subtextColor,
             fontFamily: "'Inter', system-ui, -apple-system, sans-serif",
@@ -403,6 +473,34 @@ function MultiGaugePanel({ config, data }: PanelProps) {
   const groupedGauges = useMemo(() => {
     if (!data || data.length === 0) return [];
 
+    // Check if we have a single record with multiple numeric fields
+    if (data.length === 1) {
+      const firstRecord = data[0];
+      const fields = Object.keys(firstRecord);
+      const numericFields = fields.filter((field) => {
+        if (field === 'x' || field === 'y' || field === 'series') return false;
+        const value = firstRecord[field];
+        return (
+          typeof value === "number" ||
+          (typeof value === "string" && !isNaN(Number(value)))
+        );
+      });
+      
+      // If we have multiple numeric fields, create a gauge for each
+      if (numericFields.length > 1) {
+        return numericFields.map(field => {
+          // Create a single-element array with just this field's data
+          const fieldData = [{
+            [field]: firstRecord[field],
+            x: firstRecord.x,
+            y: firstRecord[field],
+            series: field
+          }];
+          return [field, fieldData] as [string, any[]];
+        });
+      }
+    }
+
     // Check if we have a specific group by field
     const groupByField = config.fieldMapping?.seriesField;
 
@@ -449,20 +547,6 @@ function MultiGaugePanel({ config, data }: PanelProps) {
       });
     }
 
-    // If no grouping field found, show single gauge with field name
-    // This handles simple queries without GROUP BY
-    if (data.length === 1) {
-      const valueField = config.fieldMapping?.yField || 
-        fields.find((field) => {
-          const value = firstRecord[field];
-          return (
-            typeof value === "number" ||
-            (typeof value === "string" && !isNaN(Number(value)))
-          );
-        });
-      return [[valueField || 'Value', data]];
-    }
-    
     // Fallback to series-based grouping
     const groups = new Map<string, any[]>();
     data.forEach((d) => {
@@ -501,7 +585,7 @@ function MultiGaugePanel({ config, data }: PanelProps) {
           >
             <div className="text-center mb-2">
               <div className="text-sm font-medium text-muted-foreground">
-                {label}
+                {formatFieldName(label)}
               </div>
             </div>
             <div className="h-[calc(100%-2rem)]">
@@ -522,6 +606,33 @@ function GaugePanel({ config, data }: PanelProps) {
   // Check if we have multiple series (grouped data)
   const hasMultipleSeries = useMemo(() => {
     if (!data || data.length === 0) return false;
+
+    // Check if this is stat data (single gauge)
+    const isStatData = data.length > 0 && data[0].x && typeof data[0].x === "string" && 
+      ["current", "average", "min", "max"].includes(data[0].x);
+    
+    if (isStatData) {
+      return false; // Stat data should show single gauge
+    }
+
+    // Check if we have a single record with multiple numeric fields
+    if (data.length === 1) {
+      const firstRecord = data[0];
+      const fields = Object.keys(firstRecord);
+      const numericFields = fields.filter((field) => {
+        if (field === 'x' || field === 'y' || field === 'series') return false;
+        const value = firstRecord[field];
+        return (
+          typeof value === "number" ||
+          (typeof value === "string" && !isNaN(Number(value)))
+        );
+      });
+      
+      // If we have more than one numeric field, show multiple gauges
+      if (numericFields.length > 1) {
+        return true;
+      }
+    }
 
     // Check if we have a group by field in the field mapping
     const groupByField = config.fieldMapping?.seriesField;
@@ -585,6 +696,47 @@ function getDefaultColor(index: number): string {
     "#14b8a6", // Teal
   ];
   return colors[index % colors.length];
+}
+
+function adjustColorBrightness(color: string, percent: number): string {
+  // Convert hex to RGB
+  const num = parseInt(color.replace("#", ""), 16);
+  const amt = Math.round(2.55 * percent);
+  const R = (num >> 16) + amt;
+  const G = ((num >> 8) & 0x00ff) + amt;
+  const B = (num & 0x0000ff) + amt;
+  
+  // Ensure values are within valid range
+  const clamp = (val: number) => Math.max(0, Math.min(255, val));
+  
+  return (
+    "#" +
+    (
+      0x1000000 +
+      clamp(R) * 0x10000 +
+      clamp(G) * 0x100 +
+      clamp(B)
+    )
+      .toString(16)
+      .slice(1)
+  );
+}
+
+function formatFieldName(fieldName: string): string {
+  // Handle function expressions like avg(temperature), sum(sales), etc.
+  const functionMatch = fieldName.match(/^(\w+)\((.+)\)$/);
+  if (functionMatch) {
+    const [, func, field] = functionMatch;
+    // Capitalize function name and format field
+    const formattedFunc = func.charAt(0).toUpperCase() + func.slice(1);
+    const formattedField = field.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+    return `${formattedFunc} ${formattedField}`;
+  }
+  
+  // Handle regular field names
+  return fieldName
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, l => l.toUpperCase());
 }
 
 export default withPanelWrapper(GaugePanel);

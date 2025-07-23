@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useRef } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import {
   BarChart3,
@@ -11,6 +11,7 @@ import {
   Eye,
   Info,
   X,
+  Upload,
 } from "lucide-react";
 import { toast } from "sonner";
 import type {
@@ -167,8 +168,9 @@ export default function DashboardList() {
   }>({ isOpen: false, dashboard: null });
   const [isCreateSheetOpen, setIsCreateSheetOpen] = useState(false);
 
-  const { dashboardList, loading, deleteDashboard } = useDashboard();
+  const { dashboardList, loading, deleteDashboard, saveDashboard } = useDashboard();
   const navigate = useNavigate();
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Use dashboard list from atoms
   const dashboards = dashboardList || [];
@@ -237,7 +239,7 @@ export default function DashboardList() {
       try {
         const storage = getStorageImplementation();
         const exportData = await storage.exportDashboard(dashboardId);
-        const blob = new Blob([exportData], { type: "application/x-ndjson" });
+        const blob = new Blob([exportData], { type: "application/json" });
         const url = URL.createObjectURL(blob);
         const link = document.createElement("a");
         link.href = url;
@@ -255,6 +257,71 @@ export default function DashboardList() {
       }
     },
     []
+  );
+
+  const handleImportDashboard = useCallback(async () => {
+    fileInputRef.current?.click();
+  }, []);
+
+  const handleFileSelect = useCallback(
+    async (event: React.ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+
+      try {
+        const text = await file.text();
+        const storage = getStorageImplementation();
+        
+        // Validate JSON
+        try {
+          JSON.parse(text);
+        } catch (e) {
+          throw new Error("Invalid JSON file");
+        }
+
+        const newDashboardId = await storage.importDashboard(text);
+        
+        // Get the imported dashboard from localStorage
+        const dashboardsJson = localStorage.getItem("gigapi_dashboards");
+        if (dashboardsJson) {
+          const dashboards = JSON.parse(dashboardsJson);
+          const importedDashboard = dashboards.find((d: any) => d.id === newDashboardId);
+          
+          if (importedDashboard) {
+            // Convert date strings to Date objects
+            const dashboardWithDates = {
+              ...importedDashboard,
+              metadata: {
+                ...importedDashboard.metadata,
+                createdAt: new Date(importedDashboard.metadata.createdAt),
+                updatedAt: new Date(importedDashboard.metadata.updatedAt),
+              },
+            };
+            
+            // Save through the atom to ensure it's properly registered
+            await saveDashboard(dashboardWithDates);
+          }
+        }
+        
+        toast.success("Dashboard imported successfully!");
+        
+        // Navigate to the new dashboard
+        navigate(`/dashboard/${newDashboardId}`);
+      } catch (error) {
+        console.error("Failed to import dashboard:", error);
+        if (error instanceof Error && error.message === "Invalid JSON file") {
+          toast.error("Invalid file format. Please select a valid dashboard JSON file.");
+        } else {
+          toast.error("Failed to import dashboard. Please check the file format.");
+        }
+      } finally {
+        // Reset the input value so the same file can be selected again
+        if (fileInputRef.current) {
+          fileInputRef.current.value = "";
+        }
+      }
+    },
+    [navigate]
   );
 
   const columns: ColumnDef<DashboardListItem>[] = [
@@ -515,6 +582,15 @@ export default function DashboardList() {
                 </DropdownMenuContent>
               </DropdownMenu>
               <Button
+                onClick={handleImportDashboard}
+                variant="outline"
+                className="flex items-center gap-2"
+                size={"sm"}
+              >
+                <Upload className="h-4 w-4" />
+                Import
+              </Button>
+              <Button
                 onClick={() => setIsCreateSheetOpen(true)}
                 className="flex items-center gap-2"
                 size={"sm"}
@@ -634,6 +710,15 @@ export default function DashboardList() {
         isOpen={isCreateSheetOpen}
         onOpenChange={setIsCreateSheetOpen}
         onDashboardCreated={handleDashboardCreated}
+      />
+      
+      {/* Hidden file input for import */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".json"
+        onChange={handleFileSelect}
+        style={{ display: "none" }}
       />
 
       {/* Delete Confirmation Dialog */}

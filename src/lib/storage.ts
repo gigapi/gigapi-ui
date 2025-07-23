@@ -2,7 +2,11 @@
  * Storage utilities for dashboard export/import
  */
 
-import type { Dashboard, PanelConfig } from "@/types/dashboard.types";
+import type {
+  Dashboard,
+  PanelConfig,
+  PanelLayout,
+} from "@/types/dashboard.types";
 import { v4 as uuidv4 } from "uuid";
 
 export const getStorageImplementation = () => {
@@ -49,15 +53,33 @@ export const getStorageImplementation = () => {
         panels = importData.panels;
       }
 
+      // Create a mapping of old panel IDs to new panel IDs
+      const panelIdMap = new Map<string, string>();
+      const newPanels = panels.map((panel: PanelConfig) => {
+        const newPanelId = uuidv4();
+        panelIdMap.set(panel.id, newPanelId);
+        return {
+          ...panel,
+          id: newPanelId,
+        };
+      });
+
+      // Update layout to use new panel IDs
+      const newLayout = {
+        ...dashboard.layout,
+        panels: dashboard.layout.panels.map((panelLayout: PanelLayout) => ({
+          ...panelLayout,
+          panelId: panelIdMap.get(panelLayout.panelId) || panelLayout.panelId,
+        })),
+      };
+
       // Create new dashboard with new ID and embedded panels
       const newDashboard: Dashboard = {
         ...dashboard,
         id: newId,
         name: `${dashboard.name} (Imported)`,
-        panels: panels.map((panel: PanelConfig) => ({
-          ...panel,
-          id: uuidv4(),
-        })),
+        panels: newPanels,
+        layout: newLayout,
         metadata: {
           ...dashboard.metadata,
           createdAt: new Date(),

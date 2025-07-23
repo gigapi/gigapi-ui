@@ -56,7 +56,7 @@ function AppInitializer() {
     if (!apiUrl || apiUrl === "") {
       return;
     }
-    
+
     connect().catch((error) => {
       console.error("🔥 [AppInitializer] Connection failed:", error);
     });
@@ -68,7 +68,7 @@ function AppInitializer() {
 // Main app with router - only shown when connected
 function AppWithRouter() {
   return (
-    <Router>
+    <Router basename="/ui/">
       <SidebarProvider
         style={
           {
@@ -195,22 +195,22 @@ export default function App() {
                 <ConnectionStatus />
               )}
               <Toaster
-                position="top-right"
+                position="top-center"
                 richColors
                 expand
                 closeButton
-                duration={3000}
+                duration={1500}
               />
             </>
           ) : (
             <>
               <AppWithRouter />
               <Toaster
-                position="top-right"
+                position="top-center"
                 richColors
                 expand
                 closeButton
-                duration={3000}
+                duration={1500}
               />
             </>
           )}
