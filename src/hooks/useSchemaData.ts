@@ -24,6 +24,10 @@ export interface SchemaDataResult {
   timeFields: TimeFieldInfo[];
   isLoading: boolean;
   error: string | null;
+  // Optional refetch functions for dynamic mode
+  refetchDatabases?: () => Promise<void>;
+  refetchTables?: () => Promise<void>;
+  refetchSchema?: () => Promise<void>;
 }
 
 interface UseSchemaDataOptions {

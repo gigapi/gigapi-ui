@@ -1,7 +1,7 @@
-import { useState, useRef, useEffect, type KeyboardEvent } from "react";
+import { useState, useRef, useEffect, useMemo, useCallback, type KeyboardEvent } from "react";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
-import { Send, Database, Search, Table, AtSign, Bot } from "lucide-react";
+import { Send, Database, Search, Table, AtSign, Bot, RefreshCw } from "lucide-react";
 import { useAtom } from "jotai";
 import { schemaCacheAtom } from "@/atoms/database-atoms";
 import { aiConnectionsAtom } from "@/atoms/chat-atoms";
@@ -12,6 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useDynamicChatSchema } from "@/hooks/useDynamicChatSchema";
 import type { ChatSession } from "@/types/chat.types";
 
 interface ChatInputWithMentionsProps {
@@ -52,20 +53,55 @@ export default function ChatInputWithMentions({
   const [mentionFilter, setMentionFilter] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [cursorPosition, setCursorPosition] = useState(0);
+  const [useDynamicMode, setUseDynamicMode] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const mentionStartRef = useRef<number>(-1);
+  
+  // Dynamic schema hook for real-time data
+  const dynamicSchema = useDynamicChatSchema();
+  
+  // Memoize the schema data to prevent unnecessary re-renders
+  const stableSchemaData = useMemo(() => {
+    if (useDynamicMode) {
+      // Only use dynamic data if it's actually available, otherwise use empty state
+      return {
+        databases: Array.isArray(dynamicSchema.databases) ? dynamicSchema.databases : [],
+        tables: dynamicSchema.tables || {},
+        schemas: dynamicSchema.schemas || {},
+      };
+    } else {
+      return schemaCache ? {
+        databases: Object.keys(schemaCache.databases),
+        tables: Object.fromEntries(
+          Object.entries(schemaCache.databases).map(([db, data]) => [db, data.tables])
+        ),
+        schemas: Object.fromEntries(
+          Object.entries(schemaCache.databases).flatMap(([db, data]) => 
+            Object.entries(data.schemas || {}).map(([table, schema]) => [`${db}.${table}`, schema])
+          )
+        ),
+      } : { databases: [], tables: {}, schemas: {} };
+    }
+  }, [
+    useDynamicMode, 
+    // Use JSON.stringify for deep comparison to prevent unnecessary re-memoization
+    useDynamicMode ? JSON.stringify(dynamicSchema.databases) : null,
+    useDynamicMode ? JSON.stringify(dynamicSchema.tables) : null, 
+    useDynamicMode ? JSON.stringify(dynamicSchema.schemas) : null,
+    schemaCache?.timestamp // Only re-memoize when cache actually changes
+  ]);
 
-  // Get mention suggestions based on filter
-  const getMentionSuggestions = (): MentionItem[] => {
-    if (!schemaCache) return [];
+  // Get mention suggestions based on filter - now memoized to prevent infinite re-renders
+  const getMentionSuggestions = useCallback((sourceData: typeof stableSchemaData, filter: string): MentionItem[] => {
+    if (!sourceData.databases.length) return [];
 
-    const filter = mentionFilter.toLowerCase();
+    const filterLower = filter.toLowerCase();
     const suggestions: MentionItem[] = [];
     const tableOccurrences = new Map<string, string[]>();
 
     // First pass: count table occurrences across databases
-    Object.entries(schemaCache.databases).forEach(([db, data]) => {
-      data.tables.forEach((table) => {
+    Object.entries(sourceData.tables).forEach(([db, tables]) => {
+      tables.forEach((table) => {
         if (!tableOccurrences.has(table)) {
           tableOccurrences.set(table, []);
         }
@@ -74,29 +110,30 @@ export default function ChatInputWithMentions({
     });
 
     // Add databases
-    Object.entries(schemaCache.databases).forEach(([db, data]) => {
-      if (db.toLowerCase().includes(filter)) {
-        const tableCount = data.tables.length;
-        const hasSchemas = data.schemas && Object.keys(data.schemas).length > 0;
+    sourceData.databases.forEach((db) => {
+      if (db.toLowerCase().includes(filterLower)) {
+        const tables = sourceData.tables[db] || [];
+        const tableCount = tables.length;
+        const hasSchemas = Object.keys(sourceData.schemas).some(key => key.startsWith(`${db}.`));
         
         suggestions.push({
           type: "database",
           value: db,
-          description: `${tableCount} table${tableCount !== 1 ? 's' : ''}${hasSchemas ? ' with schemas' : ''}`,
+          description: `${tableCount} table${tableCount !== 1 ? 's' : ''}${hasSchemas ? ' with schemas' : ''}${useDynamicMode ? ' • live' : ''}`,
         });
       }
     });
 
     // Add tables (with database prefix)
-    Object.entries(schemaCache.databases).forEach(([db, data]) => {
-      data.tables.forEach((table) => {
+    Object.entries(sourceData.tables).forEach(([db, tables]) => {
+      tables.forEach((table) => {
         const fullName = `${db}.${table}`;
         if (
-          fullName.toLowerCase().includes(filter) ||
-          table.toLowerCase().includes(filter)
+          fullName.toLowerCase().includes(filterLower) ||
+          table.toLowerCase().includes(filterLower)
         ) {
-          const columns = data.schemas?.[table];
-          const columnCount = columns ? columns.length : 0;
+          const schema = sourceData.schemas[fullName];
+          const columnCount = schema ? schema.length : 0;
           const occurrences = tableOccurrences.get(table) || [];
           const isAmbiguous = occurrences.length > 1;
           
@@ -105,8 +142,8 @@ export default function ChatInputWithMentions({
             value: fullName,
             database: db,
             description: isAmbiguous 
-              ? `⚠️ in ${db} (also in: ${occurrences.filter(d => d !== db).join(', ')})`
-              : `in ${db}${columnCount > 0 ? ` • ${columnCount} columns` : ''}`,
+              ? `⚠️ in ${db} (also in: ${occurrences.filter(d => d !== db).join(', ')})${useDynamicMode ? ' • live' : ''}`
+              : `in ${db}${columnCount > 0 ? ` • ${columnCount} columns` : ''}${useDynamicMode ? ' • live' : ''}`,
             columnCount,
             isAmbiguous,
           });
@@ -126,9 +163,16 @@ export default function ChatInputWithMentions({
     });
 
     return suggestions.slice(0, 50); // Limit to 50 suggestions
-  };
+  }, [useDynamicMode]);
 
-  const suggestions = getMentionSuggestions();
+  // Memoize suggestions to prevent infinite re-renders
+  const suggestions = useMemo(() => {
+    // Don't compute suggestions if we're loading dynamic data or if there's no filter when mentions are shown
+    if (useDynamicMode && dynamicSchema.isLoading && showMentions) {
+      return [];
+    }
+    return getMentionSuggestions(stableSchemaData, mentionFilter);
+  }, [getMentionSuggestions, stableSchemaData, mentionFilter, useDynamicMode, dynamicSchema.isLoading, showMentions]);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -203,12 +247,25 @@ export default function ChatInputWithMentions({
       mentionStartRef.current = lastAtIndex;
       setMentionFilter("");
       setShowMentions(true);
+      
+      // Trigger fresh data fetch in dynamic mode
+      if (useDynamicMode) {
+        dynamicSchema.refreshDatabases();
+      }
     } else if (lastAtIndex !== -1 && mentionStartRef.current !== -1) {
       // Typing after @
       const afterAt = textBeforeCursor.slice(lastAtIndex + 1);
       if (afterAt.match(/^[a-zA-Z0-9._]*$/)) {
         setMentionFilter(afterAt);
         setShowMentions(true);
+        
+        // Fetch additional data if needed in dynamic mode
+        if (useDynamicMode && afterAt.includes('.')) {
+          const [dbName] = afterAt.split('.');
+          if (dbName) {
+            dynamicSchema.refreshTables(dbName);
+          }
+        }
       } else {
         setShowMentions(false);
         mentionStartRef.current = -1;
@@ -247,6 +304,11 @@ export default function ChatInputWithMentions({
     setMentionFilter("");
     setShowMentions(true);
     setCursorPosition(newValue.length);
+    
+    // Trigger fresh data fetch in dynamic mode
+    if (useDynamicMode) {
+      dynamicSchema.refreshDatabases();
+    }
 
     // Focus on textarea
     setTimeout(() => {
@@ -266,7 +328,7 @@ export default function ChatInputWithMentions({
     ) {
       onConnectionChange(aiConnections[0].id);
     }
-  }, [aiConnections.length, session?.aiConnectionId]);
+  }, [aiConnections.length, session?.aiConnectionId, onConnectionChange]);
 
   return (
     <div className="relative">
@@ -318,11 +380,26 @@ export default function ChatInputWithMentions({
                 ))}
               </div>
             </div>
-            <div className="border-t px-3 py-2">
+            <div className="border-t px-3 py-2 flex items-center justify-between">
               <p className="text-xs text-muted-foreground flex items-center gap-1">
                 <Search className="w-3 h-3" />
                 Type to search • ↑↓ to navigate • Enter to select
               </p>
+              <button
+                onClick={() => setUseDynamicMode(!useDynamicMode)}
+                className={`text-xs px-2 py-1 rounded transition-colors ${
+                  useDynamicMode 
+                    ? 'bg-green-100 text-green-700 hover:bg-green-200' 
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                }`}
+                title={useDynamicMode ? 'Live mode: Real-time data' : 'Cache mode: Faster but may be outdated'}
+              >
+                {useDynamicMode ? (
+                  <><RefreshCw className="w-3 h-3 inline mr-1" />Live</>
+                ) : (
+                  'Cached'
+                )}
+              </button>
             </div>
           </div>
         )}

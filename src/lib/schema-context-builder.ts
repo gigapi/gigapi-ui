@@ -6,6 +6,7 @@
  */
 
 import { QuerySanitizer } from './query-sanitizer';
+import axios from 'axios';
 
 export interface SchemaItem {
   type: 'database' | 'table';
@@ -21,6 +22,18 @@ export interface SchemaContextOptions {
   summaryOnly?: boolean;
   includeRecentContext?: boolean;
   isAgentic?: boolean;
+  // New options for sample data
+  includeSampleData?: boolean;
+  sampleDataLimit?: number;
+  apiUrl?: string;
+}
+
+export interface SampleDataResult {
+  success: boolean;
+  data: any[];
+  rowCount: number;
+  columns: string[];
+  error?: string;
 }
 
 export class SchemaContextBuilder {
@@ -109,11 +122,11 @@ export class SchemaContextBuilder {
   /**
    * Build context for mentioned items only
    */
-  static buildMentionContext(
+  static async buildMentionContext(
     mentions: SchemaItem[], 
     schemaCache: any,
     options: SchemaContextOptions = {}
-  ): string {
+  ): Promise<string> {
     if (!mentions.length || !schemaCache?.databases) return '';
 
     const contextParts: string[] = [];
@@ -121,15 +134,15 @@ export class SchemaContextBuilder {
     const processedTables = new Set<string>();
 
     // Process each mention
-    mentions.forEach(mention => {
+    for (const mention of mentions) {
       if (mention.type === 'database' && !processedDatabases.has(mention.database)) {
         processedDatabases.add(mention.database);
         this.addDatabaseContext(mention.database, schemaCache, contextParts, options);
       } else if (mention.type === 'table' && !processedTables.has(mention.fullName)) {
         processedTables.add(mention.fullName);
-        this.addTableContext(mention.database, mention.table!, schemaCache, contextParts, options);
+        await this.addTableContext(mention.database, mention.table!, schemaCache, contextParts, options);
       }
-    });
+    }
 
     // If we found ambiguous table names, add hints
     const ambiguousTables = this.findAmbiguousTables(mentions, schemaCache);
@@ -208,13 +221,13 @@ export class SchemaContextBuilder {
   /**
    * Add table context to the output
    */
-  private static addTableContext(
+  private static async addTableContext(
     dbName: string,
     tableName: string,
     schemaCache: any,
     contextParts: string[],
     options: SchemaContextOptions
-  ) {
+  ): Promise<void> {
     const dbData = schemaCache.databases[dbName];
     if (!dbData) {
       contextParts.push(`❌ Database "${dbName}" not found`);
@@ -274,6 +287,24 @@ export class SchemaContextBuilder {
     if (timestampCols.length > 0) {
       contextParts.push('');
       contextParts.push(`⏰ Time columns: ${timestampCols.map(c => c.column_name).join(', ')}`);
+    }
+
+    // Fetch and include sample data if requested
+    if (options.includeSampleData && options.apiUrl) {
+      try {
+        contextParts.push('');
+        const sampleData = await this.fetchSampleData(
+          dbName, 
+          tableName, 
+          options.apiUrl, 
+          options.sampleDataLimit || 5
+        );
+        const sampleDataContext = this.formatSampleData(sampleData, tableName);
+        contextParts.push(...sampleDataContext);
+      } catch (error) {
+        console.error(`[SchemaContextBuilder] Error fetching sample data for ${dbName}.${tableName}:`, error);
+        contextParts.push(`⚠️ Failed to fetch sample data: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      }
     }
 
     contextParts.push('');
@@ -456,11 +487,11 @@ export class SchemaContextBuilder {
   /**
    * Get complete schema context based on message context
    */
-  static getSchemaContext(
+  static async getSchemaContext(
     messages: Array<{role: string, content: string}>,
     schemaCache: any,
     options: SchemaContextOptions = {}
-  ): string {
+  ): Promise<string> {
     if (!schemaCache?.databases) return '';
 
     const isFirstMessage = messages.filter(m => m.role === 'user').length === 1;
@@ -480,10 +511,10 @@ export class SchemaContextBuilder {
         // If it's the first message with mentions, include both database list AND mention context
         if (isFirstMessage) {
           contextParts.push(this.buildFirstMessageContext(schemaCache));
-          contextParts.push(this.buildMentionContext(mentions, schemaCache, options));
+          contextParts.push(await this.buildMentionContext(mentions, schemaCache, options));
         } else {
           // Otherwise just return mention context
-          contextParts.push(this.buildMentionContext(mentions, schemaCache, options));
+          contextParts.push(await this.buildMentionContext(mentions, schemaCache, options));
         }
         return contextParts.join('\n\n');
       }
@@ -510,7 +541,7 @@ export class SchemaContextBuilder {
       if (recentTable) {
         contextParts.push(`📌 CONTINUING DISCUSSION ABOUT: ${recentTable.fullName}`);
         contextParts.push('');
-        contextParts.push(this.buildMentionContext([recentTable], schemaCache, options));
+        contextParts.push(await this.buildMentionContext([recentTable], schemaCache, options));
         return contextParts.join('\n\n');
       }
     }
@@ -523,5 +554,238 @@ export class SchemaContextBuilder {
     }
 
     return contextParts.join('\n\n');
+  }
+
+  /**
+   * Fetch sample data for a table to provide AI with data context
+   * First checks cache, then falls back to direct API call
+   */
+  static async fetchSampleData(
+    database: string, 
+    table: string, 
+    apiUrl: string,
+    limit: number = 5,
+    schemaCache?: any
+  ): Promise<SampleDataResult> {
+    // First try to get from cache if available
+    if (schemaCache?.databases?.[database]?.sampleData?.[table]) {
+      const cachedData = schemaCache.databases[database].sampleData[table];
+      const SAMPLE_DATA_TTL = 30 * 60 * 1000; // 30 minutes
+      
+      // Check if cached data is still valid
+      if (Date.now() - cachedData.timestamp < SAMPLE_DATA_TTL) {
+        console.log(`[SchemaContextBuilder] Using cached sample data for ${database}.${table}`);
+        return {
+          success: cachedData.success,
+          data: cachedData.data,
+          rowCount: cachedData.rowCount,
+          columns: cachedData.columns,
+          error: cachedData.error,
+        };
+      }
+    }
+
+    // Cache miss or expired - fetch fresh data with retry logic
+    const maxRetries = 2;
+    let lastError: any = null;
+    
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        const sampleQuery = `SELECT * FROM ${table} LIMIT ${limit}`;
+        const isRetry = attempt > 0;
+        
+        console.log(`[SchemaContextBuilder] ${isRetry ? `Retry ${attempt}: ` : ''}Fetching sample data for ${database}.${table}`);
+        
+        const response = await axios.post(
+          `${apiUrl}?db=${encodeURIComponent(database)}&format=json`,
+          { query: sampleQuery },
+          { 
+            timeout: 5000 + (attempt * 2000), // Increase timeout on retries
+            validateStatus: (status) => status < 500 // Retry on 5xx errors
+          }
+        );
+
+        const results = response.data.results || [];
+        const columns = results.length > 0 ? Object.keys(results[0]) : [];
+        
+        if (isRetry) {
+          console.log(`[SchemaContextBuilder] Sample data fetch succeeded on retry ${attempt} for ${database}.${table}`);
+        }
+        
+        return {
+          success: true,
+          data: results,
+          rowCount: results.length,
+          columns,
+        };
+      } catch (error: any) {
+        lastError = error;
+        const isLastAttempt = attempt === maxRetries;
+        
+        // Log different error types
+        if (error.response) {
+          const status = error.response.status;
+          if (status === 404) {
+            console.warn(`[SchemaContextBuilder] Table ${database}.${table} not found (404)`);
+            break; // Don't retry on 404
+          } else if (status >= 500 && !isLastAttempt) {
+            console.warn(`[SchemaContextBuilder] Server error ${status} for ${database}.${table}, retrying...`);
+            continue; // Retry on server errors
+          }
+        } else if (error.code === 'ECONNABORTED' && !isLastAttempt) {
+          console.warn(`[SchemaContextBuilder] Timeout fetching sample data for ${database}.${table}, retrying with longer timeout...`);
+          continue; // Retry on timeout
+        }
+
+        if (isLastAttempt) {
+          console.error(`[SchemaContextBuilder] Failed to fetch sample data for ${database}.${table} after ${maxRetries + 1} attempts:`, error);
+        }
+      }
+    }
+
+    // All attempts failed
+    let errorMessage = 'Unknown error';
+    if (lastError?.response) {
+      const status = lastError.response.status;
+      if (status === 404) {
+        errorMessage = 'Table not found';
+      } else if (status === 403) {
+        errorMessage = 'Access denied';
+      } else if (status === 500) {
+        errorMessage = 'Database server error';
+      } else {
+        errorMessage = `HTTP ${status} error`;
+      }
+    } else if (lastError?.code === 'ECONNABORTED') {
+      errorMessage = 'Request timeout';
+    } else if (lastError?.message) {
+      errorMessage = lastError.message;
+    }
+
+    return {
+      success: false,
+      data: [],
+      rowCount: 0,
+      columns: [],
+      error: errorMessage
+    };
+  }
+
+  /**
+   * Format sample data for display in AI context
+   */
+  private static formatSampleData(sampleData: SampleDataResult, tableName: string): string[] {
+    const contextParts: string[] = [];
+    
+    if (!sampleData.success || sampleData.data.length === 0) {
+      if (sampleData.error) {
+        contextParts.push(`⚠️ Sample data unavailable: ${sampleData.error}`);
+      } else {
+        contextParts.push(`ℹ️ No sample data available (table may be empty)`);
+      }
+      return contextParts;
+    }
+
+    contextParts.push(`📊 SAMPLE DATA (${sampleData.rowCount} rows):`);
+    
+    // Create a simple table format
+    const { columns, data } = sampleData;
+    
+    if (columns.length === 0) {
+      contextParts.push(`ℹ️ No columns found in sample data`);
+      return contextParts;
+    }
+
+    // Header row
+    const headerRow = `| ${columns.join(' | ')} |`;
+    const separatorRow = `|${columns.map(() => '---').join('|')}|`;
+    
+    contextParts.push(headerRow);
+    contextParts.push(separatorRow);
+    
+    // Data rows (limit to prevent context overflow)
+    const maxDisplayRows = Math.min(data.length, 5);
+    for (let i = 0; i < maxDisplayRows; i++) {
+      const row = data[i];
+      if (!row || typeof row !== 'object') {
+        contextParts.push(`| Error: Invalid row data |`);
+        continue;
+      }
+      
+      const rowValues = columns.map(col => {
+        const value = row[col];
+        if (value === null || value === undefined) {
+          return 'NULL';
+        }
+        
+        // Handle different data types
+        let strValue: string;
+        if (typeof value === 'object') {
+          try {
+            strValue = JSON.stringify(value);
+          } catch {
+            strValue = '[Object]';
+          }
+        } else {
+          strValue = String(value);
+        }
+        
+        // Escape pipe characters to avoid breaking table format
+        strValue = strValue.replace(/\|/g, '\\|');
+        
+        // Truncate long values and clean up whitespace
+        if (strValue.length > 50) {
+          strValue = `${strValue.substring(0, 47).trim()}...`;
+        }
+        
+        return strValue || '""'; // Handle empty strings
+      });
+      contextParts.push(`| ${rowValues.join(' | ')} |`);
+    }
+    
+    if (data.length > maxDisplayRows) {
+      contextParts.push(`... (showing ${maxDisplayRows} of ${data.length} rows)`);
+    }
+    
+    // Add data type hints if available
+    const typeHints = this.getDataTypeHints(data, columns);
+    if (typeHints.length > 0) {
+      contextParts.push('');
+      contextParts.push(`💡 Data types detected: ${typeHints.join(', ')}`);
+    }
+    
+    return contextParts;
+  }
+
+  /**
+   * Analyze sample data to provide data type hints for AI
+   */
+  private static getDataTypeHints(data: any[], columns: string[]): string[] {
+    if (!data.length || !columns.length) return [];
+    
+    const hints: string[] = [];
+    const sampleSize = Math.min(data.length, 3); // Check first 3 rows
+    
+    columns.forEach(col => {
+      const values = data.slice(0, sampleSize).map(row => row[col]).filter(v => v !== null && v !== undefined);
+      if (values.length === 0) return;
+      
+      const firstValue = values[0];
+      if (typeof firstValue === 'number') {
+        const hasDecimals = values.some(v => v % 1 !== 0);
+        hints.push(`${col}: ${hasDecimals ? 'decimal' : 'integer'}`);
+      } else if (typeof firstValue === 'boolean') {
+        hints.push(`${col}: boolean`);
+      } else if (typeof firstValue === 'string') {
+        // Check for date-like strings
+        if (values.some(v => !isNaN(Date.parse(v)))) {
+          hints.push(`${col}: date/time string`);
+        } else if (values.every(v => String(v).length < 10)) {
+          hints.push(`${col}: short text`);
+        }
+      }
+    });
+    
+    return hints.slice(0, 5); // Limit to 5 hints to avoid clutter
   }
 }

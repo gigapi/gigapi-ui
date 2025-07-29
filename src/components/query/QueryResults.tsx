@@ -28,6 +28,7 @@ import {
 import { selectedDbAtom, selectedTableAtom } from "@/atoms";
 import { timeRangeAtom, selectedTimeFieldAtom } from "@/atoms";
 import { createDashboardAtom, addPanelAtom } from "@/atoms";
+import { currentTabPanelConfigAtom, currentTabUserModifiedFieldsAtom } from "@/atoms";
 import GigTable from "@/components/shared/GigTable";
 import Loader from "@/components/shared/Loader";
 import { Button } from "@/components/ui/button";
@@ -107,26 +108,10 @@ export default function QueryResults() {
   const [currentExecutedQuery, setCurrentExecutedQuery] = useState(query);
   const [transformedQuery, setTransformedQuery] = useState("");
 
-  // Panel creation states - initialize with empty field mapping
-  const [panelConfig, setPanelConfig] = useState<PanelConfig>(() => {
-    const initial = PanelFactory.createPanel({
-      type: "line",
-      title: "Query Panel",
-      database: selectedDb || "",
-      query: query,
-    });
-    // Clear field mapping to allow smart defaults to work
-    initial.fieldMapping = {};
-    return initial;
-  });
+  // Panel creation states - use tab-aware atoms
+  const [panelConfig, setPanelConfig] = useAtom(currentTabPanelConfigAtom);
+  const [userModifiedFields, setUserModifiedFields] = useAtom(currentTabUserModifiedFieldsAtom);
   const [availableFields, setAvailableFields] = useState<string[]>([]);
-  
-  // Track which fields have been manually set by the user
-  const [userModifiedFields, setUserModifiedFields] = useState<{
-    xField?: boolean;
-    yField?: boolean;
-    seriesField?: boolean;
-  }>({});
   const [showSaveToDashboard, setShowSaveToDashboard] = useState(false);
   const [newDashboardName, setNewDashboardName] = useState("");
   const [selectedDashboardId, setSelectedDashboardId] = useState<string>("new");
@@ -264,40 +249,38 @@ export default function QueryResults() {
 
       // Only update field mapping if we actually have smart mapping suggestions
       if (smartMapping && (smartMapping.xField || smartMapping.yField)) {
-        setPanelConfig((prev) => {
-          const newMapping: any = {};
-          
-          // For xField: use existing if valid and user modified, otherwise use smart default
-          if (userModifiedFields.xField && prev.fieldMapping?.xField && availableFields.includes(prev.fieldMapping.xField)) {
-            newMapping.xField = prev.fieldMapping.xField;
-          } else {
-            newMapping.xField = smartMapping.xField;
-          }
-          
-          // For yField: use existing if valid and user modified, otherwise use smart default
-          if (userModifiedFields.yField && prev.fieldMapping?.yField && availableFields.includes(prev.fieldMapping.yField)) {
-            newMapping.yField = prev.fieldMapping.yField;
-          } else {
-            newMapping.yField = smartMapping.yField;
-          }
-          
-          // For seriesField: use existing if valid and user modified, otherwise use smart default
-          if (userModifiedFields.seriesField && prev.fieldMapping?.seriesField && availableFields.includes(prev.fieldMapping.seriesField)) {
-            newMapping.seriesField = prev.fieldMapping.seriesField;
-          } else {
-            newMapping.seriesField = smartMapping.seriesField;
-          }
-          
-          return {
-            ...prev,
-            fieldMapping: {
-              ...newMapping,
-              // Ensure we don't have undefined values
-              xField: newMapping.xField || undefined,
-              yField: newMapping.yField || undefined,
-              seriesField: newMapping.seriesField || undefined,
-            },
-          };
+        const newMapping: any = {};
+        
+        // For xField: use existing if valid and user modified, otherwise use smart default
+        if (userModifiedFields.xField && panelConfig.fieldMapping?.xField && availableFields.includes(panelConfig.fieldMapping.xField)) {
+          newMapping.xField = panelConfig.fieldMapping.xField;
+        } else {
+          newMapping.xField = smartMapping.xField;
+        }
+        
+        // For yField: use existing if valid and user modified, otherwise use smart default
+        if (userModifiedFields.yField && panelConfig.fieldMapping?.yField && availableFields.includes(panelConfig.fieldMapping.yField)) {
+          newMapping.yField = panelConfig.fieldMapping.yField;
+        } else {
+          newMapping.yField = smartMapping.yField;
+        }
+        
+        // For seriesField: use existing if valid and user modified, otherwise use smart default
+        if (userModifiedFields.seriesField && panelConfig.fieldMapping?.seriesField && availableFields.includes(panelConfig.fieldMapping.seriesField)) {
+          newMapping.seriesField = panelConfig.fieldMapping.seriesField;
+        } else {
+          newMapping.seriesField = smartMapping.seriesField;
+        }
+        
+        setPanelConfig({
+          ...panelConfig,
+          fieldMapping: {
+            ...newMapping,
+            // Ensure we don't have undefined values
+            xField: newMapping.xField || undefined,
+            yField: newMapping.yField || undefined,
+            seriesField: newMapping.seriesField || undefined,
+          },
         });
       }
     }
@@ -305,36 +288,28 @@ export default function QueryResults() {
 
   // Update panel config when query changes
   useEffect(() => {
-    setPanelConfig((prev) => {
-      if (query === prev.query) {
-        return prev; // No change needed
-      }
-      
-      return {
-        ...prev,
+    if (query !== panelConfig.query) {
+      setPanelConfig({
+        ...panelConfig,
         query: query,
         // Let the smart field mapping useEffect handle field validation
         // Don't reset field mapping here - let it be handled by the smart mapping logic
-      };
-    });
+      });
+    }
   }, [query]);
 
   // Update panel config when database changes
   useEffect(() => {
-    setPanelConfig((prev) => {
-      if ((selectedDb || "") === prev.database) {
-        return prev; // No change needed
-      }
-      
-      return {
-        ...prev,
+    if ((selectedDb || "") !== panelConfig.database) {
+      setPanelConfig({
+        ...panelConfig,
         database: selectedDb || "",
         // Let the smart field mapping useEffect handle field validation
-      };
-    });
-    
-    // Reset user modified flags when database changes since schema may be different
-    setUserModifiedFields({});
+      });
+      
+      // Reset user modified flags when database changes since schema may be different
+      setUserModifiedFields({});
+    }
   }, [selectedDb]);
 
   // Load dashboards for the save dialog
@@ -505,7 +480,7 @@ export default function QueryResults() {
                 setUserModifiedFields(newUserModified);
               }
               
-              setPanelConfig((prev) => ({ ...prev, ...updates }));
+              setPanelConfig({ ...panelConfig, ...updates });
             }}
             availableFields={availableFields}
             previewData={results}

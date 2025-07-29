@@ -19,38 +19,34 @@ interface ColumnSchema {
   timeUnit?: string; // Added time unit for timestamp columns
 }
 
+interface SampleDataEntry {
+  data: any[];
+  columns: string[];
+  rowCount: number;
+  timestamp: number;
+  success: boolean;
+  error?: string;
+}
+
 interface SchemaCache {
   databases: Record<
     string,
     {
       tables: string[];
       schemas: Record<string, ColumnSchema[]>;
+      sampleData: Record<string, SampleDataEntry>;
     }
   >;
   timestamp: number;
   version: string;
 }
 
-// Database selection atoms
-export const selectedDbAtom = atomWithStorage<string>(
-  "gigapi_selected_db",
-  "",
-  {
-    getItem: (key) => localStorage.getItem(key) || "",
-    setItem: (key, value) => localStorage.setItem(key, value),
-    removeItem: (key) => localStorage.removeItem(key),
-  }
-);
+// Import tab atoms
+import { currentTabDatabaseAtom, currentTabTableAtom } from "./tab-atoms";
 
-export const selectedTableAtom = atomWithStorage<string>(
-  "gigapi_selected_table",
-  "",
-  {
-    getItem: (key) => localStorage.getItem(key) || "",
-    setItem: (key, value) => localStorage.setItem(key, value),
-    removeItem: (key) => localStorage.removeItem(key),
-  }
-);
+// Database selection atoms - now use tab-aware versions
+export const selectedDbAtom = currentTabDatabaseAtom;
+export const selectedTableAtom = currentTabTableAtom;
 
 // Schema data atoms
 export const schemaAtom = atom<Record<string, any>>({});
@@ -646,30 +642,46 @@ export const initializeSchemaCacheAtom = atom(null, async (get, set) => {
   };
 
   // Only load table lists, not schemas
+  let networkCallsMade = 0;
+  const totalDatabases = databases.length;
+  
+  console.log(`[SchemaCache] Initializing cache for ${totalDatabases} databases`);
+  
   for (const database of databases) {
     try {
       // Check if we already have tables in memory
       const currentTables = get(tablesListForAIAtom)[database];
 
       if (currentTables && currentTables.length > 0) {
+        console.log(`[SchemaCache] Using cached tables for ${database} (${currentTables.length} tables)`);
         cache.databases[database] = {
           tables: currentTables,
           schemas: {}, // Empty schemas - will be loaded on demand
+          sampleData: {}, // Initialize sample data cache
         };
       } else {
+        console.log(`[SchemaCache] Fetching tables for ${database}...`);
+        const requestStart = Date.now();
+        
         const tablesResponse = await axios.post(
           `${apiUrl}?db=${database}&format=json`,
           { query: "SHOW TABLES" }
         );
-
+        
+        networkCallsMade++;
+        const requestDuration = Date.now() - requestStart;
+        
         const tables =
           tablesResponse.data.results
             ?.map((item: any) => item.table_name || item.Table || item.name)
             .filter(Boolean) || [];
 
+        console.log(`[SchemaCache] Loaded ${tables.length} tables for ${database} (${requestDuration}ms)`);
+
         cache.databases[database] = {
           tables,
           schemas: {}, // Empty schemas - will be loaded on demand
+          sampleData: {}, // Initialize sample data cache
         };
 
         // Update tables list for AI
@@ -684,9 +696,15 @@ export const initializeSchemaCacheAtom = atom(null, async (get, set) => {
         `[SchemaCache] Failed to load tables for ${database}:`,
         error
       );
-      cache.databases[database] = { tables: [], schemas: {} };
+      cache.databases[database] = { 
+        tables: [], 
+        schemas: {},
+        sampleData: {}
+      };
     }
   }
+  
+  console.log(`[SchemaCache] Cache initialization complete: ${networkCallsMade} network calls made`);
 
   // Save lightweight cache
   set(schemaCacheAtom, cache);
@@ -800,12 +818,34 @@ export const isCacheValidAtom = atom((get) => {
   return isValid;
 });
 
+// Loading state for cache refresh
+export const cacheRefreshLoadingAtom = atom<boolean>(false);
+
 // Refresh cache
-export const refreshSchemaCacheAtom = atom(null, async (_get, set) => {
-  toast.info("Refreshing database schema cache...");
-  set(schemaCacheAtom, null);
-  toast.success(`Database schema refreshed`);
-  await set(initializeSchemaCacheAtom); // Initialize lightweight cache
+export const refreshSchemaCacheAtom = atom(null, async (get, set) => {
+  set(cacheRefreshLoadingAtom, true);
+  const startTime = Date.now();
+  
+  try {
+    toast.info("Refreshing database schema cache...");
+    console.log("[SchemaCache] Starting cache refresh");
+    
+    // Clear existing cache
+    set(schemaCacheAtom, null);
+    
+    // Initialize lightweight cache with network calls
+    await set(initializeSchemaCacheAtom);
+    
+    const duration = Date.now() - startTime;
+    console.log(`[SchemaCache] Cache refresh completed in ${duration}ms`);
+    toast.success(`Database schema refreshed successfully (${Math.round(duration / 1000)}s)`);
+  } catch (error) {
+    console.error("[SchemaCache] Cache refresh failed:", error);
+    toast.error("Failed to refresh database schema cache");
+    throw error;
+  } finally {
+    set(cacheRefreshLoadingAtom, false);
+  }
 });
 
 // Force reload schema for current table
@@ -922,6 +962,259 @@ export const forceReloadCurrentTableSchemaAtom = atom(
       );
     } finally {
       set(schemaLoadingAtom, false);
+    }
+  }
+);
+
+// ============================================================================
+// Fresh Data Atoms - Always Bypass Cache for Dynamic Fetching
+// ============================================================================
+
+// Fresh databases - always fetch from API
+export const freshDatabasesLoadingAtom = atom<boolean>(false);
+export const freshDatabasesAtom = atom<string[]>([]);
+
+export const fetchFreshDatabasesAtom = atom(
+  null,
+  async (get, set) => {
+    const apiUrl = get(apiUrlAtom);
+    const isConnected = get(isConnectedAtom);
+    
+    if (!isConnected) {
+      return [];
+    }
+    
+    set(freshDatabasesLoadingAtom, true);
+    
+    try {
+      const response = await axios.post(
+        `${apiUrl}?format=json`,
+        { query: "SHOW DATABASES" }
+      );
+      
+      const databases = response.data.results
+        ?.map((item: any) => item.database_name || item.Database || item.name)
+        .filter(Boolean) || [];
+        
+      set(freshDatabasesAtom, databases);
+      return databases;
+    } catch (error) {
+      console.error("[Fresh Databases] Failed to fetch:", error);
+      set(freshDatabasesAtom, []);
+      return [];
+    } finally {
+      set(freshDatabasesLoadingAtom, false);
+    }
+  }
+);
+
+// Fresh tables - always fetch from API
+export const freshTablesLoadingAtom = atom<boolean>(false);
+export const freshTablesAtom = atom<string[]>([]);
+
+export const fetchFreshTablesAtom = atom(
+  null,
+  async (get, set, database: string) => {
+    const apiUrl = get(apiUrlAtom);
+    
+    if (!database) {
+      set(freshTablesAtom, []);
+      return [];
+    }
+    
+    set(freshTablesLoadingAtom, true);
+    
+    try {
+      const response = await axios.post(
+        `${apiUrl}?db=${database}&format=json`,
+        { query: "SHOW TABLES" }
+      );
+      
+      const tables = response.data.results
+        ?.map((item: any) => item.table_name || item.Table || item.name)
+        .filter(Boolean) || [];
+        
+      set(freshTablesAtom, tables);
+      return tables;
+    } catch (error) {
+      console.error(`[Fresh Tables] Failed to fetch for ${database}:`, error);
+      set(freshTablesAtom, []);
+      return [];
+    } finally {
+      set(freshTablesLoadingAtom, false);
+    }
+  }
+);
+
+// Fresh schema - always fetch from API
+export const freshSchemaLoadingAtom = atom<boolean>(false);
+export const freshSchemaAtom = atom<ColumnSchema[]>([]);
+
+export const fetchFreshSchemaAtom = atom(
+  null,
+  async (get, set, { database, table }: { database: string; table: string }) => {
+    const apiUrl = get(apiUrlAtom);
+    
+    if (!database || !table) {
+      set(freshSchemaAtom, []);
+      return [];
+    }
+    
+    set(freshSchemaLoadingAtom, true);
+    
+    try {
+      const response = await axios.post(
+        `${apiUrl}?db=${database}&format=json`,
+        { query: `DESCRIBE SELECT * FROM ${table} LIMIT 1` }
+      );
+      
+      const schema = response.data.results || [];
+      
+      // Add time unit information to schema
+      const schemaWithTimeUnits = schema.map((col: any) => {
+        const columnName = col.column_name || col.name;
+        const dataType = col.column_type || col.type || "unknown";
+        
+        // Detect time unit for potential time columns
+        let timeUnit;
+        const lowerName = columnName.toLowerCase();
+        if (
+          lowerName.includes("time") ||
+          lowerName.includes("date") ||
+          lowerName.includes("timestamp") ||
+          columnName === "__timestamp"
+        ) {
+          timeUnit = detectTimeUnitForColumn(columnName, dataType);
+        }
+
+        return {
+          ...col,
+          timeUnit
+        };
+      });
+      
+      set(freshSchemaAtom, schemaWithTimeUnits);
+      return schemaWithTimeUnits;
+    } catch (error) {
+      console.error(`[Fresh Schema] Failed to fetch for ${database}.${table}:`, error);
+      set(freshSchemaAtom, []);
+      return [];
+    } finally {
+      set(freshSchemaLoadingAtom, false);
+    }
+  }
+);
+
+// ============================================================================
+// Sample Data Cache Management
+// ============================================================================
+
+// Sample data cache TTL (shorter than schema cache - 30 minutes)
+const SAMPLE_DATA_TTL = 30 * 60 * 1000; // 30 minutes
+
+// Get cached sample data for a table
+export const getCachedSampleDataAtom = atom(
+  (get) =>
+    (database: string, table: string): SampleDataEntry | null => {
+      const cache = get(schemaCacheAtom);
+      const sampleData = cache?.databases[database]?.sampleData?.[table];
+      
+      if (!sampleData) return null;
+      
+      // Check if sample data is still valid (30 minutes TTL)
+      const isValid = Date.now() - sampleData.timestamp < SAMPLE_DATA_TTL;
+      return isValid ? sampleData : null;
+    }
+);
+
+// Load and cache sample data for a specific table
+export const loadAndCacheSampleDataAtom = atom(
+  null,
+  async (
+    get,
+    set,
+    { database, table, apiUrl, limit = 5 }: { 
+      database: string; 
+      table: string; 
+      apiUrl: string;
+      limit?: number;
+    }
+  ) => {
+    const cache = get(schemaCacheAtom);
+    
+    try {
+      console.log(`[SampleDataCache] Fetching sample data for ${database}.${table}`);
+      
+      const sampleQuery = `SELECT * FROM ${table} LIMIT ${limit}`;
+      const response = await axios.post(
+        `${apiUrl}?db=${encodeURIComponent(database)}&format=json`,
+        { query: sampleQuery },
+        { timeout: 5000 }
+      );
+
+      const results = response.data.results || [];
+      const columns = results.length > 0 ? Object.keys(results[0]) : [];
+      
+      const sampleDataEntry: SampleDataEntry = {
+        data: results,
+        columns,
+        rowCount: results.length,
+        timestamp: Date.now(),
+        success: true,
+      };
+
+      // Update cache with the new sample data
+      if (cache) {
+        const updatedCache = {
+          ...cache,
+          databases: {
+            ...cache.databases,
+            [database]: {
+              ...cache.databases[database],
+              sampleData: {
+                ...cache.databases[database]?.sampleData,
+                [table]: sampleDataEntry,
+              },
+            },
+          },
+        };
+
+        set(schemaCacheAtom, updatedCache);
+      }
+
+      return sampleDataEntry;
+    } catch (error) {
+      console.error(`[SampleDataCache] Failed to load sample data for ${database}.${table}:`, error);
+      
+      const errorEntry: SampleDataEntry = {
+        data: [],
+        columns: [],
+        rowCount: 0,
+        timestamp: Date.now(),
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      };
+
+      // Still cache the error to avoid repeated failed requests
+      if (cache) {
+        const updatedCache = {
+          ...cache,
+          databases: {
+            ...cache.databases,
+            [database]: {
+              ...cache.databases[database],
+              sampleData: {
+                ...cache.databases[database]?.sampleData,
+                [table]: errorEntry,
+              },
+            },
+          },
+        };
+
+        set(schemaCacheAtom, updatedCache);
+      }
+
+      throw error;
     }
   }
 );

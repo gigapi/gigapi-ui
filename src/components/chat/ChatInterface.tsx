@@ -32,6 +32,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import ArtifactRendererWrapper from "./artifacts/ArtifactRendererWrapper";
 import LazyArtifact from "./artifacts/LazyArtifact";
 import ChatInputWithMentions from "./ChatInputWithMentions";
+import ChatCacheManagement from "./ChatCacheManagement";
 import type { ChatSession, ChatMessage } from "@/types/chat.types";
 import "katex/dist/katex.min.css";
 import "highlight.js/styles/github-dark.css";
@@ -99,9 +100,12 @@ export default function ChatInterface({
   // Auto-scroll to bottom when new messages arrive (if auto-scroll is enabled)
   useEffect(() => {
     if (autoScroll && session.messages.length > 0) {
-      rowVirtualizer.scrollToIndex(session.messages.length - 1, {
-        behavior: "smooth",
-      });
+      // Use setTimeout to ensure smooth scrolling works with dynamic content
+      setTimeout(() => {
+        rowVirtualizer.scrollToIndex(session.messages.length - 1, {
+          behavior: "auto", // Changed from "smooth" to avoid warning with dynamic size
+        });
+      }, 50);
     }
   }, [session.messages.length, autoScroll, rowVirtualizer]);
 
@@ -552,13 +556,14 @@ export default function ChatInterface({
               {session.title}
             </h2>
 
-            {session.connection && (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <div className="flex items-center gap-2">
+              {session.connection && (
                 <Badge variant="outline" className="text-xs px-2 py-0.5">
                   {session.connection.model}
                 </Badge>
-              </div>
-            )}
+              )}
+              <ChatCacheManagement />
+            </div>
           </div>
         </div>
       </div>

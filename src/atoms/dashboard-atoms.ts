@@ -322,6 +322,14 @@ export const addPanelAtom = atom(
 
       // Calculate position for new panel in grid
       const existingPanels = dashboard.layout?.panels || [];
+      
+      // Use provided layout dimensions or defaults
+      const layoutFromPanelData = (panelData as any).layout;
+      const width = layoutFromPanelData?.w || 6; // Half width default
+      const height = layoutFromPanelData?.h || 8; // Default height (8 * 60 = 480px)
+      const minWidth = layoutFromPanelData?.minW || 2;
+      const minHeight = layoutFromPanelData?.minH || 2;
+      
       const newPanelLayout = {
         panelId: panelWithId.id,
         x: 0,
@@ -329,10 +337,10 @@ export const addPanelAtom = atom(
           existingPanels.length > 0
             ? Math.max(...existingPanels.map((p) => p.y + p.h))
             : 0,
-        w: 6, // Half width
-        h: 8, // Default height (8 * 60 = 480px)
-        minW: 2,
-        minH: 2,
+        w: width,
+        h: height,
+        minW: minWidth,
+        minH: minHeight,
       };
 
       updatedDashboards[dashboardIndex] = {
@@ -615,13 +623,32 @@ export function useDashboard() {
     const panelToDuplicate = panels.find((p) => p.id === panelId);
     if (!panelToDuplicate) return;
 
+    // Find the layout information for the panel being duplicated
+    const originalLayout = currentDashboard.layout?.panels?.find(
+      (layout) => layout.panelId === panelId
+    );
+
+    const newPanelId = uuidv4();
     const newPanel = {
       ...panelToDuplicate,
-      id: uuidv4(),
+      id: newPanelId,
       title: `${panelToDuplicate.title} (Copy)`,
     };
 
-    await addPanel({ panelData: newPanel, dashboardId: currentDashboard.id });
+    // Include layout information if available
+    const panelDataWithLayout = originalLayout
+      ? {
+          ...newPanel,
+          layout: {
+            w: originalLayout.w,
+            h: originalLayout.h,
+            minW: originalLayout.minW,
+            minH: originalLayout.minH,
+          },
+        }
+      : newPanel;
+
+    await addPanel({ panelData: panelDataWithLayout, dashboardId: currentDashboard.id });
   };
 
   const isPanelLoading = (panelId: string) =>

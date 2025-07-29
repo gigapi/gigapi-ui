@@ -447,10 +447,10 @@ function ChartRendererComponent({
             animationDuration: 100,
           },
           grid: {
-            left: "3%",
-            right: isTimeData && !isEditMode ? "8%" : "4%",
-            bottom: sortedSeriesEntries.length > 1 ? "15%" : "8%",
-            top: isTimeData && !isEditMode ? "12%" : "8%",
+            left: "5%",
+            right: "8%", // Consistent right margin for all cases
+            bottom: sortedSeriesEntries.length > 1 ? "15%" : "10%",
+            top: isTimeData && !isEditMode ? "12%" : "10%",
             containLabel: true,
           },
           xAxis: {
@@ -545,10 +545,10 @@ function ChartRendererComponent({
                 const unit = fieldConfig.unit || "";
                 const decimals = fieldConfig.decimals ?? 1;
                 if (Math.abs(value) >= 1000000)
-                  return (value / 1000000).toFixed(decimals) + "M" + unit;
+                  return (value / 1000000).toFixed(decimals) + "M" + (unit ? " " + unit : "");
                 if (Math.abs(value) >= 1000)
-                  return (value / 1000).toFixed(decimals) + "K" + unit;
-                return value.toFixed(decimals) + unit;
+                  return (value / 1000).toFixed(decimals) + "K" + (unit ? " " + unit : "");
+                return value.toFixed(decimals) + (unit ? " " + unit : "");
               },
             },
           },
@@ -798,7 +798,9 @@ export const ChartRenderer = memo(
       JSON.stringify(prevProps.config.fieldMapping) ===
         JSON.stringify(nextProps.config.fieldMapping) &&
       JSON.stringify(prevProps.config.options) ===
-        JSON.stringify(nextProps.config.options)
+        JSON.stringify(nextProps.config.options) &&
+      JSON.stringify(prevProps.config.fieldConfig) ===
+        JSON.stringify(nextProps.config.fieldConfig)
     );
   }
 );

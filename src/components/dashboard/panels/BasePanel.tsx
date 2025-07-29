@@ -25,7 +25,7 @@ export function withPanelWrapper<T extends PanelProps>(
 
     return (
       <div
-        className="h-full w-full overflow-hidden"
+        className="h-full w-full overflow-hidden p-4"
         style={{ minHeight: "200px" }}
         onClick={handleClick}
       >

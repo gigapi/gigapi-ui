@@ -5,100 +5,42 @@ import { QueryProcessor } from "@/lib/query-processor";
 import { toast } from "sonner";
 import parseNDJSON from "@/lib/parsers/ndjson";
 import { v4 as uuidv4 } from "uuid";
+import type { QueryHistoryItem } from "@/types/tab.types";
 
-// Define the structure for query history items
-export interface QueryHistoryItem {
-  id: string;
-  query: string;
-  processedQuery?: string;
-  database: string;
-  db: string; // Alias for database for backward compatibility
-  table: string | null;
-  timeField: string | null;
-  timeRange: any | null;
-  timestamp: string;
-  success: boolean;
-  error?: string;
-  executionTime?: number;
-  rowCount?: number;
-}
+// Re-export for backward compatibility
+export type { QueryHistoryItem };
 
-export const queryAtom = atomWithStorage<string>("gigapi_current_query", "", {
-  getItem: (key) => {
-    const stored = localStorage.getItem(key);
-    return stored || "";
-  },
-  setItem: (key, value) => {
-    localStorage.setItem(key, value);
-  },
-  removeItem: (key) => {
-    localStorage.removeItem(key);
-  },
-});
-export const queryResultsAtom = atom<any[] | null>(null);
-export const queryErrorAtom = atom<string | null>(null);
-export const queryLoadingAtom = atom<boolean>(false);
-export const queryExecutionTimeAtom = atom<number>(0);
-export const queryMetricsAtom = atom<any>({
-  executionTime: 0,
-  rowCount: 0,
-  size: 0,
-  processedRows: 0,
-});
+// Import tab atoms
+import { 
+  currentTabQueryAtom, 
+  currentTabDatabaseAtom,
+  currentTabTableAtom,
+  currentTabTimeFieldAtom,
+  currentTabTimeRangeAtom,
+  currentTabQueryHistoryAtom, 
+  addToTabQueryHistoryAtom, 
+  clearTabQueryHistoryAtom,
+  currentTabQueryResultsAtom,
+  currentTabQueryErrorAtom,
+  currentTabQueryLoadingAtom,
+  currentTabQueryExecutionTimeAtom,
+  currentTabQueryMetricsAtom,
+  currentTabRawQueryResponseAtom,
+  currentTabProcessedQueryAtom
+} from "./tab-atoms";
 
-// Raw query response (for Raw tab)
-export const rawQueryResponseAtom = atom<string>("");
+// Alias the tab-aware atoms for backward compatibility
+export const queryAtom = currentTabQueryAtom;
+export const queryResultsAtom = currentTabQueryResultsAtom;
+export const queryErrorAtom = currentTabQueryErrorAtom;
+export const queryLoadingAtom = currentTabQueryLoadingAtom;
+export const queryExecutionTimeAtom = currentTabQueryExecutionTimeAtom;
+export const queryMetricsAtom = currentTabQueryMetricsAtom;
+export const rawQueryResponseAtom = currentTabRawQueryResponseAtom;
+export const processedQueryAtom = currentTabProcessedQueryAtom;
 
-// Processed query (for debugging)
-export const processedQueryAtom = atom<string>("");
-
-// Query history - persistent storage in localStorage
-export const queryHistoryAtom = atomWithStorage<QueryHistoryItem[]>(
-  "gigapi_query_history",
-  [],
-  {
-    getItem: (key) => {
-      try {
-        const stored = localStorage.getItem(key);
-        if (stored) {
-          const parsed = JSON.parse(stored);
-          // Ensure backward compatibility - convert old format if needed
-          if (Array.isArray(parsed)) {
-            return parsed.map((item: any) => ({
-              ...item,
-              db: item.db || item.database, // Ensure db field exists
-              table: item.table || null,
-              timeField: item.timeField || null,
-              timeRange: item.timeRange || null,
-            }));
-          }
-        }
-      } catch (error) {
-        console.error("Failed to load query history:", error);
-      }
-      return [];
-    },
-    setItem: (key, value) => {
-      try {
-        // Keep only the last 50 items to prevent excessive storage
-        const trimmedValue = value.slice(0, 50);
-        localStorage.setItem(key, JSON.stringify(trimmedValue));
-      } catch (error) {
-        console.error("Failed to save query history:", error);
-        // If storage is full, try to save fewer items
-        try {
-          const reducedValue = value.slice(0, 25);
-          localStorage.setItem(key, JSON.stringify(reducedValue));
-        } catch (retryError) {
-          console.error("Failed to save reduced query history:", retryError);
-        }
-      }
-    },
-    removeItem: (key) => {
-      localStorage.removeItem(key);
-    },
-  }
-);
+// Alias the tab-aware query history atom for backward compatibility
+export const queryHistoryAtom = currentTabQueryHistoryAtom;
 
 // Actions
 export const setQueryAtom = atom(null, (_get, set, query: string) => {
@@ -107,10 +49,10 @@ export const setQueryAtom = atom(null, (_get, set, query: string) => {
 
 export const executeQueryAtom = atom(null, async (get, set) => {
   const query = get(queryAtom);
-  const selectedDb = get(selectedDbAtom);
-  const selectedTable = get(selectedTableAtom);
-  const selectedTimeField = get(selectedTimeFieldAtom);
-  const timeRange = get(timeRangeAtom);
+  const selectedDb = get(currentTabDatabaseAtom);
+  const selectedTable = get(currentTabTableAtom);
+  const selectedTimeField = get(currentTabTimeFieldAtom);
+  const timeRange = get(currentTabTimeRangeAtom);
   const tableSchema = get(tableSchemaAtom);
   const apiUrl = get(apiUrlAtom);
 
@@ -269,8 +211,8 @@ export const executeQueryAtom = atom(null, async (get, set) => {
       rowCount: parsedResults.length,
     };
 
-    const currentHistory = get(queryHistoryAtom);
-    set(queryHistoryAtom, [historyItem, ...currentHistory.slice(0, 49)]);
+    // Add to current tab's history
+    set(addToTabQueryHistoryAtom, historyItem);
   } catch (error: any) {
     let errorMessage = "Query failed";
 
@@ -320,23 +262,18 @@ export const executeQueryAtom = atom(null, async (get, set) => {
       error: errorMessage,
     };
 
-    const currentHistory = get(queryHistoryAtom);
-    set(queryHistoryAtom, [historyItem, ...currentHistory.slice(0, 49)]);
+    // Add to current tab's history
+    set(addToTabQueryHistoryAtom, historyItem);
   } finally {
     set(queryLoadingAtom, false);
   }
 });
 
 export const clearQueryHistoryAtom = atom(null, (_get, set) => {
-  set(queryHistoryAtom, []);
+  set(clearTabQueryHistoryAtom);
   toast.success("Query history cleared");
 });
 
 // Import atoms that this depends on
-import {
-  selectedDbAtom,
-  selectedTableAtom,
-  tableSchemaAtom,
-} from "./database-atoms";
-import { selectedTimeFieldAtom, timeRangeAtom } from "./time-atoms";
+import { tableSchemaAtom } from "./database-atoms";
 import { apiUrlAtom } from "./connection-atoms";

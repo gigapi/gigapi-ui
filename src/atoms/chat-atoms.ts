@@ -14,6 +14,8 @@ import { SchemaContextBuilder } from "@/lib/schema-context-builder";
 import { ConversationAnalyzer } from "@/lib/conversation-analyzer";
 import { StorageUtils } from "@/lib/storage-utils";
 import { schemaCacheAtom, loadAndCacheTableSchemaAtom } from "./database-atoms";
+import { apiUrlAtom } from "./connection-atoms";
+import { getCurrentTabData } from "./tab-atoms";
 import type {
   ChatSession,
   AIConnection,
@@ -511,10 +513,11 @@ export const sendMessageAtom = atom(
         console.warn("⚠️ No schema cache found");
       }
 
-      // Get time context from query interface
-      const timeRange = localStorage.getItem("gigapi_time_range");
-      const selectedDb = localStorage.getItem("gigapi_selected_db");
-      const selectedTable = localStorage.getItem("gigapi_selected_table");
+      // Get time context from current tab
+      const currentTab = getCurrentTabData();
+      const timeRange = currentTab?.timeRange ? JSON.stringify(currentTab.timeRange) : null;
+      const selectedDb = currentTab?.database || "";
+      const selectedTable = currentTab?.table || "";
 
       // Build query context for artifact intelligence
       // Convert schema cache to proper format
@@ -906,10 +909,11 @@ export const regenerateFromMessageAtom = atom(
       const globalInstructions = get(globalInstructionsAtom);
       let schemaCache = get(schemaCacheAtom);
 
-      // Get time context from query interface
-      const timeRange = localStorage.getItem("gigapi_time_range");
-      const selectedDb = localStorage.getItem("gigapi_selected_db");
-      const selectedTable = localStorage.getItem("gigapi_selected_table");
+      // Get time context from current tab
+      const currentTab = getCurrentTabData();
+      const timeRange = currentTab?.timeRange ? JSON.stringify(currentTab.timeRange) : null;
+      const selectedDb = currentTab?.database || "";
+      const selectedTable = currentTab?.table || "";
 
       // Build query context for artifact intelligence
       const schemaContext = convertSchemaCacheToContext(schemaCache);
@@ -1313,7 +1317,7 @@ Example: When user asks "show me sales by month", respond with:
     const conversationContext =
       ConversationAnalyzer.analyzeConversation(messages);
 
-    const schemaContextString = SchemaContextBuilder.getSchemaContext(
+    const schemaContextString = await SchemaContextBuilder.getSchemaContext(
       messages,
       schemaContext,
       {
@@ -1322,6 +1326,10 @@ Example: When user asks "show me sales by month", respond with:
         summaryOnly: false,
         includeRecentContext: true, // Always include recent context for better continuity
         isAgentic, // Pass agentic mode flag
+        // Enhanced with sample data
+        includeSampleData: true,
+        sampleDataLimit: 5,
+        apiUrl: queryContext.apiUrl || "http://localhost:7971/query",
       }
     );
 

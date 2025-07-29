@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils/class-utils";
 import { useSchemaData, type DataSource } from "@/hooks/useSchemaData";
+import { useDynamicSchemaData } from "@/hooks/useDynamicSchemaData";
 
 // Types for the unified selector
 export type SelectorType = "database" | "table" | "timeField";
@@ -50,6 +51,8 @@ interface UnifiedSchemaSelectorProps {
   showIcon?: boolean;
   // Style variant
   style?: SelectorStyle;
+  // Dynamic mode - always fetch fresh data
+  dynamic?: boolean;
 }
 
 export function UnifiedSchemaSelector({
@@ -66,17 +69,27 @@ export function UnifiedSchemaSelector({
   label,
   showIcon = true,
   style = "select",
+  dynamic = false,
 }: UnifiedSchemaSelectorProps) {
   const [searchTerm, setSearchTerm] = useState("");
   const [isOpen, setIsOpen] = useState(false);
 
+  // Use dynamic hook if dynamic mode is enabled
+  const dynamicData = useDynamicSchemaData({
+    database,
+    table,
+  });
+
   // Get schema data using the unified hook
-  const { databases, tables, timeFields, isLoading, error } = useSchemaData({
+  const cachedData = useSchemaData({
     dataSource,
     database,
     table,
     schemaOverride,
   });
+
+  // Choose which data to use based on dynamic prop
+  const { databases, tables, timeFields, isLoading, error, refetchDatabases, refetchTables, refetchSchema } = dynamic ? dynamicData : cachedData;
 
   // Get options based on selector type
   const options = useMemo(() => {
@@ -166,6 +179,30 @@ export function UnifiedSchemaSelector({
     setSearchTerm("");
   }, [onChange]);
 
+  // Handle popover open/close with dynamic fetching
+  const handleOpenChange = useCallback((open: boolean) => {
+    setIsOpen(open);
+    
+    // Trigger fresh fetch when opening in dynamic mode
+    if (open && dynamic) {
+      switch (type) {
+        case "database":
+          refetchDatabases?.();
+          break;
+        case "table":
+          if (database) {
+            refetchTables?.();
+          }
+          break;
+        case "timeField":
+          if (database && table) {
+            refetchSchema?.();
+          }
+          break;
+      }
+    }
+  }, [dynamic, type, database, table, refetchDatabases, refetchTables, refetchSchema]);
+
   // Check if selector should be disabled
   const isDisabled = disabled || 
     isLoading ||
@@ -243,7 +280,7 @@ export function UnifiedSchemaSelector({
           {displayLabel}
         </label>
       )}
-      <Popover open={isOpen} onOpenChange={setIsOpen}>
+      <Popover open={isOpen} onOpenChange={handleOpenChange}>
         <PopoverTrigger asChild>
           <Button
             variant="outline"

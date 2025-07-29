@@ -15,15 +15,19 @@ import {
   setSelectedDbAtom,
   setSelectedTableAtom,
   selectedTimeFieldAtom,
-  setTimeRangeAtom
+  setTimeRangeAtom,
+  cleanupOldLocalStorageAtom
 } from "@/atoms";
 import { HashQueryUtils } from "@/lib/url/hash-query-utils";
+import { TabBar } from "@/components/tabs/TabBar";
 
 function Home() {
   const initializeDatabase = useSetAtom(initializeDatabaseAtom);
   const isConnected = useAtomValue(isConnectedAtom);
+  const cleanupOldStorage = useSetAtom(cleanupOldLocalStorageAtom);
   const initializedRef = useRef(false);
   const urlParamsLoadedRef = useRef(false);
+  const cleanupDoneRef = useRef(false);
   
   // Atoms for setting query parameters
   const setQuery = useSetAtom(setQueryAtom);
@@ -63,34 +67,43 @@ function Home() {
     if (isConnected && !initializedRef.current) {
       initializedRef.current = true;
       initializeDatabase();
+      
+      // Cleanup old localStorage keys once
+      if (!cleanupDoneRef.current) {
+        cleanupDoneRef.current = true;
+        cleanupOldStorage();
+      }
     } else if (!isConnected) {
       // Reset initialization flag when disconnected
       initializedRef.current = false;
     }
-  }, [isConnected, initializeDatabase]);
+  }, [isConnected, initializeDatabase, cleanupOldStorage]);
 
   // Memoize breadcrumbs to prevent unnecessary re-renders
   const breadcrumbs = useMemo(() => [{ label: "Query Interface" }], []);
 
   return (
-    <AppLayout breadcrumbs={breadcrumbs} showDatabaseControls={true}>
-      <div className="p-2 md:p-3 overflow-hidden w-full mx-auto transition-all duration-300 max-w-screen h-full">
-        <ResizablePanelGroup
-          direction="vertical"
-          className="min-h-0 rounded-lg border bg-card/50 h-full"
-        >
-          <ResizablePanel defaultSize={40} minSize={0}>
-            <div className="h-full p-2">
-              <QueryEditor />
-            </div>
-          </ResizablePanel>
-          <ResizableHandle withHandle />
-          <ResizablePanel defaultSize={60} minSize={0}>
-            <div className="h-full p-2">
-              <QueryResults />
-            </div>
-          </ResizablePanel>
-        </ResizablePanelGroup>
+    <AppLayout breadcrumbs={breadcrumbs} showDatabaseControls={false}>
+      <div className="flex flex-col h-full overflow-hidden">
+        <TabBar />
+        <div className="flex-1 p-2 md:p-3 overflow-hidden w-full mx-auto transition-all duration-300 max-w-screen">
+          <ResizablePanelGroup
+            direction="vertical"
+            className="min-h-0 rounded-lg border bg-card/50 h-full"
+          >
+            <ResizablePanel defaultSize={40} minSize={0}>
+              <div className="h-full p-2">
+                <QueryEditor />
+              </div>
+            </ResizablePanel>
+            <ResizableHandle withHandle />
+            <ResizablePanel defaultSize={60} minSize={0}>
+              <div className="h-full p-2">
+                <QueryResults />
+              </div>
+            </ResizablePanel>
+          </ResizablePanelGroup>
+        </div>
       </div>
     </AppLayout>
   );

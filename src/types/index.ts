@@ -20,13 +20,8 @@ export type SchemaInfo = Record<string, TableSchema[]>;
 
 export type TimeUnit = "s" | "ms" | "us" | "ns";
 
-export interface TimeRange {
-  from: string;
-  to: string;
-  display?: string;
-  enabled?: boolean;
-  raw?: {
-    from: Date | string;
-    to: Date | string;
-  };
-}
+// ============================================================================
+// Tab Types
+// ============================================================================
+
+export * from "./tab.types";

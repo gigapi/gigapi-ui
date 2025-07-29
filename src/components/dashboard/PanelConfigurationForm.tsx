@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
+import { DebouncedInput } from "@/components/ui/debounced-input";
 import {
   Select,
   SelectContent,
@@ -340,17 +341,17 @@ export function PanelConfigurationForm({
                   <Label htmlFor="decimals" className="text-sm font-medium">
                     Decimals
                   </Label>
-                  <Input
+                  <DebouncedInput
                     id="decimals"
                     type="number"
                     value={config.fieldConfig?.defaults?.decimals || ""}
-                    onChange={(e) =>
+                    onValueChange={(value) =>
                       onConfigChange({
                         fieldConfig: {
                           ...config.fieldConfig,
                           defaults: {
                             ...config.fieldConfig?.defaults,
-                            decimals: parseInt(e.target.value) || 0,
+                            decimals: parseInt(value) || 0,
                           },
                         },
                       })
@@ -440,7 +441,7 @@ export function PanelConfigurationForm({
                     <Label htmlFor="line-width" className="text-sm font-medium">
                       Line Width
                     </Label>
-                    <Input
+                    <DebouncedInput
                       id="line-width"
                       type="number"
                       min="1"
@@ -448,7 +449,7 @@ export function PanelConfigurationForm({
                       value={
                         config.fieldConfig?.defaults?.custom?.lineWidth || ""
                       }
-                      onChange={(e) =>
+                      onValueChange={(value) =>
                         onConfigChange({
                           fieldConfig: {
                             ...config.fieldConfig,
@@ -456,7 +457,7 @@ export function PanelConfigurationForm({
                               ...config.fieldConfig?.defaults,
                               custom: {
                                 ...config.fieldConfig?.defaults?.custom,
-                                lineWidth: parseInt(e.target.value) || 1,
+                                lineWidth: parseInt(value) || 1,
                               },
                             },
                           },
@@ -473,7 +474,7 @@ export function PanelConfigurationForm({
                     >
                       Fill Opacity (0-1)
                     </Label>
-                    <Input
+                    <DebouncedInput
                       id="fill-opacity"
                       type="number"
                       min="0"
@@ -482,7 +483,7 @@ export function PanelConfigurationForm({
                       value={
                         config.fieldConfig?.defaults?.custom?.fillOpacity || ""
                       }
-                      onChange={(e) =>
+                      onValueChange={(value) =>
                         onConfigChange({
                           fieldConfig: {
                             ...config.fieldConfig,
@@ -490,7 +491,7 @@ export function PanelConfigurationForm({
                               ...config.fieldConfig?.defaults,
                               custom: {
                                 ...config.fieldConfig?.defaults?.custom,
-                                fillOpacity: parseFloat(e.target.value) || 0,
+                                fillOpacity: parseFloat(value) || 0,
                               },
                             },
                           },

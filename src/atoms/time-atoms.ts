@@ -1,39 +1,15 @@
 import { atom } from "jotai";
 import { atomWithStorage } from "jotai/utils";
+import type { TimeRange } from "@/types/tab.types";
+import { currentTabTimeFieldAtom, currentTabTimeRangeAtom, currentTabTimeZoneAtom } from "./tab-atoms";
 
-// Time range types
-export interface TimeRange {
-  type: "relative" | "absolute";
-  from: string;
-  to: string;
-  field?: string;
-  display?: string;
-}
+// Re-export TimeRange for backward compatibility
+export type { TimeRange };
 
-// Time selection atoms - Fixed to not add extra quotes
-export const selectedTimeFieldAtom = atomWithStorage<string>(
-  "gigapi_selected_time_field",
-  "",
-  {
-    getItem: (key) => localStorage.getItem(key) || "",
-    setItem: (key, value) => localStorage.setItem(key, value),
-    removeItem: (key) => localStorage.removeItem(key),
-  }
-);
-export const timeRangeAtom = atomWithStorage<TimeRange>("gigapi_time_range", {
-  type: "relative",
-  from: "now-5m",
-  to: "now",
-});
-export const selectedTimeZoneAtom = atomWithStorage<string>(
-  "gigapi_timezone",
-  "UTC",
-  {
-    getItem: (key) => localStorage.getItem(key) || "UTC",
-    setItem: (key, value) => localStorage.setItem(key, value),
-    removeItem: (key) => localStorage.removeItem(key),
-  }
-);
+// Time selection atoms - now use tab-aware versions
+export const selectedTimeFieldAtom = currentTabTimeFieldAtom;
+export const timeRangeAtom = currentTabTimeRangeAtom;
+export const selectedTimeZoneAtom = currentTabTimeZoneAtom;
 
 // Time variables detection
 export const hasTimeVariablesAtom = atom<boolean>(false);

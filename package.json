@@ -1,6 +1,6 @@
 {
   "name": "gigapi-ui",
-  "version": "1.0.17",
+  "version": "1.0.18",
   "type": "module",
   "description": "UI interface for GigAPI: The Infinite Timeseries Lakehouse. GigAPI UI provides a slick web interface to query time-series using GigAPI Catalog Metadata + DuckDB",
   "scripts": {
@@ -16,7 +16,7 @@
   "author": "",
   "license": "AGPL-3.0",
   "dependencies": {
-    "@hookform/resolvers": "^5.1.1",
+    "@hookform/resolvers": "^5.2.0",
     "@monaco-editor/react": "^4.7.0",
     "@radix-ui/react-checkbox": "^1.3.2",
     "@radix-ui/react-dialog": "^1.1.14",
@@ -33,7 +33,7 @@
     "@tanstack/react-table": "^8.21.3",
     "@tanstack/react-virtual": "^3.13.12",
     "@types/react-grid-layout": "^1.3.5",
-    "axios": "^1.10.0",
+    "axios": "^1.11.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
@@ -41,17 +41,17 @@
     "date-fns-tz": "^3.2.0",
     "echarts": "^5.6.0",
     "jotai": "^2.12.5",
-    "lucide-react": "^0.525.0",
+    "lucide-react": "^0.533.0",
     "pako": "^2.1.0",
-    "react": "^19.1.0",
-    "react-day-picker": "^9.8.0",
-    "react-dom": "^19.1.0",
+    "react": "^19.1.1",
+    "react-day-picker": "^9.8.1",
+    "react-dom": "^19.1.1",
     "react-grid-layout": "^1.5.2",
-    "react-hook-form": "^7.60.0",
+    "react-hook-form": "^7.61.1",
     "react-markdown": "^10.1.0",
     "react-resizable": "^3.0.5",
     "react-resizable-panels": "^3.0.3",
-    "react-router-dom": "^7.6.3",
+    "react-router-dom": "^7.7.1",
     "rehype-highlight": "^7.0.2",
     "rehype-katex": "^7.0.1",
     "remark-gfm": "^4.0.1",
@@ -59,18 +59,18 @@
     "sonner": "^2.0.6",
     "tailwind-merge": "^3.3.1",
     "uuid": "^11.1.0",
-    "vite": "^7.0.4",
-    "zod": "^4.0.5"
+    "vite": "^7.0.6",
+    "zod": "^4.0.11"
   },
   "devDependencies": {
-    "@types/node": "^24.0.13",
+    "@types/node": "^24.1.0",
     "@types/pako": "^2.0.3",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
     "@types/recharts": "^2.0.1",
-    "@vitejs/plugin-react": "^4.6.0",
-    "knip": "^5.61.3",
+    "@vitejs/plugin-react": "^4.7.0",
+    "knip": "^5.62.0",
     "tailwindcss": "^4.1.11",
-    "tw-animate-css": "^1.3.5"
+    "tw-animate-css": "^1.3.6"
   }
 }

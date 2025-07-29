@@ -2,7 +2,11 @@ import { useCallback } from "react";
 import { useAtom } from "jotai";
 import { UnifiedSchemaSelector } from "@/components/shared/UnifiedSchemaSelector";
 import TimeRangeSelector from "@/components/TimeRangeSelector";
-import { schemaLoadingAtom } from "@/atoms";
+import { 
+  schemaLoadingAtom,
+  currentTabDatabaseAtom,
+} from "@/atoms";
+import { Database } from "lucide-react";
 import type { TimeRange, ColumnSchema } from "@/types/utils.types";
 import type { TimeRange as DashboardTimeRange } from "@/types/dashboard.types";
 
@@ -57,6 +61,7 @@ export default function QueryEditorSelectors({
   onTimeRangeChange,
 }: QueryEditorSelectorsProps) {
   const [isSchemaLoading] = useAtom(schemaLoadingAtom);
+  const [selectedDbValue, setSelectedDb] = useAtom(currentTabDatabaseAtom);
   
   const handleTimeFieldChange = useCallback(
     (value: string) => {
@@ -77,23 +82,38 @@ export default function QueryEditorSelectors({
   );
 
 
-  if (!selectedDb) {
-    return null;
-  }
-
   return (
     <>
       {/* Desktop Layout */}
       <div className="hidden lg:flex items-center gap-2 ml-2">
         <div className="h-5 w-px bg-border mx-1"></div>
 
-        {/* Table Selector */}
+        {/* Database Selector */}
         <div className="flex items-center gap-1.5">
-          <span className="text-xs text-muted-foreground">FROM</span>
+          <Database className="h-3.5 w-3.5 text-muted-foreground" />
+          <span className="text-xs text-muted-foreground">DB</span>
+          <UnifiedSchemaSelector
+            type="database"
+            dataSource="atoms"
+            style="popover"
+            dynamic={true}
+            value={selectedDbValue || ""}
+            onChange={setSelectedDb}
+            className="w-auto min-w-[150px]"
+            showIcon={false}
+            label={null}
+          />
+        </div>
+
+        {/* Table Selector */}
+        {selectedDb && (
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs text-muted-foreground">FROM</span>
           <UnifiedSchemaSelector
             type="table"
             dataSource="atoms"
             style="popover"
+            dynamic={true}
             value={selectedTable || ""}
             onChange={onTableChange}
             database={selectedDb}
@@ -101,7 +121,8 @@ export default function QueryEditorSelectors({
             showIcon={false}
             label={null}
           />
-        </div>
+          </div>
+        )}
 
         {/* Time Field Selector */}
         {selectedTable && (
@@ -111,6 +132,7 @@ export default function QueryEditorSelectors({
               type="timeField"
               dataSource="atoms"
               style="popover"
+              dynamic={true}
               value={selectedTimeField || ""}
               onChange={handleTimeFieldChange}
               database={selectedDb}
@@ -139,16 +161,37 @@ export default function QueryEditorSelectors({
 
       {/* Mobile/Tablet Layout */}
       <div className="lg:hidden space-y-2">
+        {/* Database Selector */}
+        <div className="flex items-center gap-2">
+          <Database className="h-3.5 w-3.5 text-muted-foreground" />
+          <span className="text-xs text-muted-foreground">DB</span>
+          <div className="flex-1">
+            <UnifiedSchemaSelector
+              type="database"
+              dataSource="atoms"
+              style="popover"
+              dynamic={true}
+              value={selectedDbValue || ""}
+              onChange={setSelectedDb}
+              className="w-full"
+              showIcon={false}
+              label={null}
+            />
+          </div>
+        </div>
+
         {/* Table and Time Controls */}
-        <div className="flex flex-col sm:flex-row gap-2">
-          {/* Table Selector */}
-          <div className="flex items-center gap-1.5 min-w-0 flex-1">
-            <span className="text-xs text-muted-foreground flex-shrink-0">FROM</span>
+        {selectedDb && (
+          <div className="flex flex-col sm:flex-row gap-2">
+            {/* Table Selector */}
+            <div className="flex items-center gap-1.5 min-w-0 flex-1">
+              <span className="text-xs text-muted-foreground flex-shrink-0">FROM</span>
             <div className="min-w-0 flex-1">
               <UnifiedSchemaSelector
                 type="table"
                 dataSource="atoms"
                 style="popover"
+                dynamic={true}
                 value={selectedTable || ""}
                 onChange={onTableChange}
                 database={selectedDb}
@@ -170,6 +213,7 @@ export default function QueryEditorSelectors({
                   type="timeField"
                   dataSource="atoms"
                   style="popover"
+                  dynamic={true}
                   value={selectedTimeField || ""}
                   onChange={handleTimeFieldChange}
                   database={selectedDb}
@@ -184,6 +228,7 @@ export default function QueryEditorSelectors({
             </div>
           )}
         </div>
+        )}
 
         {/* Time Range Selector */}
         {selectedTable && selectedTimeField && (

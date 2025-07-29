@@ -65,9 +65,99 @@ export default function ArtifactRenderer({
   const [error, setError] = useState<string | null>(null);
   const [showDebug, setShowDebug] = useState(false);
   const [selectedTimeRange] = useState("1h");
-  const [selectedTimeField, setSelectedTimeField] = useState<string>(
-    (artifact.data as any).timeField || ""
-  );
+  
+  // Extract query and database from artifact - moved here to be available for state initialization
+  const getQueryInfo = useCallback(() => {
+    if (
+      isQueryArtifact(artifact) ||
+      isTableArtifact(artifact) ||
+      isMetricArtifact(artifact)
+    ) {
+      return {
+        query: artifact.data.query,
+        database: QuerySanitizer.stripAtSymbols(artifact.data.database),
+      };
+    }
+    if (isChartArtifact(artifact)) {
+      return {
+        query: artifact.data.query,
+        database: QuerySanitizer.stripAtSymbols(artifact.data.database),
+      };
+    }
+    if (isSummaryArtifact(artifact) || isInsightArtifact(artifact)) {
+      return {
+        query: artifact.data.query || null,
+        database: artifact.data.database ? QuerySanitizer.stripAtSymbols(artifact.data.database) : null,
+      };
+    }
+    return { query: null, database: null };
+  }, [artifact]);
+  
+  // Helper function to extract time field from query
+  const extractTimeFieldFromQuery = useCallback((query: string): string => {
+    if (!query) return "";
+    
+    // Common time field patterns in SQL queries
+    const timeFieldPatterns = [
+      // Look for explicit time fields in WHERE clauses, GROUP BY, ORDER BY
+      /(?:WHERE|GROUP BY|ORDER BY).*?([a-zA-Z_][a-zA-Z0-9_]*\.?[a-zA-Z_][a-zA-Z0-9_]*)\s*(?:>=|<=|>|<|=|\bBETWEEN\b)/gi,
+      // Look for DATE_TRUNC, DATE_FORMAT functions with time fields
+      /(?:DATE_TRUNC|DATE_FORMAT|EXTRACT)\s*\(\s*[^,]+,\s*([a-zA-Z_][a-zA-Z0-9_]*\.?[a-zA-Z_][a-zA-Z0-9_]*)\s*\)/gi,
+      // Look for time fields in SELECT with AS time/timestamp
+      /SELECT.*?([a-zA-Z_][a-zA-Z0-9_]*\.?[a-zA-Z_][a-zA-Z0-9_]*)\s+AS\s+(?:time|timestamp)/gi,
+      // Look for common time field names
+      /\b([a-zA-Z_]*(?:time|timestamp|date)[a-zA-Z0-9_]*)\b/gi
+    ];
+    
+    const potentialFields = new Set<string>();
+    
+    // Extract potential time fields using patterns
+    timeFieldPatterns.forEach(pattern => {
+      const matches = query.matchAll(pattern);
+      for (const match of matches) {
+        if (match[1]) {
+          // Clean up the field name (remove table prefixes if any)
+          const field = match[1].split('.').pop() || match[1];
+          potentialFields.add(field);
+        }
+      }
+    });
+    
+    // Priority order for time fields
+    const timeFieldPriority = [
+      '__timestamp',
+      'timestamp',
+      'time',
+      'created_at',
+      'updated_at',
+      'event_time',
+      'date_time',
+      'datetime',
+      'ts'
+    ];
+    
+    // Return the highest priority time field found
+    for (const priorityField of timeFieldPriority) {
+      for (const field of potentialFields) {
+        if (field.toLowerCase() === priorityField.toLowerCase()) {
+          return field;
+        }
+      }
+    }
+    
+    // Return the first time-like field found
+    return Array.from(potentialFields)[0] || "";
+  }, []);
+
+  const [selectedTimeField, setSelectedTimeField] = useState<string>(() => {
+    // Try to get time field from artifact data first
+    const artifactTimeField = (artifact.data as any).timeField;
+    if (artifactTimeField) return artifactTimeField;
+    
+    // Extract time field from query if not explicitly provided
+    const { query } = getQueryInfo();
+    return extractTimeFieldFromQuery(query || "");
+  });
 
   const {
     maxHeight = 400,
@@ -99,33 +189,6 @@ export default function ArtifactRenderer({
       case "metric":
         return <Activity className="w-4 h-4" />;
     }
-  };
-
-  // Extract query and database from artifact
-  const getQueryInfo = () => {
-    if (
-      isQueryArtifact(artifact) ||
-      isTableArtifact(artifact) ||
-      isMetricArtifact(artifact)
-    ) {
-      return {
-        query: artifact.data.query,
-        database: QuerySanitizer.stripAtSymbols(artifact.data.database),
-      };
-    }
-    if (isChartArtifact(artifact)) {
-      return {
-        query: artifact.data.query,
-        database: QuerySanitizer.stripAtSymbols(artifact.data.database),
-      };
-    }
-    if (isSummaryArtifact(artifact) || isInsightArtifact(artifact)) {
-      return {
-        query: artifact.data.query || null,
-        database: artifact.data.database ? QuerySanitizer.stripAtSymbols(artifact.data.database) : null,
-      };
-    }
-    return { query: null, database: null };
   };
 
   const { query, database } = getQueryInfo();
@@ -166,23 +229,70 @@ export default function ArtifactRenderer({
           to: "now"
         };
         
+        // Determine the time column to use with enhanced fallback logic
+        let timeColumn = selectedTimeField || 
+                        (isChartArtifact(artifact) ? artifact.data.fieldMapping?.xField : undefined) ||
+                        extractTimeFieldFromQuery(finalQuery);
+        
+        // Enhanced fallback: if no time column detected, try common defaults
+        if (!timeColumn) {
+          const commonTimeFields = ['__timestamp', 'timestamp', 'time', 'created_at', 'updated_at'];
+          log(artifact.id, "warn", "No time field detected, trying common defaults", {
+            commonTimeFields,
+            originalQuery: query,
+            finalQuery
+          });
+          
+          // Use the first common time field as fallback
+          timeColumn = commonTimeFields[0]; // Default to '__timestamp'
+        }
+        
+        log(artifact.id, "info", "Processing time variables", {
+          hasTimeVariables,
+          selectedTimeField,
+          extractedTimeField: extractTimeFieldFromQuery(finalQuery),
+          finalTimeColumn: timeColumn,
+          timeRange,
+          originalQuery: query,
+          usedFallback: !selectedTimeField && !extractTimeFieldFromQuery(finalQuery)
+        });
+        
+        if (!timeColumn) {
+          const errorMsg = "No time field could be determined for query with time variables. Please specify a time field or ensure your query includes time column references.";
+          log(artifact.id, "error", errorMsg, { 
+            query: finalQuery,
+            selectedTimeField,
+            extractedFromQuery: extractTimeFieldFromQuery(finalQuery),
+            artifactData: artifact.data 
+          });
+          throw new Error(errorMsg);
+        }
+        
         const processedResult = QueryProcessor.process({
           database,
           query: finalQuery,
           timeRange,
-          timeColumn: selectedTimeField || (isChartArtifact(artifact) ? artifact.data.fieldMapping?.xField : undefined),
+          timeColumn,
           timeZone: "UTC",
           maxDataPoints: 1000,
         });
 
         if (processedResult.errors.length > 0) {
+          log(artifact.id, "error", "Query processing failed", {
+            errors: processedResult.errors,
+            originalQuery: query,
+            finalQuery,
+            timeColumn,
+            timeRange
+          });
           throw new Error(processedResult.errors.join(", "));
         }
 
         finalQuery = processedResult.query;
-        log(artifact.id, "info", "Time variables processed", { 
+        log(artifact.id, "info", "Time variables processed successfully", { 
           originalQuery: query,
           finalQuery,
+          timeColumn,
           interpolatedVars: processedResult.interpolatedVars,
         });
       } else {
@@ -191,6 +301,12 @@ export default function ArtifactRenderer({
           finalQuery,
         });
       }
+
+      log(artifact.id, "info", "Executing final query", {
+        finalQuery,
+        database,
+        apiUrl: `${apiUrl}?db=${encodeURIComponent(database)}&format=ndjson`
+      });
 
       const response = await axios.post(
         `${apiUrl}?db=${encodeURIComponent(database)}&format=ndjson`,
@@ -201,7 +317,11 @@ export default function ArtifactRenderer({
       const parseResult = parseNDJSON(response.data);
 
       if (parseResult.errors.length > 0) {
-        throw new Error(parseResult.errors.join(", "));
+        log(artifact.id, "error", "NDJSON parsing failed", {
+          parseErrors: parseResult.errors,
+          rawResponse: response.data?.substring(0, 500)
+        });
+        throw new Error(`Query result parsing failed: ${parseResult.errors.join(", ")}`);
       }
 
       const results = parseResult.records;
@@ -209,15 +329,54 @@ export default function ArtifactRenderer({
       setData(results);
       log(artifact.id, "info", "Query executed successfully", {
         rowCount: results.length,
+        firstRowSample: results.length > 0 ? Object.keys(results[0]).slice(0, 5) : []
       });
 
       endOperation(opId, { rowCount: results.length });
     } catch (err: any) {
-      const errorMessage =
-        err.response?.data || err.message || "Failed to execute query";
+      let errorMessage = "Failed to execute query";
+      let errorDetails: any = {};
+
+      if (err.response) {
+        // Server responded with error status
+        const status = err.response.status;
+        const responseData = err.response.data;
+        
+        if (status === 500) {
+          errorMessage = "Server error (500): Query execution failed on the database server";
+          errorDetails = {
+            status,
+            serverResponse: responseData?.substring ? responseData.substring(0, 200) : responseData,
+            possibleCauses: [
+              "Invalid SQL syntax",
+              "Missing or incorrect time field references", 
+              "Database connection issues",
+              "Query timeout"
+            ]
+          };
+        } else if (status === 400) {
+          errorMessage = "Bad request (400): Query is malformed or invalid";
+          errorDetails = { status, serverResponse: responseData };
+        } else {
+          errorMessage = `HTTP ${status}: ${responseData || err.message}`;
+          errorDetails = { status, serverResponse: responseData };
+        }
+      } else if (err.code === 'ECONNABORTED') {
+        errorMessage = "Query timeout: The query took too long to execute (30s limit)";
+        errorDetails = { timeout: true, limit: "30 seconds" };
+      } else if (err.message) {
+        errorMessage = err.message;
+        errorDetails = { originalError: err.message };
+      }
+
       setError(errorMessage);
       log(artifact.id, "error", "Query execution failed", {
         error: errorMessage,
+        errorDetails,
+        query: finalQuery,
+        database,
+        timeColumn,
+        timeRange: hasTimeVariables ? timeRange : undefined
       });
       endOperation(opId, undefined, err);
     } finally {
@@ -229,6 +388,9 @@ export default function ArtifactRenderer({
     apiUrl,
     artifact,
     selectedTimeRange,
+    selectedTimeField,
+    extractTimeFieldFromQuery,
+    getQueryInfo,
     log,
     startOperation,
     endOperation,
@@ -443,9 +605,11 @@ export default function ArtifactRenderer({
                 <TimeFieldSelector
                   query={query}
                   database={database || undefined}
+                  table={isTableArtifact(artifact) ? artifact.data.query.match(/FROM\s+(\w+)/i)?.[1] : undefined}
                   value={selectedTimeField}
                   onChange={setSelectedTimeField}
                   className="max-w-xs"
+                  dynamic={true} // Enable dynamic mode for chat artifacts
                 />
               </div>
             )}

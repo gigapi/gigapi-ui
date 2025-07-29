@@ -7,8 +7,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
-import { Clock, AlertCircle } from "lucide-react";
+import { Clock, AlertCircle, RefreshCw } from "lucide-react";
 import { cn } from "@/lib";
+import { useDynamicSchemaData } from "@/hooks/useDynamicSchemaData";
 
 interface TimeFieldSelectorProps {
   query: string;
@@ -17,17 +18,29 @@ interface TimeFieldSelectorProps {
   onChange: (field: string) => void;
   schemaColumns?: string[];
   className?: string;
+  // Dynamic mode for real-time schema fetching
+  dynamic?: boolean;
+  table?: string;
 }
 
 export default function TimeFieldSelector({
   query,
+  database,
+  table,
   value,
   onChange,
   schemaColumns = [],
   className,
+  dynamic = false,
 }: TimeFieldSelectorProps) {
   const [detectedField, setDetectedField] = useState<string | null>(null);
   const [availableFields, setAvailableFields] = useState<string[]>([]);
+  
+  // Dynamic schema hook for real-time data (when enabled)
+  const dynamicData = useDynamicSchemaData({
+    database: dynamic ? database : undefined,
+    table: dynamic ? table : undefined,
+  });
 
   // Common time field patterns
   const commonTimeFields = [
@@ -65,9 +78,13 @@ export default function TimeFieldSelector({
       }
     }
 
-    // Also check schema columns if available
-    if (schemaColumns.length > 0) {
-      const timeColumns = schemaColumns.filter((col) =>
+    // Get columns from dynamic data if enabled, otherwise use provided schema
+    const columnsToCheck = dynamic && database && table && dynamicData.timeFields.length > 0
+      ? dynamicData.timeFields.map(field => field.name)
+      : schemaColumns;
+      
+    if (columnsToCheck.length > 0) {
+      const timeColumns = columnsToCheck.filter((col) =>
         commonTimeFields.some((tf) => col.toLowerCase().includes(tf))
       );
       foundFields.push(...timeColumns);
@@ -88,17 +105,27 @@ export default function TimeFieldSelector({
       onChange(preferred);
       setDetectedField(preferred);
     }
-  }, [query, schemaColumns, value, onChange]);
+  }, [query, schemaColumns, value, onChange, dynamic, database, table, dynamicData.timeFields]);
 
   const hasTimeFilter = query.includes("$__timeFilter");
   const needsTimeField = hasTimeFilter && !value;
+  const isLoading = dynamic && dynamicData.isLoading;
 
   return (
     <div className={cn("space-y-2", className)}>
       <div className="flex items-center gap-2">
-        <Clock className="w-4 h-4 text-muted-foreground" />
+        {isLoading ? (
+          <RefreshCw className="w-4 h-4 text-muted-foreground animate-spin" />
+        ) : (
+          <Clock className="w-4 h-4 text-muted-foreground" />
+        )}
         <Label htmlFor="time-field" className="text-sm font-medium">
           Time Field
+          {dynamic && (
+            <span className="ml-1 text-xs text-green-600 font-normal">
+              (live)
+            </span>
+          )}
         </Label>
         {needsTimeField && <AlertCircle className="w-4 h-4 text-yellow-500" />}
       </div>
@@ -106,9 +133,14 @@ export default function TimeFieldSelector({
       <Select value={value || ""} onValueChange={onChange}>
         <SelectTrigger
           id="time-field"
-          className={cn("w-full", needsTimeField && "border-yellow-500")}
+          className={cn(
+            "w-full", 
+            needsTimeField && "border-yellow-500",
+            isLoading && "opacity-50"
+          )}
+          disabled={isLoading}
         >
-          <SelectValue placeholder="Select time field" />
+          <SelectValue placeholder={isLoading ? "Loading fields..." : "Select time field"} />
         </SelectTrigger>
         <SelectContent>
           {availableFields.length > 0 ? (
@@ -118,6 +150,11 @@ export default function TimeFieldSelector({
                 <SelectItem key={field} value={field}>
                   {field}
                   {field === detectedField && " (detected)"}
+                  {dynamic && dynamicData.timeFields.find(f => f.name === field)?.timeUnit && (
+                    <span className="text-xs text-muted-foreground ml-2">
+                      ({dynamicData.timeFields.find(f => f.name === field)?.timeUnit})
+                    </span>
+                  )}
                 </SelectItem>
               ))}
             </>

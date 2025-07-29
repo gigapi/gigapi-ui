@@ -468,7 +468,7 @@ export default function DashboardList() {
   const breadcrumbs = [{ label: "Dashboards" }];
 
   return (
-    <AppLayout breadcrumbs={breadcrumbs} showDatabaseControls={true}>
+    <AppLayout breadcrumbs={breadcrumbs} showDatabaseControls={false}>
       <div className="flex-1 overflow-y-auto p-4 md:p-6">
         <div className="container mx-auto ">
           <div className="flex items-center py-4 gap-2 justify-between">

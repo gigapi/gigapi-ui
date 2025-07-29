@@ -1,4 +1,4 @@
-import { useMemo, useRef, useEffect } from "react";
+import { useMemo, useRef, useEffect, useState, memo } from "react";
 import * as echarts from "echarts";
 import { type PanelProps } from "@/types/dashboard.types";
 import { withPanelWrapper } from "./BasePanel";
@@ -9,26 +9,41 @@ function SingleGaugePanel({ config, data }: PanelProps) {
   const chartRef = useRef<HTMLDivElement>(null);
   const chartInstance = useRef<echarts.ECharts | null>(null);
 
+  // Detect current theme
+  const [isDarkMode, setIsDarkMode] = useState(() =>
+    document.documentElement.classList.contains("dark")
+  );
+
+  // Track container dimensions for responsive sizing
+  const [containerDimensions, setContainerDimensions] = useState({
+    width: 400,
+    height: 400,
+  });
+
   const gaugeData = useMemo(() => {
     if (!data || data.length === 0) return null;
 
     // Check if data has standard chart format with x, y properties
-    const hasChartFormat = data.length > 0 && data[0].hasOwnProperty('y');
-    
+    const hasChartFormat = data.length > 0 && data[0].hasOwnProperty("y");
+
     let displayValue: number;
     let fieldName: string = "";
-    
-    if (hasChartFormat && typeof data[0].y === 'number') {
+
+    if (hasChartFormat && typeof data[0].y === "number") {
       // Handle pre-processed data (from MultiGaugePanel or stat data)
-      const values = data.map(d => d.y).filter(v => typeof v === 'number');
+      const values = data.map((d) => d.y).filter((v) => typeof v === "number");
       if (values.length === 0) return null;
-      
-      // Use config title if available, otherwise use series name
-      fieldName = config.title || (data[0].series && data[0].series !== 'stats' ? data[0].series : config.fieldMapping?.yField || "value");
-      
+
+      // Use yField from mapping, then series, then fallback to config title
+      fieldName =
+        config.fieldMapping?.yField ||
+        (data[0].series && data[0].series !== "stats"
+          ? data[0].series
+          : config.title || "Value");
+
       // Calculate display value based on stat mode
       const statMode = config.options?.stat?.mode || "current";
-      
+
       if (data.length === 1) {
         // Single value
         displayValue = values[0];
@@ -38,7 +53,7 @@ function SingleGaugePanel({ config, data }: PanelProps) {
         const min = Math.min(...values);
         const max = Math.max(...values);
         const avg = values.reduce((sum, val) => sum + val, 0) / values.length;
-        
+
         switch (statMode) {
           case "average":
             displayValue = avg;
@@ -111,21 +126,22 @@ function SingleGaugePanel({ config, data }: PanelProps) {
           displayValue = current;
           break;
       }
-      
-      fieldName = valueField;
+
+      // Use the configured yField if available, otherwise use the detected field
+      fieldName = config.fieldMapping?.yField || valueField;
     }
 
     // Get field config for unit and decimals
     const fieldConfig = config.fieldConfig?.defaults;
-    
+
     // Always use 0-100 scale for simplicity
     const minValue = 0;
     const maxValue = 100;
-    
+
     // Calculate the actual data range for mapping
     let dataMin = 0;
     let dataMax = 100;
-    
+
     if (fieldConfig?.min !== undefined && fieldConfig?.max !== undefined) {
       dataMin = fieldConfig.min;
       dataMax = fieldConfig.max;
@@ -165,72 +181,113 @@ function SingleGaugePanel({ config, data }: PanelProps) {
   const chartOptions = useMemo(() => {
     if (!gaugeData) return {};
 
+    // Calculate responsive sizes based on container
+    const containerWidth = containerDimensions.width;
+    const containerHeight = containerDimensions.height;
+    const minDimension = Math.min(containerWidth, containerHeight);
+
+    // Scale font sizes based on container size - more aggressive scaling
+    const valueFontSize = Math.max(32, Math.min(72, minDimension * 0.18));
+    const unitFontSize = Math.max(16, Math.min(32, minDimension * 0.08));
+    const axisLabelFontSize = Math.max(10, Math.min(14, minDimension * 0.035));
+
     // Map the actual value to 0-100 range
-    const normalizedValue = ((gaugeData.value - gaugeData.dataMin) / (gaugeData.dataMax - gaugeData.dataMin)) * 100;
-    
+    const normalizedValue =
+      ((gaugeData.value - gaugeData.dataMin) /
+        (gaugeData.dataMax - gaugeData.dataMin)) *
+      100;
+
     // Clamp to 0-100
     const clampedValue = Math.max(0, Math.min(100, normalizedValue));
 
-    // Simple color logic based on percentage
-    let progressGradient;
-    
+    // Determine progress color based on value
+    let progressColor;
+    let thresholdColors;
+
     if (clampedValue < 33) {
-      // Green for low values
-      progressGradient = {
-        type: "linear",
-        x: 0,
-        y: 0,
-        x2: 0,
-        y2: 1,
-        colorStops: [
-          { offset: 0, color: "#10b981" },
-          { offset: 1, color: "#059669" },
-        ],
-      };
+      progressColor = "#10b981"; // Green
+      thresholdColors = [
+        [0.33, "#10b981"], // Green up to 33%
+        [0.66, "#f59e0b"], // Yellow 33-66%
+        [1, "#ef4444"], // Red 66-100%
+      ];
     } else if (clampedValue < 66) {
-      // Yellow/amber for medium values
-      progressGradient = {
-        type: "linear",
-        x: 0,
-        y: 0,
-        x2: 0,
-        y2: 1,
-        colorStops: [
-          { offset: 0, color: "#f59e0b" },
-          { offset: 1, color: "#d97706" },
-        ],
-      };
+      progressColor = "#f59e0b"; // Yellow
+      thresholdColors = [
+        [0.33, "#10b981"], // Green up to 33%
+        [0.66, "#f59e0b"], // Yellow 33-66%
+        [1, "#ef4444"], // Red 66-100%
+      ];
     } else {
-      // Red for high values
-      progressGradient = {
-        type: "linear",
-        x: 0,
-        y: 0,
-        x2: 0,
-        y2: 1,
-        colorStops: [
-          { offset: 0, color: "#ef4444" },
-          { offset: 1, color: "#dc2626" },
-        ],
-      };
+      progressColor = "#ef4444"; // Red
+      thresholdColors = [
+        [0.33, "#10b981"], // Green up to 33%
+        [0.66, "#f59e0b"], // Yellow 33-66%
+        [1, "#ef4444"], // Red 66-100%
+      ];
     }
 
     const gaugeDecimals = gaugeData.decimals;
     const gaugeUnit = gaugeData.unit;
 
-    // Use theme CSS variables with better visibility
+    // Use theme CSS variables with Grafana-style visibility
     const textColor = "hsl(var(--foreground))";
     const subtextColor = "hsl(var(--muted-foreground))";
-    const trackColor = "hsl(var(--muted) / 0.5)"; // More visible in both themes
 
     return {
       backgroundColor: "transparent",
       tooltip: {
         trigger: "item",
-        formatter: function() {
+        confine: true,
+        appendToBody: true,
+        renderMode: "html",
+        position: function (point: number[], size: any) {
+          if (!point || !Array.isArray(point) || point.length < 2) {
+            return [10, 10];
+          }
+
+          if (!size || !size.viewSize || !size.contentSize) {
+            return [point[0] + 15, point[1] - 15];
+          }
+
+          const x = point[0];
+          const y = point[1];
+          const viewWidth = size.viewSize[0];
+          const viewHeight = size.viewSize[1];
+          const boxWidth = size.contentSize[0];
+          const boxHeight = size.contentSize[1];
+
+          let posX = x + 15;
+          let posY = y - boxHeight - 15;
+
+          if (posX + boxWidth > viewWidth) {
+            posX = x - boxWidth - 15;
+          }
+
+          if (posY < 0) {
+            posY = y + 15;
+          }
+
+          if (posY + boxHeight > viewHeight) {
+            posY = viewHeight - boxHeight - 5;
+          }
+
+          return [posX, posY];
+        },
+        backgroundColor: isDarkMode
+          ? "rgba(30, 30, 30, 0.9)"
+          : "rgba(255, 255, 255, 0.95)",
+        borderWidth: 1,
+        borderColor: isDarkMode ? "#525252" : "#d0d0d0",
+        textStyle: {
+          color: isDarkMode ? "#e0e0e0" : "#333333",
+          fontSize: 12,
+        },
+        extraCssText: "z-index: 9999; pointer-events: none;",
+        formatter: function () {
           const value = gaugeData.value;
           let formattedValue: string;
-          
+
           if (Math.abs(value) >= 1e9) {
             formattedValue = (value / 1e9).toFixed(gaugeDecimals) + "B";
           } else if (Math.abs(value) >= 1e6) {
@@ -240,98 +297,102 @@ function SingleGaugePanel({ config, data }: PanelProps) {
           } else {
             formattedValue = value.toFixed(gaugeDecimals);
           }
-          
-          return `<div style="padding: 8px;">
-            <div style="font-weight: 600; margin-bottom: 4px;">${formatFieldName(gaugeData.fieldName)}</div>
-            <div style="font-size: 20px; font-weight: 300;">${formattedValue}${gaugeUnit ? ' ' + gaugeUnit : ''}</div>
-          </div>`;
-        },
-        backgroundColor: "rgba(0, 0, 0, 0.8)",
-        borderColor: "transparent",
-        textStyle: {
-          color: "#fff",
+
+          const marker = `<span style="display:inline-block;margin-right:8px;border-radius:50%;width:8px;height:8px;background-color:${progressColor};"></span>`;
+
+          return `<div style="margin-bottom: 6px;"><strong>${formatFieldName(
+            gaugeData.fieldName
+          )}</strong></div>
+            <div style="margin: 2px 0;">${marker}<span style="color: ${progressColor};">Value:</span> <strong>${formattedValue}${
+            gaugeUnit ? " " + gaugeUnit : ""
+          }</strong></div>`;
         },
       },
       series: [
         {
           type: "gauge",
-          startAngle: 200,
-          endAngle: -20,
+          startAngle: 225,
+          endAngle: -45,
           min: 0,
           max: 100,
           center: ["50%", "55%"],
-          radius: "80%",
+          radius: "75%",
           axisLine: {
             roundCap: true,
             lineStyle: {
-              width: 25,
-              color: [[1, trackColor]],
+              width: 20,
+              color: [
+                [
+                  1,
+                  isDarkMode
+                    ? "rgba(255, 255, 255, 0.08)"
+                    : "rgba(0, 0, 0, 0.08)",
+                ],
+              ],
             },
           },
           progress: {
             show: true,
-            overlap: false,
+            overlap: true, // Overlay on track
             roundCap: true,
             clip: false,
+            width: 20,
             itemStyle: {
-              color: progressGradient,
-              shadowBlur: 10,
-              shadowColor: "rgba(0, 0, 0, 0.2)",
+              color: progressColor,
             },
           },
           splitLine: {
             show: true,
-            distance: -35,
-            length: 35,
+            distance: -30,
+            length: 8,
             lineStyle: {
-              width: 4,
-              color: trackColor,
+              width: 1.5,
+              color: isDarkMode
+                ? "rgba(255, 255, 255, 0.1)"
+                : "rgba(0, 0, 0, 0.1)",
             },
           },
           axisTick: {
             show: true,
             splitNumber: 5,
-            distance: -30,
-            length: 8,
+            distance: -25,
+            length: 4,
             lineStyle: {
-              width: 2,
-              color: trackColor,
+              width: 1,
+              color: isDarkMode
+                ? "rgba(255, 255, 255, 0.08)"
+                : "rgba(0, 0, 0, 0.08)",
             },
           },
           axisLabel: {
             show: true,
-            distance: -50,
-            color: subtextColor,
-            fontSize: 11,
+            distance: -45,
+            color: isDarkMode
+              ? "rgba(255, 255, 255, 0.5)"
+              : "rgba(0, 0, 0, 0.5)",
+            fontSize: axisLabelFontSize,
             formatter: function (value: number) {
-              // Show 0-100 on the gauge
-              return value.toString();
+              // Map 0-100 back to actual data range for display
+              const actualValue =
+                gaugeData.dataMin +
+                (value / 100) * (gaugeData.dataMax - gaugeData.dataMin);
+              return Math.round(actualValue).toString();
             },
           },
           pointer: {
             show: true,
-            width: 6,
-            length: "70%",
-            offsetCenter: [0, "-5%"],
+            width: 3,
+            length: "50%",
+            offsetCenter: [0, "-10%"],
             itemStyle: {
-              color: progressGradient.colorStops[0].color,
-              borderColor: progressGradient.colorStops[0].color,
-              borderWidth: 1,
-              shadowBlur: 8,
-              shadowColor: "rgba(0, 0, 0, 0.3)",
+              color: isDarkMode
+                ? "rgba(255, 255, 255, 0.6)"
+                : "rgba(0, 0, 0, 0.6)",
+              borderWidth: 0,
             },
           },
           anchor: {
-            show: true,
-            showAbove: true,
-            size: 20,
-            itemStyle: {
-              color: progressGradient.colorStops[0].color,
-              borderWidth: 8,
-              borderColor: "hsl(var(--background))",
-              shadowBlur: 10,
-              shadowColor: "rgba(0, 0, 0, 0.2)",
-            },
+            show: false, // Hide for cleaner look
           },
           title: {
             show: false,
@@ -361,16 +422,16 @@ function SingleGaugePanel({ config, data }: PanelProps) {
             },
             rich: {
               value: {
-                fontSize: 56,
-                fontWeight: "300",
+                fontSize: valueFontSize,
+                fontWeight: "500",
                 color: textColor,
                 padding: [0, 0],
                 fontFamily: "'Inter', system-ui, -apple-system, sans-serif",
               },
               unit: {
-                fontSize: 24,
+                fontSize: unitFontSize,
                 color: subtextColor,
-                padding: [20, 0, 0, 2],
+                padding: [valueFontSize * 0.35, 0, 0, 2],
                 fontFamily: "'Inter', system-ui, -apple-system, sans-serif",
               },
             },
@@ -382,53 +443,62 @@ function SingleGaugePanel({ config, data }: PanelProps) {
           ],
         },
       ],
-      graphic: [
-        {
-          type: "text",
-          left: "center",
-          bottom: "20%",
-          style: {
-            text: formatFieldName(gaugeData.fieldName),
-            textAlign: "center",
-            fontSize: 16,
-            fontWeight: 500,
-            fill: subtextColor,
-            fontFamily: "'Inter', system-ui, -apple-system, sans-serif",
-          },
-        },
-      ],
+      // Removed graphic text element to clean up the gauge
     };
-  }, [gaugeData]);
+  }, [gaugeData, isDarkMode, containerDimensions]);
 
-  // Initialize and update chart
+  // Watch for theme changes
+  useEffect(() => {
+    const observer = new MutationObserver(() => {
+      setIsDarkMode(document.documentElement.classList.contains("dark"));
+    });
+
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class"],
+    });
+
+    return () => observer.disconnect();
+  }, []);
+
+  // Watch for container size changes
+  useEffect(() => {
+    if (!chartRef.current) return;
+
+    const resizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+        setContainerDimensions({ width, height });
+      }
+    });
+
+    resizeObserver.observe(chartRef.current);
+
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, []);
+
+  // Initialize chart instance
   useEffect(() => {
     if (!chartRef.current || !gaugeData) return;
 
     try {
-      // Initialize chart instance
-      if (!chartInstance.current) {
-        chartInstance.current = echarts.init(chartRef.current, null, {
-          renderer: "canvas",
-        });
+      // Dispose existing instance if any
+      if (chartInstance.current) {
+        chartInstance.current.dispose();
+        chartInstance.current = null;
       }
 
-      // Set chart options
-      chartInstance.current.setOption(chartOptions);
+      // Initialize new chart instance
+      chartInstance.current = echarts.init(chartRef.current, null, {
+        renderer: "canvas",
+      });
 
       // Handle resize
       const handleResize = () => {
         chartInstance.current?.resize();
       };
-
-      // Handle theme changes
-      const observer = new MutationObserver(() => {
-        chartInstance.current?.setOption(chartOptions);
-      });
-
-      observer.observe(document.documentElement, {
-        attributes: true,
-        attributeFilter: ["class"],
-      });
 
       window.addEventListener("resize", handleResize);
 
@@ -437,21 +507,45 @@ function SingleGaugePanel({ config, data }: PanelProps) {
 
       return () => {
         window.removeEventListener("resize", handleResize);
-        observer.disconnect();
+        if (chartInstance.current) {
+          chartInstance.current.dispose();
+          chartInstance.current = null;
+        }
       };
     } catch (error) {
       console.error("[SingleGaugePanel] Error initializing chart:", error);
     }
+  }, []); // Only run on mount/unmount
+
+  // Update chart options separately
+  useEffect(() => {
+    if (!chartInstance.current || !gaugeData) return;
+
+    try {
+      chartInstance.current.setOption(chartOptions, {
+        notMerge: true,
+        lazyUpdate: true,
+      });
+    } catch (error) {
+      console.error("[SingleGaugePanel] Error updating chart:", error);
+    }
   }, [chartOptions, gaugeData]);
 
-  // Cleanup on unmount
+  // Handle resize separately
   useEffect(() => {
+    if (!chartInstance.current) return;
+
+    const handleResize = () => {
+      chartInstance.current?.resize();
+    };
+
+    const resizeObserver = new ResizeObserver(handleResize);
+    if (chartRef.current) {
+      resizeObserver.observe(chartRef.current);
+    }
+
     return () => {
-      try {
-        chartInstance.current?.dispose();
-      } catch (error) {
-        console.error("[SingleGaugePanel] Error disposing chart:", error);
-      }
+      resizeObserver.disconnect();
     };
   }, []);
 
@@ -478,24 +572,26 @@ function MultiGaugePanel({ config, data }: PanelProps) {
       const firstRecord = data[0];
       const fields = Object.keys(firstRecord);
       const numericFields = fields.filter((field) => {
-        if (field === 'x' || field === 'y' || field === 'series') return false;
+        if (field === "x" || field === "y" || field === "series") return false;
         const value = firstRecord[field];
         return (
           typeof value === "number" ||
           (typeof value === "string" && !isNaN(Number(value)))
         );
       });
-      
+
       // If we have multiple numeric fields, create a gauge for each
       if (numericFields.length > 1) {
-        return numericFields.map(field => {
+        return numericFields.map((field) => {
           // Create a single-element array with just this field's data
-          const fieldData = [{
-            [field]: firstRecord[field],
-            x: firstRecord.x,
-            y: firstRecord[field],
-            series: field
-          }];
+          const fieldData = [
+            {
+              [field]: firstRecord[field],
+              x: firstRecord.x,
+              y: firstRecord[field],
+              series: field,
+            },
+          ];
           return [field, fieldData] as [string, any[]];
         });
       }
@@ -579,10 +675,7 @@ function MultiGaugePanel({ config, data }: PanelProps) {
         )}
       >
         {groupedGauges.map(([label, records]) => (
-          <div
-            key={label}
-            className="border rounded-lg bg-card p-4 h-full"
-          >
+          <div key={label} className="border rounded-lg bg-card p-4 h-full">
             <div className="text-center mb-2">
               <div className="text-sm font-medium text-muted-foreground">
                 {formatFieldName(label)}
@@ -608,9 +701,12 @@ function GaugePanel({ config, data }: PanelProps) {
     if (!data || data.length === 0) return false;
 
     // Check if this is stat data (single gauge)
-    const isStatData = data.length > 0 && data[0].x && typeof data[0].x === "string" && 
+    const isStatData =
+      data.length > 0 &&
+      data[0].x &&
+      typeof data[0].x === "string" &&
       ["current", "average", "min", "max"].includes(data[0].x);
-    
+
     if (isStatData) {
       return false; // Stat data should show single gauge
     }
@@ -620,14 +716,14 @@ function GaugePanel({ config, data }: PanelProps) {
       const firstRecord = data[0];
       const fields = Object.keys(firstRecord);
       const numericFields = fields.filter((field) => {
-        if (field === 'x' || field === 'y' || field === 'series') return false;
+        if (field === "x" || field === "y" || field === "series") return false;
         const value = firstRecord[field];
         return (
           typeof value === "number" ||
           (typeof value === "string" && !isNaN(Number(value)))
         );
       });
-      
+
       // If we have more than one numeric field, show multiple gauges
       if (numericFields.length > 1) {
         return true;
@@ -685,43 +781,6 @@ function GaugePanel({ config, data }: PanelProps) {
   );
 }
 
-function getDefaultColor(index: number): string {
-  const colors = [
-    "#10b981", // Emerald
-    "#f59e0b", // Amber
-    "#ef4444", // Red
-    "#3b82f6", // Blue
-    "#8b5cf6", // Violet
-    "#ec4899", // Pink
-    "#14b8a6", // Teal
-  ];
-  return colors[index % colors.length];
-}
-
-function adjustColorBrightness(color: string, percent: number): string {
-  // Convert hex to RGB
-  const num = parseInt(color.replace("#", ""), 16);
-  const amt = Math.round(2.55 * percent);
-  const R = (num >> 16) + amt;
-  const G = ((num >> 8) & 0x00ff) + amt;
-  const B = (num & 0x0000ff) + amt;
-  
-  // Ensure values are within valid range
-  const clamp = (val: number) => Math.max(0, Math.min(255, val));
-  
-  return (
-    "#" +
-    (
-      0x1000000 +
-      clamp(R) * 0x10000 +
-      clamp(G) * 0x100 +
-      clamp(B)
-    )
-      .toString(16)
-      .slice(1)
-  );
-}
-
 function formatFieldName(fieldName: string): string {
   // Handle function expressions like avg(temperature), sum(sales), etc.
   const functionMatch = fieldName.match(/^(\w+)\((.+)\)$/);
@@ -729,14 +788,22 @@ function formatFieldName(fieldName: string): string {
     const [, func, field] = functionMatch;
     // Capitalize function name and format field
     const formattedFunc = func.charAt(0).toUpperCase() + func.slice(1);
-    const formattedField = field.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+    const formattedField = field
+      .replace(/_/g, " ")
+      .replace(/\b\w/g, (l) => l.toUpperCase());
     return `${formattedFunc} ${formattedField}`;
   }
-  
+
   // Handle regular field names
-  return fieldName
-    .replace(/_/g, ' ')
-    .replace(/\b\w/g, l => l.toUpperCase());
+  return fieldName.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase());
 }
 
-export default withPanelWrapper(GaugePanel);
+// Memoize the gauge panel to prevent unnecessary re-renders
+const MemoizedGaugePanel = memo(GaugePanel, (prevProps, nextProps) => {
+  return (
+    prevProps.config === nextProps.config &&
+    prevProps.data === nextProps.data
+  );
+});
+
+export default withPanelWrapper(MemoizedGaugePanel);

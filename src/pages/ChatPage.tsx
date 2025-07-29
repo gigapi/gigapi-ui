@@ -137,7 +137,7 @@ export default function ChatPage({ chatId }: ChatPageProps) {
   ];
 
   return (
-    <AppLayout breadcrumbs={breadcrumbs} showDatabaseControls={true}>
+    <AppLayout breadcrumbs={breadcrumbs} showDatabaseControls={false}>
       <div className="h-full flex">
         <SimpleChatSidebar
           activeSessionId={activeSessionId}

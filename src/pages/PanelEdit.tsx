@@ -89,7 +89,6 @@ export default function PanelEdit(props?: PanelEditProps) {
   const [previewData, setPreviewData] = useState<any[] | null>(null);
   const [availableFields, setAvailableFields] = useState<string[]>([]);
   const [queryError, setQueryError] = useState<string | null>(null);
-  const [refreshTrigger, setRefreshTrigger] = useState(0);
 
   const isNewPanel = !panelId;
 
@@ -112,6 +111,7 @@ export default function PanelEdit(props?: PanelEditProps) {
       const updatedConfig = { ...localConfig, ...updates };
       setLocalConfig(updatedConfig);
       setHasChanges(true);
+      // Preview will update automatically via prop changes, no need for refreshTrigger
     },
     [localConfig]
   );
@@ -368,7 +368,6 @@ export default function PanelEdit(props?: PanelEditProps) {
 
     setIsExecuting(true);
     setQueryError(null);
-    setRefreshTrigger(Date.now()); // Trigger refresh in preview panel
     await executeQuery({ force: true });
   }, [localConfig, currentDashboard, executeQuery]);
 
@@ -581,9 +580,6 @@ export default function PanelEdit(props?: PanelEditProps) {
                       currentDashboard &&
                       previewData !== null ? (
                         <PanelDataProvider
-                          key={`${localConfig.type}-${
-                            localConfig.id || "preview"
-                          }`}
                           panelId={panelId || "preview"}
                           config={
                             {
@@ -593,7 +589,6 @@ export default function PanelEdit(props?: PanelEditProps) {
                           }
                           dashboard={currentDashboard}
                           autoRefresh={false}
-                          refreshTrigger={refreshTrigger}
                           externalData={previewData}
                         >
                           <EnhancedPanel
@@ -602,7 +597,7 @@ export default function PanelEdit(props?: PanelEditProps) {
                               {
                                 ...localConfig,
                                 id: panelId || "preview",
-                              } as PanelConfig
+                            } as PanelConfig
                             }
                             dashboard={currentDashboard}
                             className="w-full h-full"
