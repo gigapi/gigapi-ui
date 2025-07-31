@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { useAtom, useSetAtom } from "jotai";
+import { useAtom, useSetAtom, useAtomValue } from "jotai";
 import {
   tabsAtom,
   activeTabIdAtom,
@@ -8,6 +8,7 @@ import {
   closeTabAtom,
   renameTabAtom,
   duplicateTabAtom,
+  runningQueriesAtom,
 } from "@/atoms/tab-atoms";
 import { cn } from "@/lib/utils/class-utils";
 import { Button } from "@/components/ui/button";
@@ -34,6 +35,7 @@ import {
   MoreVertical,
   Copy,
   Edit2,
+  Loader2,
 } from "lucide-react";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { toast } from "sonner";
@@ -41,6 +43,7 @@ import { toast } from "sonner";
 export function TabBar() {
   const [tabs] = useAtom(tabsAtom);
   const [activeTabId] = useAtom(activeTabIdAtom);
+  const runningQueries = useAtomValue(runningQueriesAtom);
   const switchTab = useSetAtom(switchTabAtom);
   const createTab = useSetAtom(createTabAtom);
   const closeTab = useSetAtom(closeTabAtom);
@@ -99,7 +102,12 @@ export function TabBar() {
                 )}
                 onClick={() => switchTab(tab.id)}
               >
-                <span className="flex-1 truncate text-sm">{tab.name}</span>
+                <span className="flex-1 truncate text-sm flex items-center gap-2">
+                  {tab.name}
+                  {runningQueries.has(tab.id) && (
+                    <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
+                  )}
+                </span>
 
                 {/* Tab Actions */}
                 <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">

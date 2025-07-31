@@ -822,7 +822,7 @@ export const isCacheValidAtom = atom((get) => {
 export const cacheRefreshLoadingAtom = atom<boolean>(false);
 
 // Refresh cache
-export const refreshSchemaCacheAtom = atom(null, async (get, set) => {
+export const refreshSchemaCacheAtom = atom(null, async (_get, set) => {
   set(cacheRefreshLoadingAtom, true);
   const startTime = Date.now();
   
@@ -997,6 +997,7 @@ export const fetchFreshDatabasesAtom = atom(
         .filter(Boolean) || [];
         
       set(freshDatabasesAtom, databases);
+      set(freshDatabasesLoadedAtom, true);
       return databases;
     } catch (error) {
       console.error("[Fresh Databases] Failed to fetch:", error);
@@ -1008,9 +1009,9 @@ export const fetchFreshDatabasesAtom = atom(
   }
 );
 
-// Fresh tables - always fetch from API
+// Fresh tables - always fetch from API (keyed by database)
 export const freshTablesLoadingAtom = atom<boolean>(false);
-export const freshTablesAtom = atom<string[]>([]);
+export const freshTablesAtom = atom<Record<string, string[]>>({});
 
 export const fetchFreshTablesAtom = atom(
   null,
@@ -1018,7 +1019,6 @@ export const fetchFreshTablesAtom = atom(
     const apiUrl = get(apiUrlAtom);
     
     if (!database) {
-      set(freshTablesAtom, []);
       return [];
     }
     
@@ -1034,11 +1034,25 @@ export const fetchFreshTablesAtom = atom(
         ?.map((item: any) => item.table_name || item.Table || item.name)
         .filter(Boolean) || [];
         
-      set(freshTablesAtom, tables);
+      // Store tables keyed by database
+      set(freshTablesAtom, (prev) => ({
+        ...prev,
+        [database]: tables
+      }));
+      // Mark this database as having tables loaded
+      set(freshTablesLoadedForAtom, (prev: Set<string>) => {
+        const newSet = new Set(prev);
+        newSet.add(database);
+        return newSet;
+      });
       return tables;
     } catch (error) {
       console.error(`[Fresh Tables] Failed to fetch for ${database}:`, error);
-      set(freshTablesAtom, []);
+      // Don't clear all tables, just mark this database as empty
+      set(freshTablesAtom, (prev) => ({
+        ...prev,
+        [database]: []
+      }));
       return [];
     } finally {
       set(freshTablesLoadingAtom, false);
@@ -1046,9 +1060,9 @@ export const fetchFreshTablesAtom = atom(
   }
 );
 
-// Fresh schema - always fetch from API
+// Fresh schema - always fetch from API (keyed by database.table)
 export const freshSchemaLoadingAtom = atom<boolean>(false);
-export const freshSchemaAtom = atom<ColumnSchema[]>([]);
+export const freshSchemaAtom = atom<Record<string, ColumnSchema[]>>({});
 
 export const fetchFreshSchemaAtom = atom(
   null,
@@ -1056,7 +1070,6 @@ export const fetchFreshSchemaAtom = atom(
     const apiUrl = get(apiUrlAtom);
     
     if (!database || !table) {
-      set(freshSchemaAtom, []);
       return [];
     }
     
@@ -1093,17 +1106,46 @@ export const fetchFreshSchemaAtom = atom(
         };
       });
       
-      set(freshSchemaAtom, schemaWithTimeUnits);
+      // Store schema keyed by database.table
+      const schemaKey = `${database}.${table}`;
+      set(freshSchemaAtom, (prev) => ({
+        ...prev,
+        [schemaKey]: schemaWithTimeUnits
+      }));
+      // Mark this table schema as loaded
+      set(freshSchemasLoadedForAtom, (prev: Set<string>) => {
+        const newSet = new Set(prev);
+        newSet.add(schemaKey);
+        return newSet;
+      });
       return schemaWithTimeUnits;
     } catch (error) {
       console.error(`[Fresh Schema] Failed to fetch for ${database}.${table}:`, error);
-      set(freshSchemaAtom, []);
+      // Don't clear all schemas, just mark this table as empty
+      const schemaKey = `${database}.${table}`;
+      set(freshSchemaAtom, (prev) => ({
+        ...prev,
+        [schemaKey]: []
+      }));
       return [];
     } finally {
       set(freshSchemaLoadingAtom, false);
     }
   }
 );
+
+// ============================================================================
+// Fresh Data Tracking Atoms - Track what has been loaded
+// ============================================================================
+
+// Track if databases have been loaded in this session
+export const freshDatabasesLoadedAtom = atom<boolean>(false);
+
+// Track which database tables have been loaded
+export const freshTablesLoadedForAtom = atom<Set<string>>(new Set<string>());
+
+// Track which schemas have been loaded (key: "database.table")
+export const freshSchemasLoadedForAtom = atom<Set<string>>(new Set<string>());
 
 // ============================================================================
 // Sample Data Cache Management

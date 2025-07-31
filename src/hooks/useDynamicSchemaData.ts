@@ -3,15 +3,17 @@ import { useEffect, useMemo } from "react";
 import {
   freshDatabasesAtom,
   freshDatabasesLoadingAtom,
+  freshDatabasesLoadedAtom,
   fetchFreshDatabasesAtom,
   freshTablesAtom,
   freshTablesLoadingAtom,
+  freshTablesLoadedForAtom,
   fetchFreshTablesAtom,
   freshSchemaAtom,
   freshSchemaLoadingAtom,
+  freshSchemasLoadedForAtom,
   fetchFreshSchemaAtom,
 } from "@/atoms";
-import { detectTimeFieldsFromSchema } from "@/lib/query-processor";
 import type { TimeFieldInfo, SchemaDataResult } from "./useSchemaData";
 
 interface UseDynamicSchemaDataOptions {
@@ -30,34 +32,49 @@ export function useDynamicSchemaData({
   // Fresh data atoms
   const [databases] = useAtom(freshDatabasesAtom);
   const [databasesLoading] = useAtom(freshDatabasesLoadingAtom);
+  const [databasesLoaded] = useAtom(freshDatabasesLoadedAtom);
   const fetchDatabases = useSetAtom(fetchFreshDatabasesAtom);
   
-  const [tables] = useAtom(freshTablesAtom);
+  const [allTables] = useAtom(freshTablesAtom);
   const [tablesLoading] = useAtom(freshTablesLoadingAtom);
+  const [tablesLoadedFor] = useAtom(freshTablesLoadedForAtom);
   const fetchTables = useSetAtom(fetchFreshTablesAtom);
   
-  const [schema] = useAtom(freshSchemaAtom);
+  const [allSchemas] = useAtom(freshSchemaAtom);
   const [schemaLoading] = useAtom(freshSchemaLoadingAtom);
+  const [schemasLoadedFor] = useAtom(freshSchemasLoadedForAtom);
   const fetchSchema = useSetAtom(fetchFreshSchemaAtom);
+  
+  // Get tables for current database
+  const tables = database ? (allTables[database] || []) : [];
+  
+  // Get schema for current database.table
+  const schemaKey = database && table ? `${database}.${table}` : null;
+  const schema = schemaKey ? (allSchemas[schemaKey] || []) : [];
 
-  // Fetch databases on mount and when needed
+  // Fetch databases on mount only if not already loaded
   useEffect(() => {
-    fetchDatabases();
-  }, [fetchDatabases]);
+    if (!databasesLoaded) {
+      fetchDatabases();
+    }
+  }, [databasesLoaded, fetchDatabases]);
 
-  // Fetch tables when database changes
+  // Fetch tables when database changes, only if not already loaded
   useEffect(() => {
-    if (database) {
+    if (database && !tablesLoadedFor.has(database)) {
       fetchTables(database);
     }
-  }, [database, fetchTables]);
+  }, [database, tablesLoadedFor, fetchTables]);
 
-  // Fetch schema when table changes
+  // Fetch schema when table changes, only if not already loaded
   useEffect(() => {
     if (database && table) {
-      fetchSchema({ database, table });
+      const schemaKey = `${database}.${table}`;
+      if (!schemasLoadedFor.has(schemaKey)) {
+        fetchSchema({ database, table });
+      }
     }
-  }, [database, table, fetchSchema]);
+  }, [database, table, schemasLoadedFor, fetchSchema]);
 
   // Extract time fields from schema
   const timeFields = useMemo((): TimeFieldInfo[] => {

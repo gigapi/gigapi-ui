@@ -28,7 +28,7 @@ import {
 import { selectedDbAtom, selectedTableAtom } from "@/atoms";
 import { timeRangeAtom, selectedTimeFieldAtom } from "@/atoms";
 import { createDashboardAtom, addPanelAtom } from "@/atoms";
-import { currentTabPanelConfigAtom, currentTabUserModifiedFieldsAtom } from "@/atoms";
+import { currentTabPanelConfigAtom, currentTabUserModifiedFieldsAtom, currentTabAvailableFieldsAtom } from "@/atoms";
 import GigTable from "@/components/shared/GigTable";
 import Loader from "@/components/shared/Loader";
 import { Button } from "@/components/ui/button";
@@ -111,7 +111,7 @@ export default function QueryResults() {
   // Panel creation states - use tab-aware atoms
   const [panelConfig, setPanelConfig] = useAtom(currentTabPanelConfigAtom);
   const [userModifiedFields, setUserModifiedFields] = useAtom(currentTabUserModifiedFieldsAtom);
-  const [availableFields, setAvailableFields] = useState<string[]>([]);
+  const [availableFields, setAvailableFields] = useAtom(currentTabAvailableFieldsAtom);
   const [showSaveToDashboard, setShowSaveToDashboard] = useState(false);
   const [newDashboardName, setNewDashboardName] = useState("");
   const [selectedDashboardId, setSelectedDashboardId] = useState<string>("new");

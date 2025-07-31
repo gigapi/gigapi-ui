@@ -38,6 +38,7 @@ export interface QueryTab {
     yField?: boolean;
     seriesField?: boolean;
   };
+  availableFields: string[];
   createdAt: string;
   updatedAt: string;
 }

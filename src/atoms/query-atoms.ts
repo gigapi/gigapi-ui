@@ -1,5 +1,4 @@
 import { atom } from "jotai";
-import { atomWithStorage } from "jotai/utils";
 import axios from "axios";
 import { QueryProcessor } from "@/lib/query-processor";
 import { toast } from "sonner";
@@ -13,12 +12,7 @@ export type { QueryHistoryItem };
 // Import tab atoms
 import { 
   currentTabQueryAtom, 
-  currentTabDatabaseAtom,
-  currentTabTableAtom,
-  currentTabTimeFieldAtom,
-  currentTabTimeRangeAtom,
   currentTabQueryHistoryAtom, 
-  addToTabQueryHistoryAtom, 
   clearTabQueryHistoryAtom,
   currentTabQueryResultsAtom,
   currentTabQueryErrorAtom,
@@ -26,7 +20,18 @@ import {
   currentTabQueryExecutionTimeAtom,
   currentTabQueryMetricsAtom,
   currentTabRawQueryResponseAtom,
-  currentTabProcessedQueryAtom
+  currentTabProcessedQueryAtom,
+  activeTabIdAtom,
+  addRunningQueryAtom,
+  removeRunningQueryAtom,
+  updateTabQueryResultsByIdAtom,
+  updateTabQueryErrorByIdAtom,
+  updateTabQueryLoadingByIdAtom,
+  updateTabQueryMetricsByIdAtom,
+  updateTabRawResponseByIdAtom,
+  updateTabProcessedQueryByIdAtom,
+  addToTabQueryHistoryByIdAtom,
+  getTabByIdAtom
 } from "./tab-atoms";
 
 // Alias the tab-aware atoms for backward compatibility
@@ -48,11 +53,27 @@ export const setQueryAtom = atom(null, (_get, set, query: string) => {
 });
 
 export const executeQueryAtom = atom(null, async (get, set) => {
-  const query = get(queryAtom);
-  const selectedDb = get(currentTabDatabaseAtom);
-  const selectedTable = get(currentTabTableAtom);
-  const selectedTimeField = get(currentTabTimeFieldAtom);
-  const timeRange = get(currentTabTimeRangeAtom);
+  // Capture the tab ID at the start of execution
+  const executeTabId = get(activeTabIdAtom);
+  if (!executeTabId) {
+    toast.error("No active tab");
+    return;
+  }
+
+  // Get the tab data at the time of execution
+  const getTabById = get(getTabByIdAtom);
+  const executeTab = getTabById(executeTabId);
+  if (!executeTab) {
+    toast.error("Tab not found");
+    return;
+  }
+
+  // Use the tab's data at execution time
+  const query = executeTab.query;
+  const selectedDb = executeTab.database;
+  const selectedTable = executeTab.table;
+  const selectedTimeField = executeTab.timeField;
+  const timeRange = executeTab.timeRange;
   const tableSchema = get(tableSchemaAtom);
   const apiUrl = get(apiUrlAtom);
 
@@ -66,9 +87,13 @@ export const executeQueryAtom = atom(null, async (get, set) => {
     return;
   }
 
-  set(queryLoadingAtom, true);
-  set(queryErrorAtom, null);
-  set(queryResultsAtom, null); // Clear previous results
+  // Update loading state for the specific tab
+  set(updateTabQueryLoadingByIdAtom, { tabId: executeTabId, loading: true });
+  set(updateTabQueryErrorByIdAtom, { tabId: executeTabId, error: null });
+  set(updateTabQueryResultsByIdAtom, { tabId: executeTabId, results: null }); // Clear previous results
+  
+  // Mark this tab as having a running query
+  set(addRunningQueryAtom, executeTabId);
 
   const startTime = Date.now();
 
@@ -112,13 +137,13 @@ export const executeQueryAtom = atom(null, async (get, set) => {
       });
 
       if (processed.errors.length > 0) {
-        set(queryErrorAtom, processed.errors.join("; "));
+        set(updateTabQueryErrorByIdAtom, { tabId: executeTabId, error: processed.errors.join("; ") });
         toast.error(`Query processing error: ${processed.errors[0]}`);
         return;
       }
 
       processedQuery = processed.query;
-      set(processedQueryAtom, processedQuery);
+      set(updateTabProcessedQueryByIdAtom, { tabId: executeTabId, query: processedQuery });
     }
 
     // Execute the processed query
@@ -176,11 +201,10 @@ export const executeQueryAtom = atom(null, async (get, set) => {
     }
 
     // Store raw response for Raw tab
-    set(rawQueryResponseAtom, rawResponse);
+    set(updateTabRawResponseByIdAtom, { tabId: executeTabId, response: rawResponse });
 
     const executionTime = Date.now() - startTime;
-    set(queryResultsAtom, parsedResults);
-    set(queryExecutionTimeAtom, executionTime);
+    set(updateTabQueryResultsByIdAtom, { tabId: executeTabId, results: parsedResults });
 
     // Calculate size properly based on the raw response
     const responseSize =
@@ -188,11 +212,14 @@ export const executeQueryAtom = atom(null, async (get, set) => {
         ? result.length
         : JSON.stringify(result).length;
 
-    set(queryMetricsAtom, {
-      executionTime,
-      rowCount: parsedResults.length,
-      size: responseSize,
-      processedRows: parsedResults.length,
+    set(updateTabQueryMetricsByIdAtom, {
+      tabId: executeTabId,
+      metrics: {
+        executionTime,
+        rowCount: parsedResults.length,
+        size: responseSize,
+        processedRows: parsedResults.length,
+      }
     });
 
     // Add to history with full context
@@ -211,8 +238,8 @@ export const executeQueryAtom = atom(null, async (get, set) => {
       rowCount: parsedResults.length,
     };
 
-    // Add to current tab's history
-    set(addToTabQueryHistoryAtom, historyItem);
+    // Add to the specific tab's history
+    set(addToTabQueryHistoryByIdAtom, { tabId: executeTabId, historyItem });
   } catch (error: any) {
     let errorMessage = "Query failed";
 
@@ -245,8 +272,8 @@ export const executeQueryAtom = atom(null, async (get, set) => {
       errorMessage = error.message;
     }
 
-    set(queryErrorAtom, errorMessage);
-    set(queryResultsAtom, null); // Clear results on error
+    set(updateTabQueryErrorByIdAtom, { tabId: executeTabId, error: errorMessage });
+    set(updateTabQueryResultsByIdAtom, { tabId: executeTabId, results: null }); // Clear results on error
 
     // Add failed query to history with full context
     const historyItem: QueryHistoryItem = {
@@ -262,10 +289,14 @@ export const executeQueryAtom = atom(null, async (get, set) => {
       error: errorMessage,
     };
 
-    // Add to current tab's history
-    set(addToTabQueryHistoryAtom, historyItem);
+    // Add to the specific tab's history
+    set(addToTabQueryHistoryByIdAtom, { tabId: executeTabId, historyItem });
   } finally {
-    set(queryLoadingAtom, false);
+    // Update loading state for the specific tab
+    set(updateTabQueryLoadingByIdAtom, { tabId: executeTabId, loading: false });
+    
+    // Remove this tab from running queries
+    set(removeRunningQueryAtom, executeTabId);
   }
 });
 
