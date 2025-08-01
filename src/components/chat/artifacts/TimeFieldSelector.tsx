@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import {
   Select,
   SelectContent,
@@ -23,6 +23,55 @@ interface TimeFieldSelectorProps {
   table?: string;
 }
 
+// Helper function to detect time field from query (can be used by parent components)
+export function detectTimeFieldFromQuery(query: string, schemaColumns: string[] = []): string | null {
+  const queryLower = query.toLowerCase();
+  
+  // Check if $__timeFilter is already used with the old function syntax
+  const timeFilterMatch = query.match(/\$__timeFilter\s*\(\s*([^)]+)\s*\)/i);
+  if (timeFilterMatch) {
+    return timeFilterMatch[1].trim();
+  }
+  
+  // Common time field patterns - ensure __timestamp is always first
+  const commonTimeFields = [
+    "__timestamp", // Always include this as it's the default for ClickHouse
+    "timestamp",
+    "time",
+    "created_at",
+    "updated_at",
+    "event_time",
+    "date",
+    "datetime",
+    "ts",
+    "_time", // Common in some systems
+  ];
+  
+  // Find time fields in the query
+  const foundFields: string[] = [];
+  for (const field of commonTimeFields) {
+    if (queryLower.includes(field)) {
+      foundFields.push(field);
+    }
+  }
+  
+  // Check schema columns
+  if (schemaColumns.length > 0) {
+    const timeColumns = schemaColumns.filter((col) =>
+      commonTimeFields.some((tf) => col.toLowerCase().includes(tf))
+    );
+    foundFields.push(...timeColumns);
+  }
+  
+  // Remove duplicates
+  const uniqueFields = Array.from(new Set(foundFields));
+  
+  if (uniqueFields.length === 0) return null;
+  
+  // Prefer __timestamp if available
+  return uniqueFields.find((f) => f === "__timestamp") || uniqueFields[0];
+}
+
 export default function TimeFieldSelector({
   query,
   database,
@@ -35,6 +84,40 @@ export default function TimeFieldSelector({
 }: TimeFieldSelectorProps) {
   const [detectedField, setDetectedField] = useState<string | null>(null);
   const [availableFields, setAvailableFields] = useState<string[]>([]);
+  const isMountedRef = useRef(false);
+  const hasInitializedRef = useRef(false);
+  
+  // Track mount status - only run once on mount
+  useEffect(() => {
+    isMountedRef.current = true;
+    // Add a delay before allowing any onChange calls
+    const timer = setTimeout(() => {
+      hasInitializedRef.current = true;
+    }, 500); // Half second delay before allowing changes
+    
+    return () => {
+      isMountedRef.current = false;
+      clearTimeout(timer);
+    };
+  }, []); // Empty dependency array - only run on mount/unmount
+  
+  // Safe onChange handler that prevents undefined values and initial render calls
+  const handleChange = useCallback((newValue: string) => {
+    // Don't call onChange during initial mount phase
+    if (!hasInitializedRef.current) {
+      return;
+    }
+    
+    // Don't call onChange if the value hasn't actually changed
+    if (newValue !== value) {
+      // Use setTimeout to defer the state update
+      setTimeout(() => {
+        if (isMountedRef.current) {
+          onChange(newValue);
+        }
+      }, 0);
+    }
+  }, [value, onChange]);
   
   // Dynamic schema hook for real-time data (when enabled)
   const dynamicData = useDynamicSchemaData({
@@ -42,21 +125,22 @@ export default function TimeFieldSelector({
     table: dynamic ? table : undefined,
   });
 
-  // Common time field patterns
+  // Common time field patterns - ensure __timestamp is always first
   const commonTimeFields = [
-    "__timestamp",
-    "time",
+    "__timestamp", // Always include this as it's the default for ClickHouse
     "timestamp",
+    "time",
     "created_at",
     "updated_at",
     "event_time",
     "date",
     "datetime",
     "ts",
+    "_time", // Common in some systems
   ];
 
   useEffect(() => {
-    // Detect time field from query
+    // Only detect available fields, NO auto-selection here
     const queryLower = query.toLowerCase();
 
     // Check if $__timeFilter is already used (with the old function syntax)
@@ -64,10 +148,6 @@ export default function TimeFieldSelector({
     if (timeFilterMatch) {
       const field = timeFilterMatch[1].trim();
       setDetectedField(field);
-      if (!value) {
-        onChange(field);
-      }
-      // Don't return early, still scan for available fields
     }
 
     // Find time fields in the query
@@ -93,23 +173,39 @@ export default function TimeFieldSelector({
     // Remove duplicates and set available fields
     const uniqueFields = Array.from(new Set(foundFields));
     setAvailableFields(uniqueFields);
+  }, [query, schemaColumns, dynamic, database, table, dynamicData.timeFields]);
 
-    // Auto-select if only one option
-    if (uniqueFields.length === 1 && !value) {
-      onChange(uniqueFields[0]);
-      setDetectedField(uniqueFields[0]);
-    } else if (uniqueFields.length > 0 && !value) {
-      // Prefer __timestamp if available
-      const preferred =
-        uniqueFields.find((f) => f === "__timestamp") || uniqueFields[0];
-      onChange(preferred);
-      setDetectedField(preferred);
-    }
-  }, [query, schemaColumns, value, onChange, dynamic, database, table, dynamicData.timeFields]);
 
   const hasTimeFilter = query.includes("$__timeFilter");
   const needsTimeField = hasTimeFilter && !value;
   const isLoading = dynamic && dynamicData.isLoading;
+  
+  // Build the full list of options
+  const allOptions = useMemo(() => {
+    const options = new Set<string>();
+    
+    // Add available fields from detection
+    availableFields.forEach(field => options.add(field));
+    
+    // Always include common time fields as fallback options
+    commonTimeFields.forEach(field => options.add(field));
+    
+    return Array.from(options);
+  }, [availableFields]);
+  
+  // Ensure the current value exists in options
+  const safeValue = useMemo(() => {
+    if (!value) return "";
+    
+    // If value exists in options, use it
+    if (allOptions.includes(value)) return value;
+    
+    // Otherwise reset to empty
+    return "";
+  }, [value, allOptions]);
+  
+  // Don't render the Select until we have determined the options
+  const isReady = hasInitializedRef.current && isMountedRef.current;
 
   return (
     <div className={cn("space-y-2", className)}>
@@ -130,19 +226,25 @@ export default function TimeFieldSelector({
         {needsTimeField && <AlertCircle className="w-4 h-4 text-yellow-500" />}
       </div>
 
-      <Select value={value || ""} onValueChange={onChange}>
-        <SelectTrigger
-          id="time-field"
-          className={cn(
-            "w-full", 
-            needsTimeField && "border-yellow-500",
-            isLoading && "opacity-50"
-          )}
-          disabled={isLoading}
-        >
-          <SelectValue placeholder={isLoading ? "Loading fields..." : "Select time field"} />
-        </SelectTrigger>
-        <SelectContent>
+      {!isReady ? (
+        <div className="flex items-center h-9 px-3 text-sm text-muted-foreground">
+          <RefreshCw className="w-3 h-3 mr-2 animate-spin" />
+          Initializing...
+        </div>
+      ) : (
+        <Select value={safeValue} onValueChange={handleChange}>
+          <SelectTrigger
+            id="time-field"
+            className={cn(
+              "w-full", 
+              needsTimeField && "border-yellow-500",
+              isLoading && "opacity-50"
+            )}
+            disabled={isLoading}
+          >
+            <SelectValue placeholder={isLoading ? "Loading fields..." : "Select time field"} />
+          </SelectTrigger>
+          <SelectContent>
           {availableFields.length > 0 ? (
             <>
               <SelectItem value="auto">Auto-detect</SelectItem>
@@ -167,6 +269,7 @@ export default function TimeFieldSelector({
           )}
         </SelectContent>
       </Select>
+      )}
 
       {hasTimeFilter && !value && (
         <p className="text-xs text-yellow-600">

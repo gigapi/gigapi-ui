@@ -172,6 +172,12 @@ export class QueryProcessor {
       });
     }
 
+    // Handle table variable replacement
+    if (processedQuery.includes("$__table") && options.table) {
+      processedQuery = processedQuery.replace(/\$__table/g, options.table);
+      interpolatedVars.table = options.table;
+    }
+
     // Handle time filter interpolation
     if (processedQuery.includes("$__timeFilter") && timeRange) {
       const timeFilter = this.generateTimeFilter(

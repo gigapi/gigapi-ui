@@ -37,7 +37,8 @@ export const TIME_VARIABLE_PATTERNS = {
   TIME_FIELD: /\$__timeField/g,
   TIME_FROM: /\$__timeFrom/g,
   TIME_TO: /\$__timeTo/g,
-  ALL_TIME_VARS: /\$__(timeFilter|timeField|timeFrom|timeTo)/,
+  TABLE: /\$__table/g,
+  ALL_TIME_VARS: /\$__(timeFilter|timeField|timeFrom|timeTo|table)/,
 } as const;
 
 export const DEFAULT_TIME_RANGE: TimeRange = {

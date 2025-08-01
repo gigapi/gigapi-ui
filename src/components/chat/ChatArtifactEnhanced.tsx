@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo, memo, useRef, startTransition } from "react";
 import { useAtom, useSetAtom } from "jotai";
 import { apiUrlAtom } from "@/atoms";
 import { setQueryAtom } from "@/atoms/query-atoms";
@@ -63,7 +63,6 @@ import { QueryProcessor } from "@/lib/query-processor";
 import { QuerySanitizer } from "@/lib/query-sanitizer";
 import { useArtifact } from "@/contexts/ArtifactContext";
 import ArtifactDebugPanel from "./ArtifactDebugPanel";
-import TimeFieldSelector from "./artifacts/TimeFieldSelector";
 import type {
   ChatSession,
   ChatArtifact,
@@ -134,6 +133,8 @@ export default function ChatArtifactEnhanced({
   const [showDebugDialog, setShowDebugDialog] = useState(false);
   const [isEditingQuery, setIsEditingQuery] = useState(false);
   const [editedQuery, setEditedQuery] = useState("");
+  const [isMounted, setIsMounted] = useState(false);
+  const [isStable, setIsStable] = useState(false);
 
   // Determine artifact type and extract data first
   const isQueryArtifact = artifact.type === "query";
@@ -153,19 +154,6 @@ export default function ChatArtifactEnhanced({
     ? (artifactData as QueryArtifact).query
     : (artifactData as ChartArtifact).query;
 
-  // Time field state (QueryProcessor will auto-detect if needed)
-  const [selectedTimeField, setSelectedTimeField] = useState<string>(
-    artifactData.timeField || ""
-  );
-
-  // Dashboard save dialog state
-  const [showSaveToDashboard, setShowSaveToDashboard] = useState(false);
-  const [selectedDashboardId, setSelectedDashboardId] = useState<string>("new");
-  const [newDashboardName, setNewDashboardName] = useState("");
-
-  // Use edited query if available, otherwise use original
-  const query = editedQuery || originalQuery;
-
   // Extract database name and strip @ prefix if present
   const rawDatabase = isQueryArtifact
     ? (artifactData as QueryArtifact).database || "default"
@@ -175,6 +163,70 @@ export default function ChatArtifactEnhanced({
   const database = rawDatabase
     ? QuerySanitizer.stripAtSymbols(rawDatabase)
     : rawDatabase;
+
+  // Calculate schema columns for time field detection
+  const schemaColumns = useMemo(() => {
+    // Try to get schema columns from localStorage
+    try {
+      const schemaCache = localStorage.getItem("gigapi_schema_cache");
+      if (schemaCache && database) {
+        const parsed = JSON.parse(schemaCache);
+        const dbSchema = parsed.databases?.[database];
+        if (dbSchema?.schemas) {
+          // Collect all timestamp columns from all tables
+          const timeColumns: string[] = [];
+          Object.values(dbSchema.schemas).forEach((columns: any) => {
+            if (Array.isArray(columns)) {
+              columns.forEach((col: any) => {
+                if (
+                  col.column_type?.toLowerCase().includes("time") ||
+                  col.column_type?.toLowerCase().includes("date") ||
+                  col.column_name?.toLowerCase().includes("time") ||
+                  col.column_name?.toLowerCase().includes("date") ||
+                  col.column_name === "__timestamp"
+                ) {
+                  timeColumns.push(col.column_name);
+                }
+              });
+            }
+          });
+          return [...new Set(timeColumns)]; // Remove duplicates
+        }
+      }
+    } catch (e) {
+      console.error("Failed to parse schema cache:", e);
+    }
+    return [];
+  }, [database]);
+
+  // Time field state - always use __timestamp for time filters
+  const selectedTimeField = useMemo(() => {
+    // First check if timeField is already set in artifact data
+    if (artifactData.timeField) return artifactData.timeField;
+    
+    // For chart artifacts, check fieldMapping.xField as fallback
+    if (isChartArtifact) {
+      const chartData = artifactData as ChartArtifact;
+      if (chartData.fieldMapping?.xField) {
+        return chartData.fieldMapping.xField;
+      }
+    }
+    
+    // If query has time filter, always use __timestamp
+    if (originalQuery && originalQuery.includes("$__timeFilter")) {
+      return "__timestamp";
+    }
+    
+    return "";
+  }, [artifactData, isChartArtifact, originalQuery]);
+
+  // Dashboard save dialog state
+  const [showSaveToDashboard, setShowSaveToDashboard] = useState(false);
+  const [selectedDashboardId, setSelectedDashboardId] = useState<string>("new");
+  const [newDashboardName, setNewDashboardName] = useState("");
+
+  // Use edited query if available, otherwise use original
+  const query = editedQuery || originalQuery;
 
   // Get effective time range
   const getEffectiveTimeRange = useCallback((): TimeRange => {
@@ -510,6 +562,26 @@ export default function ChatArtifactEnhanced({
     session.id,
   ]);
 
+  // Track mount state and add stabilization period
+  useEffect(() => {
+    setIsMounted(true);
+    
+    // Check if this is a newly created artifact
+    const isNewlyCreated = (artifact as any).metadata?.isNewlyCreated;
+    
+    // Add a longer stabilization delay to prevent render cycles
+    // Even longer delay for newly created artifacts to ensure stability
+    const delay = isNewlyCreated ? 600 : 300;
+    
+    const stabilizeTimer = setTimeout(() => {
+      setIsStable(true);
+    }, delay);
+    
+    return () => {
+      clearTimeout(stabilizeTimer);
+    };
+  }, [artifact]);
+
   // Use cached data if available, but don't auto-execute
   useEffect(() => {
     if (persistedData) {
@@ -748,6 +820,8 @@ export default function ChatArtifactEnhanced({
     setIsEditingQuery(false);
     executeQuery();
   };
+  
+  // Time field is now hardcoded, no need for handler
 
   // Build panel config for chart renderer
   const panelConfig = isChartArtifact
@@ -999,63 +1073,7 @@ export default function ChatArtifactEnhanced({
             </div>
           )}
 
-          {/* Time Field Selector for queries with time filter */}
-          {query.includes("$__timeFilter") && (
-            <div className="mb-4">
-              <TimeFieldSelector
-                query={query}
-                database={database}
-                value={selectedTimeField}
-                onChange={setSelectedTimeField}
-                className="max-w-xs"
-                schemaColumns={(() => {
-                  // Try to get schema columns from localStorage
-                  try {
-                    const schemaCache = localStorage.getItem(
-                      "gigapi_schema_cache"
-                    );
-                    if (schemaCache && database) {
-                      const parsed = JSON.parse(schemaCache);
-                      const dbSchema = parsed.databases?.[database];
-                      if (dbSchema?.schemas) {
-                        // Collect all timestamp columns from all tables
-                        const timeColumns: string[] = [];
-                        Object.values(dbSchema.schemas).forEach(
-                          (columns: any) => {
-                            if (Array.isArray(columns)) {
-                              columns.forEach((col: any) => {
-                                if (
-                                  col.column_type
-                                    ?.toLowerCase()
-                                    .includes("time") ||
-                                  col.column_type
-                                    ?.toLowerCase()
-                                    .includes("date") ||
-                                  col.column_name
-                                    ?.toLowerCase()
-                                    .includes("time") ||
-                                  col.column_name
-                                    ?.toLowerCase()
-                                    .includes("date") ||
-                                  col.column_name === "__timestamp"
-                                ) {
-                                  timeColumns.push(col.column_name);
-                                }
-                              });
-                            }
-                          }
-                        );
-                        return [...new Set(timeColumns)]; // Remove duplicates
-                      }
-                    }
-                  } catch (e) {
-                    console.error("Failed to parse schema cache:", e);
-                  }
-                  return [];
-                })()}
-              />
-            </div>
-          )}
+          {/* Time field is hardcoded to __timestamp for now */}
 
           <div className="bg-background rounded border min-h-[200px] sm:min-h-[320px] relative">
             {error ? (

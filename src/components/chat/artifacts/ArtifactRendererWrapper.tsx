@@ -1,4 +1,5 @@
 import { useState, useCallback } from "react";
+import { flushSync } from "react-dom";
 import { useAtom } from "jotai";
 import { chatSessionsAtom } from "@/atoms/chat-atoms";
 import { apiUrlAtom } from "@/atoms/connection-atoms";
@@ -70,14 +71,16 @@ export default function ArtifactRendererWrapper({
           return message;
         });
 
-        // Update the session with approved status
-        setChatSessions({
-          ...chatSessions,
-          [session.id]: {
-            ...currentSession,
-            messages: updatedMessages,
-            updatedAt: new Date().toISOString(),
-          },
+        // Update the session with approved status using flushSync to batch updates
+        flushSync(() => {
+          setChatSessions({
+            ...chatSessions,
+            [session.id]: {
+              ...currentSession,
+              messages: updatedMessages,
+              updatedAt: new Date().toISOString(),
+            },
+          });
         });
 
         // Initialize auto-execution engine
@@ -111,6 +114,15 @@ export default function ArtifactRendererWrapper({
 
         // Create result artifact based on proposal chart type
         const artifactType = proposal.chart_type ? "chart" : "query";
+        
+        // Check if query has time variables
+        const hasTimeVariables = proposal.query && (
+          proposal.query.includes("$__timeFilter") ||
+          proposal.query.includes("$__timeField") ||
+          proposal.query.includes("$__timeFrom") ||
+          proposal.query.includes("$__timeTo")
+        );
+        
         const resultArtifact: ChatArtifact = {
           id: `artifact_${Date.now()}`,
           type: artifactType,
@@ -122,6 +134,8 @@ export default function ArtifactRendererWrapper({
                 database: proposal.database,
                 type: proposal.chart_type,
                 chartType: proposal.chart_type, // Also set chartType for compatibility
+                // Always use __timestamp for time-based queries
+                timeField: hasTimeVariables ? "__timestamp" : undefined,
                 fieldMapping: {
                   xField: proposal.x_axis,
                   yField:
@@ -149,16 +163,24 @@ export default function ArtifactRendererWrapper({
                   execution_result: executionResult,
                   feedback: feedback,
                   title: proposal.title,
+                  // Mark this as a newly created artifact
+                  isNewlyCreated: true,
+                  createdAt: new Date().toISOString(),
                 },
               }
             : {
                 // Query artifact structure
                 query: proposal.query,
                 database: proposal.database,
+                // Always use __timestamp for time-based queries
+                timeField: hasTimeVariables ? "__timestamp" : undefined,
                 metadata: {
                   execution_result: executionResult,
                   feedback: feedback,
                   title: proposal.title,
+                  // Mark this as a newly created artifact
+                  isNewlyCreated: true,
+                  createdAt: new Date().toISOString(),
                 },
               },
         };
@@ -232,15 +254,23 @@ export default function ArtifactRendererWrapper({
           },
         };
 
-        // Add the feedback message to the session
-        setChatSessions({
-          ...chatSessions,
-          [session.id]: {
-            ...currentSession,
-            messages: [...finalMessages, feedbackMessage],
-            updatedAt: new Date().toISOString(),
-          },
-        });
+        // Add the feedback message to the session with a delay
+        // This prevents infinite loops when artifacts contain time variables
+        // Significantly increased delay to allow component tree to fully stabilize
+        setTimeout(() => {
+          const updatedSessions = { ...chatSessions };
+          const updatedSession = updatedSessions[session.id];
+          if (updatedSession) {
+            setChatSessions({
+              ...updatedSessions,
+              [session.id]: {
+                ...updatedSession,
+                messages: [...finalMessages, feedbackMessage],
+                updatedAt: new Date().toISOString(),
+              },
+            });
+          }
+        }, 500); // Increased from 150ms to 500ms
 
         if (executionResult.success) {
           toast.success(

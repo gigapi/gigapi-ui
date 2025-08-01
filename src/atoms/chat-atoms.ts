@@ -14,7 +14,6 @@ import { SchemaContextBuilder } from "@/lib/schema-context-builder";
 import { ConversationAnalyzer } from "@/lib/conversation-analyzer";
 import { StorageUtils } from "@/lib/storage-utils";
 import { schemaCacheAtom, loadAndCacheTableSchemaAtom } from "./database-atoms";
-import { apiUrlAtom } from "./connection-atoms";
 import { getCurrentTabData } from "./tab-atoms";
 import type {
   ChatSession,
@@ -244,7 +243,6 @@ export const sessionListAtom = atom((get) => {
   );
 });
 
-
 // ============================================================================
 // Helper Functions
 // ============================================================================
@@ -332,54 +330,51 @@ export const createSessionAtom = atom(
 );
 
 // Cancel streaming message
-export const cancelMessageAtom = atom(
-  null,
-  (get, set, sessionId: string) => {
-    const abortControllers = get(activeAbortControllersAtom);
-    const controller = abortControllers.get(sessionId);
-    
-    if (controller) {
-      // Abort the fetch request
-      controller.abort();
-      
-      // Remove from active controllers
-      const newControllers = new Map(abortControllers);
-      newControllers.delete(sessionId);
-      set(activeAbortControllersAtom, newControllers);
-      
-      // Update the session to remove streaming flag from the last message
-      const sessions = get(chatSessionsAtom);
-      const session = sessions[sessionId];
-      if (session && session.messages.length > 0) {
-        const lastMessage = session.messages[session.messages.length - 1];
-        if (lastMessage.metadata?.isStreaming) {
-          const updatedMessages = [...session.messages];
-          updatedMessages[updatedMessages.length - 1] = {
-            ...lastMessage,
-            metadata: {
-              ...lastMessage.metadata,
-              isStreaming: false,
-              wasCancelled: true,
-            },
-          };
-          
-          set(chatSessionsAtom, {
-            ...sessions,
-            [sessionId]: {
-              ...session,
-              messages: updatedMessages,
-              updatedAt: new Date().toISOString(),
-            },
-          });
-        }
+export const cancelMessageAtom = atom(null, (get, set, sessionId: string) => {
+  const abortControllers = get(activeAbortControllersAtom);
+  const controller = abortControllers.get(sessionId);
+
+  if (controller) {
+    // Abort the fetch request
+    controller.abort();
+
+    // Remove from active controllers
+    const newControllers = new Map(abortControllers);
+    newControllers.delete(sessionId);
+    set(activeAbortControllersAtom, newControllers);
+
+    // Update the session to remove streaming flag from the last message
+    const sessions = get(chatSessionsAtom);
+    const session = sessions[sessionId];
+    if (session && session.messages.length > 0) {
+      const lastMessage = session.messages[session.messages.length - 1];
+      if (lastMessage.metadata?.isStreaming) {
+        const updatedMessages = [...session.messages];
+        updatedMessages[updatedMessages.length - 1] = {
+          ...lastMessage,
+          metadata: {
+            ...lastMessage.metadata,
+            isStreaming: false,
+            wasCancelled: true,
+          },
+        };
+
+        set(chatSessionsAtom, {
+          ...sessions,
+          [sessionId]: {
+            ...session,
+            messages: updatedMessages,
+            updatedAt: new Date().toISOString(),
+          },
+        });
       }
-      
-      return true;
     }
-    
-    return false;
+
+    return true;
   }
-);
+
+  return false;
+});
 
 // Send message with streaming support
 export const sendMessageAtom = atom(
@@ -515,7 +510,9 @@ export const sendMessageAtom = atom(
 
       // Get time context from current tab
       const currentTab = getCurrentTabData();
-      const timeRange = currentTab?.timeRange ? JSON.stringify(currentTab.timeRange) : null;
+      const timeRange = currentTab?.timeRange
+        ? JSON.stringify(currentTab.timeRange)
+        : null;
       const selectedDb = currentTab?.database || "";
       const selectedTable = currentTab?.table || "";
 
@@ -686,7 +683,7 @@ export const sendMessageAtom = atom(
         },
         abortController.signal
       );
-      
+
       // Clean up abort controller after successful completion
       const currentControllers = get(activeAbortControllersAtom);
       const updatedControllers = new Map(currentControllers);
@@ -700,9 +697,9 @@ export const sendMessageAtom = atom(
       set(activeAbortControllersAtom, updatedControllers);
 
       // Check if the error is due to abort
-      if (error instanceof Error && error.name === 'AbortError') {
+      if (error instanceof Error && error.name === "AbortError") {
         // Don't show error message for cancelled requests
-        console.log('Message streaming was cancelled');
+        console.log("Message streaming was cancelled");
         return;
       }
 
@@ -789,7 +786,11 @@ export const deleteSessionAtom = atom(null, (get, set, sessionId: string) => {
 // Edit message
 export const editMessageAtom = atom(
   null,
-  async (get, set, options: { sessionId: string; messageId: string; newContent: string }) => {
+  async (
+    get,
+    set,
+    options: { sessionId: string; messageId: string; newContent: string }
+  ) => {
     const { sessionId, messageId, newContent } = options;
     const sessions = get(chatSessionsAtom);
     const session = sessions[sessionId];
@@ -844,7 +845,11 @@ export const editMessageAtom = atom(
 // Regenerate from message
 export const regenerateFromMessageAtom = atom(
   null,
-  async (get, set, options: { sessionId: string; messageId: string; isAgentic?: boolean }) => {
+  async (
+    get,
+    set,
+    options: { sessionId: string; messageId: string; isAgentic?: boolean }
+  ) => {
     const { sessionId, messageId, isAgentic } = options;
     const sessions = get(chatSessionsAtom);
     const session = sessions[sessionId];
@@ -911,7 +916,9 @@ export const regenerateFromMessageAtom = atom(
 
       // Get time context from current tab
       const currentTab = getCurrentTabData();
-      const timeRange = currentTab?.timeRange ? JSON.stringify(currentTab.timeRange) : null;
+      const timeRange = currentTab?.timeRange
+        ? JSON.stringify(currentTab.timeRange)
+        : null;
       const selectedDb = currentTab?.database || "";
       const selectedTable = currentTab?.table || "";
 
@@ -963,7 +970,10 @@ export const regenerateFromMessageAtom = atom(
           function processChunkForThinking(text: string) {
             const thinkingStartMatch = text.match(/<think>/);
             if (thinkingStartMatch && thinkingStartMatch.index !== undefined) {
-              const beforeThinking = text.substring(0, thinkingStartMatch.index);
+              const beforeThinking = text.substring(
+                0,
+                thinkingStartMatch.index
+              );
               const afterThinking = text.substring(
                 thinkingStartMatch.index + thinkingStartMatch[0].length
               );
@@ -1049,7 +1059,7 @@ export const regenerateFromMessageAtom = atom(
         },
         abortController.signal
       );
-      
+
       // Clean up abort controller after successful completion
       const currentControllers = get(activeAbortControllersAtom);
       const updatedControllers = new Map(currentControllers);
@@ -1063,8 +1073,8 @@ export const regenerateFromMessageAtom = atom(
       set(activeAbortControllersAtom, updatedControllers);
 
       // Check if the error is due to abort
-      if (error instanceof Error && error.name === 'AbortError') {
-        console.log('Message streaming was cancelled');
+      if (error instanceof Error && error.name === "AbortError") {
+        console.log("Message streaming was cancelled");
         return;
       }
 
@@ -1121,7 +1131,6 @@ export const renameSessionAtom = atom(
     });
   }
 );
-
 
 // Delete connection
 export const deleteConnectionAtom = atom(
@@ -1325,11 +1334,9 @@ Example: When user asks "show me sales by month", respond with:
         includeIndices: true,
         summaryOnly: false,
         includeRecentContext: true, // Always include recent context for better continuity
-        isAgentic, // Pass agentic mode flag
-        // Enhanced with sample data
+        isAgentic,
         includeSampleData: true,
         sampleDataLimit: 5,
-        apiUrl: queryContext.apiUrl || "http://localhost:7971/query",
       }
     );
 

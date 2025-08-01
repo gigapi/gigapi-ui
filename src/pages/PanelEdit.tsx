@@ -71,6 +71,7 @@ export default function PanelEdit(props?: PanelEditProps) {
     updatePanel,
     addPanel,
     getPanelById,
+    updateDashboardTimeRange,
   } = dashboardContext;
 
   const [availableDatabases] = useAtom(availableDatabasesAtom);
@@ -143,6 +144,9 @@ export default function PanelEdit(props?: PanelEditProps) {
         dashboardId: dashboardId,
       });
 
+      // Ensure useParentTimeFilter is set for new panels
+      newPanel.useParentTimeFilter = true;
+
       setLocalConfig(newPanel);
       setHasChanges(true);
       setIsLoadingPanel(false);
@@ -161,18 +165,10 @@ export default function PanelEdit(props?: PanelEditProps) {
         setLocalConfig({
           ...panelCopy,
           table, // Set extracted or existing table
-          useParentTimeFilter: true,
+          useParentTimeFilter: panelCopy.useParentTimeFilter ?? true, // Keep existing value or default to true
         });
         setHasChanges(false);
         setIsLoadingPanel(false);
-
-        // Mark that we should auto-run query after component is ready
-        if (panel.query && panel.database && currentDashboard?.timeRange) {
-          setTimeout(() => {
-            const event = new CustomEvent("autoRunQuery");
-            window.dispatchEvent(event);
-          }, 200); //  Delay to ensure component is fully loaded
-        }
       } else {
         toast.error(
           `Panel with ID ${panelId} not found in the current dashboard.`
@@ -275,8 +271,9 @@ export default function PanelEdit(props?: PanelEditProps) {
 
           // Check if this is likely a GROUP BY query result
           // (multiple rows with exactly one numeric field and one or more string fields)
-          const isGroupByResult = data.length > 1 && 
-            numericFields.length === 1 && 
+          const isGroupByResult =
+            data.length > 1 &&
+            numericFields.length === 1 &&
             stringFields.length >= 1;
 
           if (timeFields.length > 0) {
@@ -298,11 +295,13 @@ export default function PanelEdit(props?: PanelEditProps) {
             const groupingFields = stringFields.filter((field) => {
               const lower = field.toLowerCase();
               // Exclude fields that are likely aggregated values
-              return !lower.includes("avg(") && 
-                     !lower.includes("sum(") && 
-                     !lower.includes("count(") && 
-                     !lower.includes("max(") && 
-                     !lower.includes("min(");
+              return (
+                !lower.includes("avg(") &&
+                !lower.includes("sum(") &&
+                !lower.includes("count(") &&
+                !lower.includes("max(") &&
+                !lower.includes("min(")
+              );
             });
 
             if (groupingFields.length > 0) {
@@ -386,18 +385,6 @@ export default function PanelEdit(props?: PanelEditProps) {
       }
     }
   }, [localConfig?.database, schema, loadSchemaForDb, setSelectedDb]);
-
-  // Listen for auto-run query event
-  useEffect(() => {
-    const handleAutoRunQuery = () => {
-      if (localConfig?.query && localConfig?.database) {
-        handleRunQuery();
-      }
-    };
-
-    window.addEventListener("autoRunQuery", handleAutoRunQuery);
-    return () => window.removeEventListener("autoRunQuery", handleAutoRunQuery);
-  }, [handleRunQuery, localConfig]);
 
   // Schema detection is now handled by atoms
 
@@ -523,8 +510,6 @@ export default function PanelEdit(props?: PanelEditProps) {
     );
   }
 
-  const currentData = previewData ? { data: previewData } : undefined;
-
   return (
     <div className="flex flex-col h-screen bg-background">
       {/* Header */}
@@ -548,9 +533,16 @@ export default function PanelEdit(props?: PanelEditProps) {
                 }
               }
               timeZone={currentDashboard.timeZone || "UTC"}
-              onTimeRangeChange={() => {}}
+              onTimeRangeChange={async (newTimeRange) => {
+                // Update the dashboard time range
+                await updateDashboardTimeRange(newTimeRange);
+
+                // Refresh the preview if query exists
+                if (localConfig?.query && previewData) {
+                  handleRunQuery();
+                }
+              }}
               onTimeZoneChange={() => {}}
-              disabled={true}
               showTimeZone={false}
             />
           )}
@@ -597,7 +589,7 @@ export default function PanelEdit(props?: PanelEditProps) {
                               {
                                 ...localConfig,
                                 id: panelId || "preview",
-                            } as PanelConfig
+                              } as PanelConfig
                             }
                             dashboard={currentDashboard}
                             className="w-full h-full"
@@ -827,7 +819,10 @@ export default function PanelEdit(props?: PanelEditProps) {
                         {previewData !== null && (
                           <div className="flex items-center gap-2 text-xs text-muted-foreground">
                             <div className="w-2 h-2 rounded-full bg-green-500"></div>
-                            {Array.isArray(previewData) ? previewData.length : 0} rows returned
+                            {Array.isArray(previewData)
+                              ? previewData.length
+                              : 0}{" "}
+                            rows returned
                           </div>
                         )}
 

@@ -1,5 +1,4 @@
 import { atom } from "jotai";
-import { atomWithStorage } from "jotai/utils";
 import type { TimeRange } from "@/types/tab.types";
 import { currentTabTimeFieldAtom, currentTabTimeRangeAtom, currentTabTimeZoneAtom } from "./tab-atoms";
 

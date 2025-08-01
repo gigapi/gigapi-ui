@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useAtom } from "jotai";
 import { apiUrlAtom } from "@/atoms";
 import { useArtifact } from "@/contexts/ArtifactContext";
@@ -38,7 +38,7 @@ import TableArtifact from "./TableArtifact";
 import MetricArtifact from "./MetricArtifact";
 import SummaryArtifact from "./SummaryArtifact";
 import InsightArtifact from "./InsightArtifact";
-import TimeFieldSelector from "./TimeFieldSelector";
+import TimeFieldSelector, { detectTimeFieldFromQuery } from "./TimeFieldSelector";
 import ChatArtifactEnhanced from "../ChatArtifactEnhanced";
 import ArtifactDebugPanel from "../ArtifactDebugPanel";
 import parseNDJSON from "@/lib/parsers/ndjson";
@@ -65,6 +65,7 @@ export default function ArtifactRenderer({
   const [error, setError] = useState<string | null>(null);
   const [showDebug, setShowDebug] = useState(false);
   const [selectedTimeRange] = useState("1h");
+  const isMountedRef = useRef(false);
   
   // Extract query and database from artifact - moved here to be available for state initialization
   const getQueryInfo = useCallback(() => {
@@ -93,61 +94,6 @@ export default function ArtifactRenderer({
     return { query: null, database: null };
   }, [artifact]);
   
-  // Helper function to extract time field from query
-  const extractTimeFieldFromQuery = useCallback((query: string): string => {
-    if (!query) return "";
-    
-    // Common time field patterns in SQL queries
-    const timeFieldPatterns = [
-      // Look for explicit time fields in WHERE clauses, GROUP BY, ORDER BY
-      /(?:WHERE|GROUP BY|ORDER BY).*?([a-zA-Z_][a-zA-Z0-9_]*\.?[a-zA-Z_][a-zA-Z0-9_]*)\s*(?:>=|<=|>|<|=|\bBETWEEN\b)/gi,
-      // Look for DATE_TRUNC, DATE_FORMAT functions with time fields
-      /(?:DATE_TRUNC|DATE_FORMAT|EXTRACT)\s*\(\s*[^,]+,\s*([a-zA-Z_][a-zA-Z0-9_]*\.?[a-zA-Z_][a-zA-Z0-9_]*)\s*\)/gi,
-      // Look for time fields in SELECT with AS time/timestamp
-      /SELECT.*?([a-zA-Z_][a-zA-Z0-9_]*\.?[a-zA-Z_][a-zA-Z0-9_]*)\s+AS\s+(?:time|timestamp)/gi,
-      // Look for common time field names
-      /\b([a-zA-Z_]*(?:time|timestamp|date)[a-zA-Z0-9_]*)\b/gi
-    ];
-    
-    const potentialFields = new Set<string>();
-    
-    // Extract potential time fields using patterns
-    timeFieldPatterns.forEach(pattern => {
-      const matches = query.matchAll(pattern);
-      for (const match of matches) {
-        if (match[1]) {
-          // Clean up the field name (remove table prefixes if any)
-          const field = match[1].split('.').pop() || match[1];
-          potentialFields.add(field);
-        }
-      }
-    });
-    
-    // Priority order for time fields
-    const timeFieldPriority = [
-      '__timestamp',
-      'timestamp',
-      'time',
-      'created_at',
-      'updated_at',
-      'event_time',
-      'date_time',
-      'datetime',
-      'ts'
-    ];
-    
-    // Return the highest priority time field found
-    for (const priorityField of timeFieldPriority) {
-      for (const field of potentialFields) {
-        if (field.toLowerCase() === priorityField.toLowerCase()) {
-          return field;
-        }
-      }
-    }
-    
-    // Return the first time-like field found
-    return Array.from(potentialFields)[0] || "";
-  }, []);
 
   const [selectedTimeField, setSelectedTimeField] = useState<string>(() => {
     // Try to get time field from artifact data first
@@ -156,7 +102,14 @@ export default function ArtifactRenderer({
     
     // Extract time field from query if not explicitly provided
     const { query } = getQueryInfo();
-    return extractTimeFieldFromQuery(query || "");
+    if (query && query.includes("$__timeFilter")) {
+      // Use the helper function from TimeFieldSelector
+      const detectedField = detectTimeFieldFromQuery(query);
+      // Only return if we found a field, otherwise empty string to let user select
+      return detectedField || "";
+    }
+    
+    return "";
   });
 
   const {
@@ -210,29 +163,35 @@ export default function ArtifactRenderer({
     setIsLoading(true);
     setError(null);
 
+    // Declare variables outside try block for proper scope
+    let finalQuery = query;
+    let timeColumn: string | undefined;
+    let timeRange: any;
+    let hasTimeVariables = false;
+
     try {
       // Start with basic sanitization
-      let finalQuery = QuerySanitizer.stripAtSymbols(query);
+      finalQuery = QuerySanitizer.stripAtSymbols(query);
       finalQuery = QuerySanitizer.fixTimeFilter(finalQuery);
       
       // Only use QueryProcessor for queries with time variables
-      const hasTimeVariables = finalQuery.includes('$__timeFilter') || 
+      hasTimeVariables = finalQuery.includes('$__timeFilter') || 
                                finalQuery.includes('$__timeField') ||
                                finalQuery.includes('$__timeFrom') ||
                                finalQuery.includes('$__timeTo') ||
                                finalQuery.includes('$__interval');
       
       if (hasTimeVariables) {
-        const timeRange = { 
+        timeRange = { 
           type: "relative" as const,
           from: `now-${selectedTimeRange}`, 
           to: "now"
         };
         
         // Determine the time column to use with enhanced fallback logic
-        let timeColumn = selectedTimeField || 
+        timeColumn = selectedTimeField || 
                         (isChartArtifact(artifact) ? artifact.data.fieldMapping?.xField : undefined) ||
-                        extractTimeFieldFromQuery(finalQuery);
+                        detectTimeFieldFromQuery(finalQuery) || undefined;
         
         // Enhanced fallback: if no time column detected, try common defaults
         if (!timeColumn) {
@@ -250,11 +209,11 @@ export default function ArtifactRenderer({
         log(artifact.id, "info", "Processing time variables", {
           hasTimeVariables,
           selectedTimeField,
-          extractedTimeField: extractTimeFieldFromQuery(finalQuery),
+          extractedTimeField: detectTimeFieldFromQuery(finalQuery),
           finalTimeColumn: timeColumn,
           timeRange,
           originalQuery: query,
-          usedFallback: !selectedTimeField && !extractTimeFieldFromQuery(finalQuery)
+          usedFallback: !selectedTimeField && !detectTimeFieldFromQuery(finalQuery)
         });
         
         if (!timeColumn) {
@@ -262,7 +221,7 @@ export default function ArtifactRenderer({
           log(artifact.id, "error", errorMsg, { 
             query: finalQuery,
             selectedTimeField,
-            extractedFromQuery: extractTimeFieldFromQuery(finalQuery),
+            extractedFromQuery: detectTimeFieldFromQuery(finalQuery),
             artifactData: artifact.data 
           });
           throw new Error(errorMsg);
@@ -389,20 +348,37 @@ export default function ArtifactRenderer({
     artifact,
     selectedTimeRange,
     selectedTimeField,
-    extractTimeFieldFromQuery,
     getQueryInfo,
     log,
     startOperation,
     endOperation,
   ]);
 
+  // Track mount state
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
   // Auto-execute on mount only for non-query/chart artifacts
   // Query and chart artifacts are handled by ChatArtifactEnhanced
   useEffect(() => {
+    // Skip execution during initial mount to prevent infinite loops
+    if (!isMountedRef.current) return;
+    
     if (query && database && artifact.type !== "query" && artifact.type !== "chart") {
-      executeQuery();
+      // Add a small delay to ensure render cycle completes
+      const timer = setTimeout(() => {
+        if (isMountedRef.current) {
+          executeQuery();
+        }
+      }, 100);
+      
+      return () => clearTimeout(timer);
     }
-  }, []);
+  }, [query, database, artifact.type, executeQuery]);
 
   // Handle export
   const handleExport = (format: "png" | "csv" | "json") => {
@@ -609,7 +585,7 @@ export default function ArtifactRenderer({
                   value={selectedTimeField}
                   onChange={setSelectedTimeField}
                   className="max-w-xs"
-                  dynamic={true} // Enable dynamic mode for chat artifacts
+                  dynamic={false} // Disable dynamic mode to prevent API call loops
                 />
               </div>
             )}
