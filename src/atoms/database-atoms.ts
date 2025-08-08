@@ -61,13 +61,13 @@ export const databaseListForAIAtom = atomWithStorage<string[]>(
   "gigapi_databases",
   []
 );
-export const tablesListForAIAtom = atomWithStorage<Record<string, string[]>>(
+const tablesListForAIAtom = atomWithStorage<Record<string, string[]>>(
   "gigapi_tables",
   {}
 );
 
 // Loading state atoms
-export const tablesLoadingAtom = atom<boolean>(false);
+const tablesLoadingAtom = atom<boolean>(false);
 export const schemaLoadingAtom = atom<boolean>(false);
 
 // ============================================================================
@@ -359,7 +359,7 @@ export const setSelectedTableAtom = atom(
 );
 
 // Load tables for current database without changing selection
-export const loadTablesForCurrentDbAtom = atom(null, async (get, set) => {
+const loadTablesForCurrentDbAtom = atom(null, async (get, set) => {
   const currentDb = get(selectedDbAtom);
 
   if (!currentDb) return;
@@ -1146,117 +1146,3 @@ export const freshTablesLoadedForAtom = atom<Set<string>>(new Set<string>());
 
 // Track which schemas have been loaded (key: "database.table")
 export const freshSchemasLoadedForAtom = atom<Set<string>>(new Set<string>());
-
-// ============================================================================
-// Sample Data Cache Management
-// ============================================================================
-
-// Sample data cache TTL (shorter than schema cache - 30 minutes)
-const SAMPLE_DATA_TTL = 30 * 60 * 1000; // 30 minutes
-
-// Get cached sample data for a table
-export const getCachedSampleDataAtom = atom(
-  (get) =>
-    (database: string, table: string): SampleDataEntry | null => {
-      const cache = get(schemaCacheAtom);
-      const sampleData = cache?.databases[database]?.sampleData?.[table];
-      
-      if (!sampleData) return null;
-      
-      // Check if sample data is still valid (30 minutes TTL)
-      const isValid = Date.now() - sampleData.timestamp < SAMPLE_DATA_TTL;
-      return isValid ? sampleData : null;
-    }
-);
-
-// Load and cache sample data for a specific table
-export const loadAndCacheSampleDataAtom = atom(
-  null,
-  async (
-    get,
-    set,
-    { database, table, apiUrl, limit = 5 }: { 
-      database: string; 
-      table: string; 
-      apiUrl: string;
-      limit?: number;
-    }
-  ) => {
-    const cache = get(schemaCacheAtom);
-    
-    try {
-      console.log(`[SampleDataCache] Fetching sample data for ${database}.${table}`);
-      
-      const sampleQuery = `SELECT * FROM ${table} LIMIT ${limit}`;
-      const response = await axios.post(
-        `${apiUrl}?db=${encodeURIComponent(database)}&format=json`,
-        { query: sampleQuery },
-        { timeout: 5000 }
-      );
-
-      const results = response.data.results || [];
-      const columns = results.length > 0 ? Object.keys(results[0]) : [];
-      
-      const sampleDataEntry: SampleDataEntry = {
-        data: results,
-        columns,
-        rowCount: results.length,
-        timestamp: Date.now(),
-        success: true,
-      };
-
-      // Update cache with the new sample data
-      if (cache) {
-        const updatedCache = {
-          ...cache,
-          databases: {
-            ...cache.databases,
-            [database]: {
-              ...cache.databases[database],
-              sampleData: {
-                ...cache.databases[database]?.sampleData,
-                [table]: sampleDataEntry,
-              },
-            },
-          },
-        };
-
-        set(schemaCacheAtom, updatedCache);
-      }
-
-      return sampleDataEntry;
-    } catch (error) {
-      console.error(`[SampleDataCache] Failed to load sample data for ${database}.${table}:`, error);
-      
-      const errorEntry: SampleDataEntry = {
-        data: [],
-        columns: [],
-        rowCount: 0,
-        timestamp: Date.now(),
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error',
-      };
-
-      // Still cache the error to avoid repeated failed requests
-      if (cache) {
-        const updatedCache = {
-          ...cache,
-          databases: {
-            ...cache.databases,
-            [database]: {
-              ...cache.databases[database],
-              sampleData: {
-                ...cache.databases[database]?.sampleData,
-                [table]: errorEntry,
-              },
-            },
-          },
-        };
-
-        set(schemaCacheAtom, updatedCache);
-      }
-
-      throw error;
-    }
-  }
-);

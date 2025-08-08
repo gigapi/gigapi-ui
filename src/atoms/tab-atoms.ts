@@ -110,10 +110,10 @@ interface TabsRuntimeState {
 // ============================================================================
 
 // Runtime state for large data (not persisted to localStorage)
-export const tabsRuntimeStateAtom = atom<TabsRuntimeState>({});
+const tabsRuntimeStateAtom = atom<TabsRuntimeState>({});
 
 // Main tabs state stored in localStorage (excludes large data fields)
-export const tabsStateAtom = atomWithStorage<TabsState>(
+const tabsStateAtom = atomWithStorage<TabsState>(
   "gigapi_tabs",
   migrateOldData(),
   {
@@ -127,7 +127,7 @@ export const tabsStateAtom = atomWithStorage<TabsState>(
             parsed.tabs = parsed.tabs.map((tab: any) => ({
               ...tab,
               queryResults: null,
-              rawQueryResponse: ""
+              rawQueryResponse: "",
             }));
           }
           return parsed;
@@ -142,11 +142,11 @@ export const tabsStateAtom = atomWithStorage<TabsState>(
       // Strip out large data fields before saving to localStorage
       const valueToStore = {
         ...value,
-        tabs: value.tabs.map(tab => ({
+        tabs: value.tabs.map((tab) => ({
           ...tab,
           queryResults: null,
-          rawQueryResponse: ""
-        }))
+          rawQueryResponse: "",
+        })),
       };
       localStorage.setItem(key, JSON.stringify(valueToStore));
     },
@@ -167,7 +167,7 @@ export const tabsAtom = atom((get) => get(tabsStateAtom).tabs);
 export const activeTabIdAtom = atom((get) => get(tabsStateAtom).activeTabId);
 
 // Get active tab
-export const activeTabAtom = atom((get) => {
+const activeTabAtom = atom((get) => {
   const state = get(tabsStateAtom);
   return state.tabs.find((tab) => tab.id === state.activeTabId) || null;
 });
@@ -359,7 +359,7 @@ export const switchTabAtom = atom(null, (get, set, tabId: string) => {
 // Close tab
 export const closeTabAtom = atom(null, (get, set, tabId: string) => {
   const state = get(tabsStateAtom);
-  
+
   // Don't close if it's the only tab
   if (state.tabs.length <= 1) return;
 
@@ -406,30 +406,6 @@ export const renameTabAtom = atom(
         ? { ...tab, name, updatedAt: new Date().toISOString() }
         : tab
     );
-
-    set(tabsStateAtom, { ...state, tabs: updatedTabs });
-  }
-);
-
-// Add to current tab's query history
-export const addToTabQueryHistoryAtom = atom(
-  null,
-  (get, set, historyItem: any) => {
-    const state = get(tabsStateAtom);
-    const activeTab = get(activeTabAtom);
-    if (!activeTab) return;
-
-    const updatedTabs = state.tabs.map((tab) => {
-      if (tab.id === activeTab.id) {
-        const newHistory = [historyItem, ...tab.queryHistory].slice(0, 50); // Keep last 50 per tab
-        return {
-          ...tab,
-          queryHistory: newHistory,
-          updatedAt: new Date().toISOString(),
-        };
-      }
-      return tab;
-    });
 
     set(tabsStateAtom, { ...state, tabs: updatedTabs });
   }
@@ -541,8 +517,8 @@ export const currentTabQueryResultsAtom = atom(
       ...runtimeState,
       [activeTab.id]: {
         ...runtimeState[activeTab.id],
-        queryResults: results
-      }
+        queryResults: results,
+      },
     });
 
     // Update the updatedAt timestamp in persistent state
@@ -602,7 +578,11 @@ export const currentTabQueryExecutionTimeAtom = atom(
 
     const updatedTabs = state.tabs.map((tab) =>
       tab.id === activeTab.id
-        ? { ...tab, queryExecutionTime: time, updatedAt: new Date().toISOString() }
+        ? {
+            ...tab,
+            queryExecutionTime: time,
+            updatedAt: new Date().toISOString(),
+          }
         : tab
     );
 
@@ -612,12 +592,13 @@ export const currentTabQueryExecutionTimeAtom = atom(
 
 // Current tab's query metrics
 export const currentTabQueryMetricsAtom = atom(
-  (get) => get(activeTabAtom)?.queryMetrics || {
-    executionTime: 0,
-    rowCount: 0,
-    size: 0,
-    processedRows: 0,
-  },
+  (get) =>
+    get(activeTabAtom)?.queryMetrics || {
+      executionTime: 0,
+      rowCount: 0,
+      size: 0,
+      processedRows: 0,
+    },
   (get, set, metrics: any) => {
     const state = get(tabsStateAtom);
     const activeTab = get(activeTabAtom);
@@ -651,8 +632,8 @@ export const currentTabRawQueryResponseAtom = atom(
       ...runtimeState,
       [activeTab.id]: {
         ...runtimeState[activeTab.id],
-        rawQueryResponse: response
-      }
+        rawQueryResponse: response,
+      },
     });
 
     // Update the updatedAt timestamp in persistent state
@@ -705,14 +686,22 @@ export const currentTabPanelConfigAtom = atom(
 // Current tab's user modified fields
 export const currentTabUserModifiedFieldsAtom = atom(
   (get) => get(activeTabAtom)?.userModifiedFields || {},
-  (get, set, fields: { xField?: boolean; yField?: boolean; seriesField?: boolean }) => {
+  (
+    get,
+    set,
+    fields: { xField?: boolean; yField?: boolean; seriesField?: boolean }
+  ) => {
     const state = get(tabsStateAtom);
     const activeTab = get(activeTabAtom);
     if (!activeTab) return;
 
     const updatedTabs = state.tabs.map((tab) =>
       tab.id === activeTab.id
-        ? { ...tab, userModifiedFields: fields, updatedAt: new Date().toISOString() }
+        ? {
+            ...tab,
+            userModifiedFields: fields,
+            updatedAt: new Date().toISOString(),
+          }
         : tab
     );
 
@@ -730,7 +719,11 @@ export const currentTabAvailableFieldsAtom = atom(
 
     const updatedTabs = state.tabs.map((tab) =>
       tab.id === activeTab.id
-        ? { ...tab, availableFields: fields, updatedAt: new Date().toISOString() }
+        ? {
+            ...tab,
+            availableFields: fields,
+            updatedAt: new Date().toISOString(),
+          }
         : tab
     );
 
@@ -746,32 +739,18 @@ export const currentTabAvailableFieldsAtom = atom(
 export const runningQueriesAtom = atom<Set<string>>(new Set<string>());
 
 // Add a tab to running queries
-export const addRunningQueryAtom = atom(
-  null,
-  (get, set, tabId: string) => {
-    const running = new Set(get(runningQueriesAtom));
-    running.add(tabId);
-    set(runningQueriesAtom, running);
-  }
-);
+export const addRunningQueryAtom = atom(null, (get, set, tabId: string) => {
+  const running = new Set(get(runningQueriesAtom));
+  running.add(tabId);
+  set(runningQueriesAtom, running);
+});
 
 // Remove a tab from running queries
-export const removeRunningQueryAtom = atom(
-  null,
-  (get, set, tabId: string) => {
-    const running = new Set(get(runningQueriesAtom));
-    running.delete(tabId);
-    set(runningQueriesAtom, running);
-  }
-);
-
-// Check if a tab has a running query
-export const isTabQueryRunningAtom = atom(
-  (get) => (tabId: string) => {
-    const running = get(runningQueriesAtom);
-    return running.has(tabId);
-  }
-);
+export const removeRunningQueryAtom = atom(null, (get, set, tabId: string) => {
+  const running = new Set(get(runningQueriesAtom));
+  running.delete(tabId);
+  set(runningQueriesAtom, running);
+});
 
 // ============================================================================
 // Tab-specific Update Atoms (by ID, not current tab)
@@ -787,16 +766,14 @@ export const updateTabQueryResultsByIdAtom = atom(
       ...runtimeState,
       [tabId]: {
         ...runtimeState[tabId],
-        queryResults: results
-      }
+        queryResults: results,
+      },
     });
 
     // Update the updatedAt timestamp in persistent state
     const state = get(tabsStateAtom);
     const updatedTabs = state.tabs.map((tab) =>
-      tab.id === tabId
-        ? { ...tab, updatedAt: new Date().toISOString() }
-        : tab
+      tab.id === tabId ? { ...tab, updatedAt: new Date().toISOString() } : tab
     );
     set(tabsStateAtom, { ...state, tabs: updatedTabs });
   }
@@ -837,7 +814,12 @@ export const updateTabQueryMetricsByIdAtom = atom(
     const state = get(tabsStateAtom);
     const updatedTabs = state.tabs.map((tab) =>
       tab.id === tabId
-        ? { ...tab, queryMetrics: metrics, queryExecutionTime: metrics.executionTime, updatedAt: new Date().toISOString() }
+        ? {
+            ...tab,
+            queryMetrics: metrics,
+            queryExecutionTime: metrics.executionTime,
+            updatedAt: new Date().toISOString(),
+          }
         : tab
     );
     set(tabsStateAtom, { ...state, tabs: updatedTabs });
@@ -854,16 +836,14 @@ export const updateTabRawResponseByIdAtom = atom(
       ...runtimeState,
       [tabId]: {
         ...runtimeState[tabId],
-        rawQueryResponse: response
-      }
+        rawQueryResponse: response,
+      },
     });
 
     // Update the updatedAt timestamp in persistent state
     const state = get(tabsStateAtom);
     const updatedTabs = state.tabs.map((tab) =>
-      tab.id === tabId
-        ? { ...tab, updatedAt: new Date().toISOString() }
-        : tab
+      tab.id === tabId ? { ...tab, updatedAt: new Date().toISOString() } : tab
     );
     set(tabsStateAtom, { ...state, tabs: updatedTabs });
   }
@@ -911,10 +891,10 @@ export const addToTabQueryHistoryByIdAtom = atom(
 export function getCurrentTabData() {
   const stored = localStorage.getItem("gigapi_tabs");
   if (!stored) return null;
-  
+
   try {
     const state: TabsState = JSON.parse(stored);
-    const activeTab = state.tabs.find(tab => tab.id === state.activeTabId);
+    const activeTab = state.tabs.find((tab) => tab.id === state.activeTabId);
     return activeTab || null;
   } catch (e) {
     console.error("Failed to get current tab data:", e);

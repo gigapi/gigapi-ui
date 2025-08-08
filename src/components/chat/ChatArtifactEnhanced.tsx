@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, memo, useRef, startTransition } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useAtom, useSetAtom } from "jotai";
 import { apiUrlAtom } from "@/atoms";
 import { setQueryAtom } from "@/atoms/query-atoms";
@@ -63,18 +63,22 @@ import { QueryProcessor } from "@/lib/query-processor";
 import { QuerySanitizer } from "@/lib/query-sanitizer";
 import { useArtifact } from "@/contexts/ArtifactContext";
 import ArtifactDebugPanel from "./ArtifactDebugPanel";
+import type { ChatSession } from "@/types/chat.types";
+import type { Dashboard, TimeRange } from "@/types/dashboard.types";
 import type {
-  ChatSession,
-  ChatArtifact,
+  Artifact,
   QueryArtifact,
   ChartArtifact,
-} from "@/types/chat.types";
-import type { Dashboard, TimeRange } from "@/types/dashboard.types";
+} from "@/types/artifact.types";
+import {
+  isQueryArtifact,
+  isChartArtifact,
+} from "@/types/artifact.types";
 import parseNDJSON from "@/lib/parsers/ndjson";
 import { useNavigate } from "react-router-dom";
 
 interface ChatArtifactEnhancedProps {
-  artifact: ChatArtifact;
+  artifact: Artifact;
   session: ChatSession;
   dashboardTimeRange?: TimeRange;
 }
@@ -137,9 +141,9 @@ export default function ChatArtifactEnhanced({
   const [isStable, setIsStable] = useState(false);
 
   // Determine artifact type and extract data first
-  const isQueryArtifact = artifact.type === "query";
-  const isChartArtifact = artifact.type === "chart";
-  const artifactData = artifact.data as QueryArtifact | ChartArtifact;
+  const isQueryArtifactResult = isQueryArtifact(artifact);
+  const isChartArtifactResult = isChartArtifact(artifact);
+  const artifactData = artifact.data;
 
   // Extract validation info from metadata
   const validationErrors = (artifact as any).metadata?.validationErrors || [];
@@ -150,14 +154,18 @@ export default function ChatArtifactEnhanced({
   const [selectedTimeRange, setSelectedTimeRange] = useState<string>("1h");
 
   // Get the original query first (needed for time field detection)
-  const originalQuery = isQueryArtifact
-    ? (artifactData as QueryArtifact).query
-    : (artifactData as ChartArtifact).query;
+  const originalQuery = isQueryArtifactResult
+    ? (artifact as QueryArtifact).data.query
+    : isChartArtifactResult
+    ? (artifact as ChartArtifact).data.query
+    : "";
 
   // Extract database name and strip @ prefix if present
-  const rawDatabase = isQueryArtifact
-    ? (artifactData as QueryArtifact).database || "default"
-    : (artifactData as ChartArtifact).database || "default";
+  const rawDatabase = isQueryArtifactResult
+    ? (artifact as QueryArtifact).data.database || "default"
+    : isChartArtifactResult
+    ? (artifact as ChartArtifact).data.database || "default"
+    : "default";
 
   // Strip @ prefix from database name if present
   const database = rawDatabase
@@ -201,24 +209,12 @@ export default function ChatArtifactEnhanced({
 
   // Time field state - always use __timestamp for time filters
   const selectedTimeField = useMemo(() => {
-    // First check if timeField is already set in artifact data
-    if (artifactData.timeField) return artifactData.timeField;
-    
-    // For chart artifacts, check fieldMapping.xField as fallback
-    if (isChartArtifact) {
-      const chartData = artifactData as ChartArtifact;
-      if (chartData.fieldMapping?.xField) {
-        return chartData.fieldMapping.xField;
-      }
-    }
-    
     // If query has time filter, always use __timestamp
     if (originalQuery && originalQuery.includes("$__timeFilter")) {
       return "__timestamp";
     }
-    
     return "";
-  }, [artifactData, isChartArtifact, originalQuery]);
+  }, [originalQuery]);
 
   // Dashboard save dialog state
   const [showSaveToDashboard, setShowSaveToDashboard] = useState(false);
@@ -278,8 +274,8 @@ export default function ChatArtifactEnhanced({
 
       if (hasTimeVariables) {
         const timeRange = getEffectiveTimeRange();
-        const chartData = isChartArtifact
-          ? (artifactData as ChartArtifact)
+        const chartData = isChartArtifactResult
+          ? (artifact as ChartArtifact).data
           : null;
 
         log(artifact.id, "info", "Processing query with time variables", {
@@ -548,7 +544,7 @@ export default function ChatArtifactEnhanced({
     query,
     database,
     apiUrl,
-    isChartArtifact,
+    isChartArtifactResult,
     artifactData,
     artifact.id,
     log,
@@ -565,18 +561,18 @@ export default function ChatArtifactEnhanced({
   // Track mount state and add stabilization period
   useEffect(() => {
     setIsMounted(true);
-    
+
     // Check if this is a newly created artifact
     const isNewlyCreated = (artifact as any).metadata?.isNewlyCreated;
-    
+
     // Add a longer stabilization delay to prevent render cycles
     // Even longer delay for newly created artifacts to ensure stability
     const delay = isNewlyCreated ? 600 : 300;
-    
+
     const stabilizeTimer = setTimeout(() => {
       setIsStable(true);
     }, delay);
-    
+
     return () => {
       clearTimeout(stabilizeTimer);
     };
@@ -590,14 +586,22 @@ export default function ChatArtifactEnhanced({
         executionTime: persistedExecutionTime,
       });
     } else {
-      log(artifact.id, "info", "No cached data available - click play to execute query");
+      log(
+        artifact.id,
+        "info",
+        "No cached data available - click play to execute query"
+      );
     }
   }, []);
 
   // Don't auto-execute when time range changes - let user control execution
   useEffect(() => {
     if (query && database && data.length > 0) {
-      log(artifact.id, "info", "Time range changed - click play to re-execute with new range");
+      log(
+        artifact.id,
+        "info",
+        "Time range changed - click play to re-execute with new range"
+      );
     }
   }, [selectedTimeRange]);
 
@@ -760,10 +764,10 @@ export default function ChatArtifactEnhanced({
     setIsEditingQuery(false);
 
     // Update the artifact data with the edited query
-    if (isQueryArtifact) {
-      (artifact.data as QueryArtifact).query = editedQuery;
-    } else if (isChartArtifact) {
-      (artifact.data as ChartArtifact).query = editedQuery;
+    if (isQueryArtifactResult) {
+      (artifact as QueryArtifact).data.query = editedQuery;
+    } else if (isChartArtifactResult) {
+      (artifact as ChartArtifact).data.query = editedQuery;
     }
 
     // Update the chat session to persist the changes
@@ -820,24 +824,24 @@ export default function ChatArtifactEnhanced({
     setIsEditingQuery(false);
     executeQuery();
   };
-  
+
   // Time field is now hardcoded, no need for handler
 
   // Build panel config for chart renderer
-  const panelConfig = isChartArtifact
+  const panelConfig = isChartArtifactResult
     ? {
         id: artifact.id,
-        type: ((artifactData as ChartArtifact).type ||
-          (artifactData as ChartArtifact).chartType ||
+        type: ((artifact as ChartArtifact).data.type ||
+          (artifact as ChartArtifact).data.chartType ||
           "timeseries") as any,
         title: artifact.title || "Chart",
         query: query || "",
         database,
-        fieldMapping: (artifactData as ChartArtifact).fieldMapping || {},
-        fieldConfig: (artifactData as ChartArtifact).fieldConfig || {
+        fieldMapping: (artifact as ChartArtifact).data.fieldMapping || {},
+        fieldConfig: (artifact as ChartArtifact).data.fieldConfig || {
           defaults: { unit: "", decimals: 2 },
         },
-        options: (artifactData as ChartArtifact).options || {
+        options: (artifact as ChartArtifact).data.options || {
           legend: { showLegend: true, placement: "bottom" as const },
         },
         timeField: selectedTimeField || undefined,
@@ -919,7 +923,7 @@ export default function ChatArtifactEnhanced({
             <div className="flex-1 min-w-0 w-full sm:w-auto">
               <div className="flex flex-wrap items-center gap-2 mb-2">
                 <Badge variant="secondary" className="text-xs">
-                  {isQueryArtifact ? (
+                  {isQueryArtifactResult ? (
                     <>
                       <Zap className="w-3 h-3 mr-1" />
                       SQL Query
@@ -931,7 +935,7 @@ export default function ChatArtifactEnhanced({
                     </>
                   )}
                 </Badge>
-                {isChartArtifact && panelConfig && (
+                {isChartArtifactResult && panelConfig && (
                   <Badge variant="outline" className="text-xs">
                     {panelConfig.type}
                   </Badge>
@@ -948,7 +952,7 @@ export default function ChatArtifactEnhanced({
               </div>
               <CardTitle className="text-base sm:text-lg">
                 {artifact.title ||
-                  (isQueryArtifact ? "Query Results" : "Chart")}
+                  (isQueryArtifactResult ? "Query Results" : "Chart")}
               </CardTitle>
             </div>
 
@@ -1016,13 +1020,13 @@ export default function ChatArtifactEnhanced({
                 <Copy className="w-3 h-3" />
               </Button>
 
-              {isQueryArtifact && (
+              {isQueryArtifactResult && (
                 <Button variant="ghost" size="sm" onClick={useQueryInEditor}>
                   <FileCode className="w-3 h-3" />
                 </Button>
               )}
 
-              {isChartArtifact && (
+              {isChartArtifactResult && (
                 <Button
                   variant="default"
                   size="sm"
@@ -1129,7 +1133,7 @@ export default function ChatArtifactEnhanced({
                   )}
                 </div>
               </div>
-            ) : isChartArtifact && panelConfig ? (
+            ) : isChartArtifactResult && panelConfig ? (
               <div className="p-2 sm:p-3 h-[200px] sm:h-[320px]">
                 <ChartRenderer
                   config={panelConfig}
@@ -1139,7 +1143,7 @@ export default function ChatArtifactEnhanced({
                   width="100%"
                 />
               </div>
-            ) : isQueryArtifact ? (
+            ) : isQueryArtifactResult ? (
               <div className="max-h-[300px] sm:max-h-[400px] overflow-auto">
                 {renderQueryResults()}
               </div>
@@ -1245,7 +1249,7 @@ export default function ChatArtifactEnhanced({
         </CardContent>
 
         {/* Save to Dashboard Dialog */}
-        {isChartArtifact && (
+        {isChartArtifactResult && (
           <Dialog
             open={showSaveToDashboard}
             onOpenChange={setShowSaveToDashboard}

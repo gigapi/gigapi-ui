@@ -79,7 +79,7 @@ export const dashboardErrorAtom = atom<string | null>(null);
 
 // Edit mode atoms - defined outside the hook
 export const isEditModeAtom = atom<boolean>(false);
-export const selectedPanelIdAtom = atom<string | null>(null);
+const selectedPanelIdAtom = atom<string | null>(null);
 
 // Clear current dashboard atom
 export const clearCurrentDashboardAtom = atom(null, (_get, set) => {
@@ -237,7 +237,7 @@ export const updateDashboardAtom = atom(
   }
 );
 
-export const deleteDashboardAtom = atom(
+const deleteDashboardAtom = atom(
   null,
   async (get, set, dashboardId: string) => {
     try {
@@ -373,7 +373,7 @@ export const addPanelAtom = atom(
   }
 );
 
-export const removePanelAtom = atom(
+const removePanelAtom = atom(
   null,
   async (
     get,
@@ -444,7 +444,7 @@ export const removePanelAtom = atom(
 );
 
 // Derived atoms
-export const dashboardListItemsAtom = atom((get): DashboardListItem[] => {
+const dashboardListItemsAtom = atom((get): DashboardListItem[] => {
   const dashboards = get(dashboardListAtom);
 
   return dashboards
@@ -463,7 +463,7 @@ export const dashboardListItemsAtom = atom((get): DashboardListItem[] => {
     );
 });
 
-export const currentDashboardPanelsAtom = atom((get): PanelConfig[] => {
+const currentDashboardPanelsAtom = atom((get): PanelConfig[] => {
   const currentDashboard = get(currentDashboardAtom);
 
   if (!currentDashboard) return [];
@@ -478,7 +478,7 @@ export function useDashboardSafely() {
 
 // Action atom to refresh panel data
 // This now acts as a trigger - actual query execution happens in components via usePanelQuery hook
-export const refreshPanelDataAtom = atom(
+const refreshPanelDataAtom = atom(
   null,
   async (get, set, { panelId }: { panelId: string; config?: PanelConfig }) => {
     // Mark panel data as stale to trigger refresh in components

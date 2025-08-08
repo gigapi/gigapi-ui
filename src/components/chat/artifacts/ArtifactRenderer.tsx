@@ -23,13 +23,16 @@ import axios from "axios";
 
 // Import artifact types and type guards
 import {
-  type EnhancedArtifact,
+  type Artifact,
   isQueryArtifact,
   isChartArtifact,
   isTableArtifact,
   isSummaryArtifact,
   isInsightArtifact,
   isMetricArtifact,
+  isProposalArtifact,
+  getArtifactQuery,
+  getArtifactDatabase,
   type ArtifactRendererConfig,
 } from "@/types/artifact.types";
 
@@ -38,7 +41,6 @@ import TableArtifact from "./TableArtifact";
 import MetricArtifact from "./MetricArtifact";
 import SummaryArtifact from "./SummaryArtifact";
 import InsightArtifact from "./InsightArtifact";
-import TimeFieldSelector, { detectTimeFieldFromQuery } from "./TimeFieldSelector";
 import ChatArtifactEnhanced from "../ChatArtifactEnhanced";
 import ArtifactDebugPanel from "../ArtifactDebugPanel";
 import parseNDJSON from "@/lib/parsers/ndjson";
@@ -47,7 +49,7 @@ import { QuerySanitizer } from "@/lib/query-sanitizer";
 import type { ChatSession } from "@/types/chat.types";
 
 interface ArtifactRendererProps {
-  artifact: EnhancedArtifact;
+  artifact: Artifact;
   session: ChatSession;
   config?: Partial<ArtifactRendererConfig>;
 }
@@ -95,22 +97,8 @@ export default function ArtifactRenderer({
   }, [artifact]);
   
 
-  const [selectedTimeField, setSelectedTimeField] = useState<string>(() => {
-    // Try to get time field from artifact data first
-    const artifactTimeField = (artifact.data as any).timeField;
-    if (artifactTimeField) return artifactTimeField;
-    
-    // Extract time field from query if not explicitly provided
-    const { query } = getQueryInfo();
-    if (query && query.includes("$__timeFilter")) {
-      // Use the helper function from TimeFieldSelector
-      const detectedField = detectTimeFieldFromQuery(query);
-      // Only return if we found a field, otherwise empty string to let user select
-      return detectedField || "";
-    }
-    
-    return "";
-  });
+  // Always use __timestamp for time-based queries
+  const selectedTimeField = "__timestamp";
 
   const {
     maxHeight = 400,
@@ -188,40 +176,21 @@ export default function ArtifactRenderer({
           to: "now"
         };
         
-        // Determine the time column to use with enhanced fallback logic
-        timeColumn = selectedTimeField || 
-                        (isChartArtifact(artifact) ? artifact.data.fieldMapping?.xField : undefined) ||
-                        detectTimeFieldFromQuery(finalQuery) || undefined;
-        
-        // Enhanced fallback: if no time column detected, try common defaults
-        if (!timeColumn) {
-          const commonTimeFields = ['__timestamp', 'timestamp', 'time', 'created_at', 'updated_at'];
-          log(artifact.id, "warn", "No time field detected, trying common defaults", {
-            commonTimeFields,
-            originalQuery: query,
-            finalQuery
-          });
-          
-          // Use the first common time field as fallback
-          timeColumn = commonTimeFields[0]; // Default to '__timestamp'
-        }
+        // Always use __timestamp for time-based queries
+        timeColumn = "__timestamp";
         
         log(artifact.id, "info", "Processing time variables", {
           hasTimeVariables,
-          selectedTimeField,
-          extractedTimeField: detectTimeFieldFromQuery(finalQuery),
-          finalTimeColumn: timeColumn,
+          timeColumn,
           timeRange,
-          originalQuery: query,
-          usedFallback: !selectedTimeField && !detectTimeFieldFromQuery(finalQuery)
+          originalQuery: query
         });
         
         if (!timeColumn) {
           const errorMsg = "No time field could be determined for query with time variables. Please specify a time field or ensure your query includes time column references.";
           log(artifact.id, "error", errorMsg, { 
             query: finalQuery,
-            selectedTimeField,
-            extractedFromQuery: detectTimeFieldFromQuery(finalQuery),
+            timeColumn,
             artifactData: artifact.data 
           });
           throw new Error(errorMsg);
@@ -573,22 +542,6 @@ export default function ArtifactRenderer({
             </div>
           )}
 
-          {/* Time Field Selector for non-chart artifacts with time filter */}
-          {query &&
-            query.includes("$__timeFilter") &&
-            !isChartArtifact(artifact) && (
-              <div className="mb-4">
-                <TimeFieldSelector
-                  query={query}
-                  database={database || undefined}
-                  table={isTableArtifact(artifact) ? artifact.data.query.match(/FROM\s+(\w+)/i)?.[1] : undefined}
-                  value={selectedTimeField}
-                  onChange={setSelectedTimeField}
-                  className="max-w-xs"
-                  dynamic={false} // Disable dynamic mode to prevent API call loops
-                />
-              </div>
-            )}
 
           <div
             style={{ maxHeight: `${maxHeight}px` }}

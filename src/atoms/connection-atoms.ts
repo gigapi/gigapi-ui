@@ -65,7 +65,7 @@ export const apiUrlAtom = atomWithStorage<string>(
 export const connectionStateAtom = atom<ConnectionState>("disconnected");
 export const databasesAtom = atom<Database[]>([]);
 export const connectionErrorAtom = atom<string | null>(null);
-export const isConnectingAtom = atom<boolean>(false);
+const isConnectingAtom = atom<boolean>(false);
 
 // Derived atoms
 export const isConnectedAtom = atom(

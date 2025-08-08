@@ -4,11 +4,11 @@ import {
   Play,
   Copy,
   Eraser,
-  Share,
   MessageCircle,
   Bot,
   Share2,
   RefreshCw,
+  MoreVertical,
 } from "lucide-react";
 import {
   Tooltip,
@@ -16,6 +16,13 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import Loader from "@/components/shared/Loader";
 import { HashQueryUtils } from "@/lib/";
 import { toast } from "sonner";
@@ -244,145 +251,103 @@ export default function QueryEditorToolbar({
         </div>
       </div>
 
-      {/* Mobile/Tablet Layout */}
-      <div className="lg:hidden bg-card rounded-md border p-2 space-y-2">
-        {/* First Row: Run Query and Action Buttons */}
-        <div className="flex items-center justify-between">
-          <Button
-            onClick={onRunQuery}
-            disabled={isLoading || !selectedDb}
-            className="h-8 px-3 flex-shrink-0"
-            variant="default"
-          >
-            {isLoading ? (
-              <>
-                <Loader className="h-4 w-4" />
-                <span className="hidden sm:inline ml-1">Running...</span>
-              </>
-            ) : (
-              <>
-                <Play className="mr-1.5 h-3.5 w-3.5" />
-                <span className="hidden sm:inline">Run Query</span>
-                <span className="sm:hidden">Run</span>
-              </>
-            )}
-          </Button>
+      {/* Mobile/Tablet Layout - Compact with dropdown */}
+      <div className="lg:hidden flex items-center gap-1 p-1">
+        {/* Run Button */}
+        <Button
+          onClick={onRunQuery}
+          disabled={isLoading || !selectedDb}
+          className="h-8 px-3 flex-shrink-0"
+          variant="default"
+        >
+          {isLoading ? (
+            <>
+              <Loader className="h-3.5 w-3.5" />
+              <span className="ml-1">Running...</span>
+            </>
+          ) : (
+            <>
+              <Play className="h-3.5 w-3.5" />
+              <span className="ml-1">Run</span>
+            </>
+          )}
+        </Button>
 
-          <div className="flex items-center gap-1">
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={shareQuery}
-                    className="h-8 w-8 p-0"
-                    disabled={!query.trim()}
-                  >
-                    <Share className="h-3.5 w-3.5" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">
-                  <p className="text-xs">Share</p>
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={copyQuery}
-                    className="h-8 w-8 p-0"
-                    disabled={!query.trim()}
-                  >
-                    <Copy className="h-3.5 w-3.5" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">
-                  <p className="text-xs">Copy</p>
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-8 w-8 p-0"
-                    onClick={onClearQuery}
-                    disabled={!query.trim()}
-                  >
-                    <Eraser className="h-3.5 w-3.5" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">
-                  <p className="text-xs">Clear</p>
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
+        {/* Actions Dropdown */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+              <MoreVertical className="h-4 w-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-48">
+            <DropdownMenuItem 
+              onClick={shareQuery}
+              disabled={!query.trim()}
+              className="cursor-pointer"
+            >
+              <Share2 className="h-4 w-4 mr-2" />
+              Share Query
+            </DropdownMenuItem>
+            
+            <DropdownMenuItem 
+              onClick={copyQuery}
+              disabled={!query.trim()}
+              className="cursor-pointer"
+            >
+              <Copy className="h-4 w-4 mr-2" />
+              Copy Query
+            </DropdownMenuItem>
+            
+            <DropdownMenuItem 
+              onClick={onClearQuery}
+              disabled={!query.trim()}
+              className="cursor-pointer"
+            >
+              <Eraser className="h-4 w-4 mr-2" />
+              Clear Query
+            </DropdownMenuItem>
 
             {onRefreshSchema && selectedTable && (
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-8 w-8 p-0"
-                      onClick={onRefreshSchema}
-                    >
-                      <RefreshCw className="h-3.5 w-3.5" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom">
-                    <p className="text-xs">Refresh</p>
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem 
+                  onClick={onRefreshSchema}
+                  className="cursor-pointer"
+                >
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Refresh Schema
+                </DropdownMenuItem>
+              </>
             )}
 
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant={showChatPanel ? "default" : "outline"}
-                    size="sm"
-                    className="h-8 px-2 relative bg-gradient-to-r from-purple-500 to-blue-600 hover:from-purple-600 hover:to-blue-700 text-white border-0"
-                    onClick={onToggleChat}
+            <DropdownMenuSeparator />
+            
+            <DropdownMenuItem 
+              onClick={onToggleChat}
+              className="cursor-pointer"
+            >
+              <div className="flex items-center justify-between w-full">
+                <div className="flex items-center">
+                  {mcpConnected ? (
+                    <Bot className="h-4 w-4 mr-2" />
+                  ) : (
+                    <MessageCircle className="h-4 w-4 mr-2" />
+                  )}
+                  <span>{showChatPanel ? "Hide" : "Show"} AI Assistant</span>
+                </div>
+                {chatSessionsCount > 0 && (
+                  <Badge
+                    variant="secondary"
+                    className="h-5 px-1.5 flex items-center justify-center text-xs"
                   >
-                    {mcpConnected ? (
-                      <Bot className="h-3.5 w-3.5 mr-1" />
-                    ) : (
-                      <MessageCircle className="h-3.5 w-3.5 mr-1" />
-                    )}
-                    <span className="text-xs sm:inline hidden">AI</span>
-                    {chatSessionsCount > 0 && (
-                      <Badge
-                        variant="secondary"
-                        className="ml-1 h-4 w-4 p-0 flex items-center justify-center text-xs bg-white/20 text-white border-0"
-                      >
-                        {chatSessionsCount > 9 ? "9+" : chatSessionsCount}
-                      </Badge>
-                    )}
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">
-                  <p className="text-xs">
-                    {showChatPanel ? "Hide" : "Show"} AI assistant
-                    {mcpConnected
-                      ? ` (${chatSessionsCount} sessions)`
-                      : " (Setup required)"}
-                  </p>
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-          </div>
-        </div>
+                    {chatSessionsCount}
+                  </Badge>
+                )}
+              </div>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
     </>
   );

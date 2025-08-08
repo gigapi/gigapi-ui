@@ -17,7 +17,6 @@ import {
   currentTabQueryResultsAtom,
   currentTabQueryErrorAtom,
   currentTabQueryLoadingAtom,
-  currentTabQueryExecutionTimeAtom,
   currentTabQueryMetricsAtom,
   currentTabRawQueryResponseAtom,
   currentTabProcessedQueryAtom,
@@ -39,7 +38,6 @@ export const queryAtom = currentTabQueryAtom;
 export const queryResultsAtom = currentTabQueryResultsAtom;
 export const queryErrorAtom = currentTabQueryErrorAtom;
 export const queryLoadingAtom = currentTabQueryLoadingAtom;
-export const queryExecutionTimeAtom = currentTabQueryExecutionTimeAtom;
 export const queryMetricsAtom = currentTabQueryMetricsAtom;
 export const rawQueryResponseAtom = currentTabRawQueryResponseAtom;
 export const processedQueryAtom = currentTabProcessedQueryAtom;

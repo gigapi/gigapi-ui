@@ -1,5 +1,4 @@
 import { useState, useCallback } from "react";
-import { flushSync } from "react-dom";
 import { useAtom } from "jotai";
 import { chatSessionsAtom } from "@/atoms/chat-atoms";
 import { apiUrlAtom } from "@/atoms/connection-atoms";
@@ -7,17 +6,17 @@ import { toast } from "sonner";
 import { AutoExecutionEngine } from "@/lib/auto-execution";
 import { ResultFeedbackManager } from "@/lib/auto-execution/result-feedback";
 import ArtifactRenderer from "./ArtifactRenderer";
-import ProposalArtifact from "./ProposalArtifact";
-import type {
-  ChatArtifact,
-  ChatSession,
-  ChatMessage,
-  ProposalArtifact as ProposalArtifactType,
-} from "@/types/chat.types";
+import ProposalArtifactComponent from "./ProposalArtifact";
+import type { ChatSession, ChatMessage } from "@/types/chat.types";
+import type { 
+  Artifact, 
+  ProposalArtifact,
+  isProposalArtifact 
+} from "@/types/artifact.types";
 import type { ExecutionContext } from "@/lib/auto-execution/types";
 
 interface ArtifactRendererWrapperProps {
-  artifact: ChatArtifact;
+  artifact: Artifact;
   session: ChatSession;
 }
 
@@ -41,7 +40,7 @@ export default function ArtifactRendererWrapper({
           return;
         }
 
-        const proposal = artifact.data as ProposalArtifactType;
+        const proposal = (artifact as ProposalArtifact).data;
 
         // Update proposal as approved and executing
         const updatedMessages = currentSession.messages.map((message) => {
@@ -71,16 +70,14 @@ export default function ArtifactRendererWrapper({
           return message;
         });
 
-        // Update the session with approved status using flushSync to batch updates
-        flushSync(() => {
-          setChatSessions({
-            ...chatSessions,
-            [session.id]: {
-              ...currentSession,
-              messages: updatedMessages,
-              updatedAt: new Date().toISOString(),
-            },
-          });
+        // Update the session with approved status
+        setChatSessions({
+          ...chatSessions,
+          [session.id]: {
+            ...currentSession,
+            messages: updatedMessages,
+            updatedAt: new Date().toISOString(),
+          },
         });
 
         // Initialize auto-execution engine
@@ -99,17 +96,27 @@ export default function ArtifactRendererWrapper({
           chat_history: currentSession.messages,
         };
 
-        // Execute the query
-        const executionResult = await autoExecutionEngine.executeProposal(
-          proposal,
-          executionContext
-        );
+        // Create a timeout promise
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          setTimeout(() => {
+            reject(new Error("Query execution timed out after 30 seconds"));
+          }, 30000); // 30 second timeout
+        });
+
+        // Execute the query with timeout
+        const executionResult = await Promise.race([
+          autoExecutionEngine.executeProposal(
+            artifact as ProposalArtifact,
+            executionContext
+          ),
+          timeoutPromise
+        ]);
 
         // Generate feedback
         const feedback = resultFeedbackManager.generateFeedback(
           proposalId,
           executionResult,
-          proposal
+          artifact as ProposalArtifact
         );
 
         // Create result artifact based on proposal chart type
@@ -123,7 +130,7 @@ export default function ArtifactRendererWrapper({
           proposal.query.includes("$__timeTo")
         );
         
-        const resultArtifact: ChatArtifact = {
+        const resultArtifact: Artifact = {
           id: `artifact_${Date.now()}`,
           type: artifactType,
           title: proposal.title,
@@ -254,10 +261,9 @@ export default function ArtifactRendererWrapper({
           },
         };
 
-        // Add the feedback message to the session with a delay
-        // This prevents infinite loops when artifacts contain time variables
-        // Significantly increased delay to allow component tree to fully stabilize
-        setTimeout(() => {
+        // Add the feedback message to the session
+        // Use requestAnimationFrame to ensure DOM updates are complete
+        requestAnimationFrame(() => {
           const updatedSessions = { ...chatSessions };
           const updatedSession = updatedSessions[session.id];
           if (updatedSession) {
@@ -270,7 +276,7 @@ export default function ArtifactRendererWrapper({
               },
             });
           }
-        }, 500); // Increased from 150ms to 500ms
+        });
 
         if (executionResult.success) {
           toast.success(
@@ -283,7 +289,51 @@ export default function ArtifactRendererWrapper({
         }
       } catch (error) {
         console.error("Error in auto-execution:", error);
-        toast.error("Failed to execute query automatically");
+        
+        // Update the proposal status to failed
+        const currentSession = chatSessions[session.id];
+        if (currentSession) {
+          const failedMessages = currentSession.messages.map((message) => {
+            if (message.metadata?.artifacts) {
+              const failedArtifacts = message.metadata.artifacts.map((art) => {
+                if (art.id === proposalId && art.type === "proposal") {
+                  return {
+                    ...art,
+                    data: {
+                      ...(art as ProposalArtifact).data,
+                      approved: true,
+                      execution_status: "failed" as const,
+                      execution_error: error instanceof Error ? error.message : String(error),
+                      execution_timestamp: new Date().toISOString(),
+                    },
+                  };
+                }
+                return art;
+              });
+              return {
+                ...message,
+                metadata: {
+                  ...message.metadata,
+                  artifacts: failedArtifacts,
+                },
+              };
+            }
+            return message;
+          });
+          
+          // Update session with failed status
+          setChatSessions({
+            ...chatSessions,
+            [session.id]: {
+              ...currentSession,
+              messages: failedMessages,
+              updatedAt: new Date().toISOString(),
+            },
+          });
+        }
+        
+        const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
+        toast.error(`Failed to execute query: ${errorMessage}`);
       } finally {
         setIsExecuting(false);
       }
@@ -334,7 +384,7 @@ export default function ArtifactRendererWrapper({
   // Handle proposal artifacts separately
   if (artifact.type === "proposal") {
     return (
-      <ProposalArtifact
+      <ProposalArtifactComponent
         artifact={artifact}
         session={session}
         onApprove={handleProposalApproval}
@@ -345,14 +395,7 @@ export default function ArtifactRendererWrapper({
   }
 
   // For other artifact types, use the regular renderer
-  // Convert ChatArtifact to EnhancedArtifact format
-  const enhancedArtifact = {
-    ...artifact,
-    timestamp: new Date().toISOString(),
-    version: 1,
-  };
-
   return (
-    <ArtifactRenderer artifact={enhancedArtifact as any} session={session} />
+    <ArtifactRenderer artifact={artifact} session={session} />
   );
 }

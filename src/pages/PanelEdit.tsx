@@ -11,9 +11,8 @@ import {
   selectedTableAtom,
 } from "@/atoms";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Save, RefreshCw, Play } from "lucide-react";
+import { ArrowLeft, Save, RefreshCw, Play, Database } from "lucide-react";
 import { MonacoSqlEditor } from "@/components/query";
-import { Label } from "@/components/ui/label";
 import {
   ResizablePanelGroup,
   ResizablePanel,
@@ -678,14 +677,192 @@ export default function PanelEdit(props?: PanelEditProps) {
               <ResizablePanel defaultSize={60} minSize={40}>
                 <div className="h-full flex flex-col bg-background">
                   {/* Query Editor Header */}
-                  <div className="px-6 py-3 border-b bg-background">
-                    <div className="flex items-center justify-between gap-4">
-                      {/* Left Side - Title, Database Selector, and Status */}
-                      <div className="flex items-center gap-4 min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
-                          <Label className="text-sm font-medium text-muted-foreground whitespace-nowrap">
-                            Database:
-                          </Label>
+                  <div className="border-b bg-background">
+                    {/* Desktop Layout - Clean single row */}
+                    <div className="hidden lg:block px-4 py-2">
+                      <div className="flex items-center justify-between gap-4">
+                        {/* Left Side - Selectors and Status */}
+                        <div className="flex items-center gap-3 flex-1 min-w-0">
+                          {/* Database Selector */}
+                          <div className="flex items-center gap-1.5">
+                            <Database className="h-3.5 w-3.5 text-muted-foreground" />
+                            <span className="text-xs text-muted-foreground">DB</span>
+                            <UnifiedSchemaSelector
+                              type="database"
+                              dataSource="cache"
+                              value={localConfig?.database || ""}
+                              onChange={(value) =>
+                                handleConfigChange({
+                                  database: value === "" ? "" : value,
+                                  table: "", // Reset table when database changes
+                                  timeField: "", // Reset time field when database changes
+                                })
+                              }
+                              className="w-[140px]"
+                              showIcon={false}
+                              label={null}
+                            />
+                          </div>
+
+                          {/* Table Selector */}
+                          {localConfig?.database && (
+                            <>
+                              <div className="h-4 w-px bg-border"></div>
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-xs text-muted-foreground">FROM</span>
+                                <UnifiedSchemaSelector
+                                  type="table"
+                                  dataSource="cache"
+                                  database={localConfig?.database}
+                                  value={localConfig?.table || ""}
+                                  onChange={(value) => {
+                                    const updates: Partial<PanelConfig> = {
+                                      table: value === "" ? "" : value,
+                                      timeField: "", // Reset time field when table changes
+                                    };
+
+                                    // Auto-select first time field if available
+                                    if (
+                                      value &&
+                                      localConfig?.database &&
+                                      schema[localConfig.database]
+                                    ) {
+                                      const tableSchema =
+                                        schema[localConfig.database][value];
+                                      if (
+                                        tableSchema &&
+                                        Array.isArray(tableSchema)
+                                      ) {
+                                        const timeColumns = tableSchema.filter(
+                                          (col: any) => {
+                                            const colName = (
+                                              col.column_name ||
+                                              col.name ||
+                                              ""
+                                            ).toLowerCase();
+                                            const dataType = (
+                                              col.column_type ||
+                                              col.type ||
+                                              ""
+                                            ).toLowerCase();
+                                            return (
+                                              colName.includes("time") ||
+                                              colName.includes("date") ||
+                                              colName.includes("timestamp") ||
+                                              colName === "__timestamp" ||
+                                              dataType.includes("timestamp") ||
+                                              dataType.includes("datetime")
+                                            );
+                                          }
+                                        );
+
+                                        if (timeColumns && timeColumns.length > 0) {
+                                          const preferredTimeField =
+                                            timeColumns.find(
+                                              (col: any) =>
+                                                (col.column_name || col.name) ===
+                                                "__timestamp"
+                                            ) || timeColumns[0];
+                                          updates.timeField =
+                                            preferredTimeField.column_name ||
+                                            preferredTimeField.name;
+                                        }
+                                      }
+                                    }
+
+                                    // Update query to use selected table
+                                    if (
+                                      localConfig.query &&
+                                      localConfig.query.includes("your_table")
+                                    ) {
+                                      updates.query = localConfig.query.replace(
+                                        /your_table/g,
+                                        value
+                                      );
+                                    }
+
+                                    handleConfigChange(updates);
+                                  }}
+                                  className="w-[180px]"
+                                  showIcon={false}
+                                  label={null}
+                                />
+                              </div>
+                            </>
+                          )}
+
+                          {/* Time Field Selector */}
+                          {localConfig?.database && localConfig?.table && (
+                            <>
+                              <div className="h-4 w-px bg-border"></div>
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-xs text-muted-foreground">TIME BY</span>
+                                <UnifiedSchemaSelector
+                                  type="timeField"
+                                  dataSource="cache"
+                                  database={localConfig?.database}
+                                  table={localConfig?.table}
+                                  value={localConfig?.timeField || ""}
+                                  onChange={(value) =>
+                                    handleConfigChange({
+                                      timeField: value === "" ? "" : value,
+                                    })
+                                  }
+                                  className="w-[160px]"
+                                  showIcon={false}
+                                  label={null}
+                                />
+                              </div>
+                            </>
+                          )}
+
+                          {/* Query Status */}
+                          <div className="flex items-center gap-3 ml-auto">
+                            {previewData !== null && (
+                              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                                <div className="w-1.5 h-1.5 rounded-full bg-green-500"></div>
+                                <span>{Array.isArray(previewData) ? previewData.length : 0} rows</span>
+                              </div>
+                            )}
+
+                            {queryError && (
+                              <div className="flex items-center gap-1.5 text-xs text-red-600">
+                                <div className="w-1.5 h-1.5 rounded-full bg-red-500"></div>
+                                <span>Error</span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Right Side - Run Button */}
+                        <Button
+                          onClick={handleRunQuery}
+                          disabled={!localConfig?.query?.trim() || isExecuting}
+                          size="sm"
+                          className="h-8 px-3"
+                          variant="default"
+                        >
+                          {isExecuting ? (
+                            <>
+                              <Loader className="h-3.5 w-3.5" />
+                              <span className="ml-1.5">Running...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Play className="h-3.5 w-3.5" />
+                              <span className="ml-1.5">Run Query</span>
+                            </>
+                          )}
+                        </Button>
+                      </div>
+                    </div>
+
+                    {/* Mobile/Tablet Layout - Compact horizontal design */}
+                    <div className="lg:hidden px-3 py-2 space-y-2">
+                      {/* First Row: Database and Table */}
+                      <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-1 flex-1">
+                          <Database className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
                           <UnifiedSchemaSelector
                             type="database"
                             dataSource="cache"
@@ -697,18 +874,15 @@ export default function PanelEdit(props?: PanelEditProps) {
                                 timeField: "", // Reset time field when database changes
                               })
                             }
-                            className="w-[180px] h-8 text-sm"
+                            className="w-full min-w-0"
                             showIcon={false}
                             label={null}
                           />
                         </div>
 
-                        {/* Table Selector */}
                         {localConfig?.database && (
-                          <div className="flex items-center gap-2">
-                            <Label className="text-sm font-medium text-muted-foreground whitespace-nowrap">
-                              Table:
-                            </Label>
+                          <div className="flex items-center gap-1 flex-1">
+                            <span className="text-xs text-muted-foreground">FROM</span>
                             <UnifiedSchemaSelector
                               type="table"
                               dataSource="cache"
@@ -726,7 +900,6 @@ export default function PanelEdit(props?: PanelEditProps) {
                                   localConfig?.database &&
                                   schema[localConfig.database]
                                 ) {
-                                  // Schema structure is { database: { table: [...columns] } }
                                   const tableSchema =
                                     schema[localConfig.database][value];
                                   if (
@@ -757,7 +930,6 @@ export default function PanelEdit(props?: PanelEditProps) {
                                     );
 
                                     if (timeColumns && timeColumns.length > 0) {
-                                      // Prefer __timestamp or first available time column
                                       const preferredTimeField =
                                         timeColumns.find(
                                           (col: any) =>
@@ -784,19 +956,19 @@ export default function PanelEdit(props?: PanelEditProps) {
 
                                 handleConfigChange(updates);
                               }}
-                              className="w-[180px] h-8 text-sm"
+                              className="w-full min-w-0"
                               showIcon={false}
                               label={null}
                             />
                           </div>
                         )}
+                      </div>
 
-                        {/* Time Field Selector */}
-                        {localConfig?.database && localConfig?.table && (
-                          <div className="flex items-center gap-2">
-                            <Label className="text-sm font-medium text-muted-foreground whitespace-nowrap">
-                              Time Field:
-                            </Label>
+                      {/* Second Row: Time Field and Run Button */}
+                      {localConfig?.database && localConfig?.table && (
+                        <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-1 flex-1">
+                            <span className="text-xs text-muted-foreground">TIME BY</span>
                             <UnifiedSchemaSelector
                               type="timeField"
                               dataSource="cache"
@@ -808,42 +980,100 @@ export default function PanelEdit(props?: PanelEditProps) {
                                   timeField: value === "" ? "" : value,
                                 })
                               }
-                              className="w-[180px] h-8 text-sm"
+                              className="w-full min-w-0"
                               showIcon={false}
                               label={null}
                             />
                           </div>
-                        )}
 
-                        {/* Query Status */}
-                        {previewData !== null && (
-                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                            <div className="w-2 h-2 rounded-full bg-green-500"></div>
-                            {Array.isArray(previewData)
-                              ? previewData.length
-                              : 0}{" "}
-                            rows returned
-                          </div>
-                        )}
+                          <Button
+                            onClick={handleRunQuery}
+                            disabled={!localConfig?.query?.trim() || isExecuting}
+                            size="sm"
+                            className="h-8 px-3 flex-shrink-0"
+                            variant="default"
+                          >
+                            {isExecuting ? (
+                              <>
+                                <Loader className="h-3.5 w-3.5" />
+                                <span className="ml-1 hidden sm:inline">Running...</span>
+                              </>
+                            ) : (
+                              <>
+                                <Play className="h-3.5 w-3.5" />
+                                <span className="ml-1 hidden sm:inline">Run</span>
+                              </>
+                            )}
+                          </Button>
+                        </div>
+                      )}
 
-                        {queryError && (
-                          <div className="flex items-center gap-2 text-xs text-red-600">
-                            <div className="w-2 h-2 rounded-full bg-red-500"></div>
-                            Query failed
-                          </div>
-                        )}
-                      </div>
+                      {/* Status Row - Only show if there's data or error */}
+                      {(previewData !== null || queryError) && (
+                        <div className="flex items-center justify-between px-1">
+                          {previewData !== null && (
+                            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                              <div className="w-1.5 h-1.5 rounded-full bg-green-500"></div>
+                              <span>{Array.isArray(previewData) ? previewData.length : 0} rows</span>
+                            </div>
+                          )}
 
-                      {/* Right Side - Run Button */}
-                      <Button
-                        onClick={handleRunQuery}
-                        disabled={!localConfig?.query?.trim() || isExecuting}
-                        size="sm"
-                        className="bg-blue-600 hover:bg-blue-700 text-white shadow-sm"
-                      >
-                        <Play className="h-3 w-3 mr-1.5" />
-                        {isExecuting ? "Running..." : "Run Query"}
-                      </Button>
+                          {queryError && (
+                            <div className="flex items-center gap-1.5 text-xs text-red-600">
+                              <div className="w-1.5 h-1.5 rounded-full bg-red-500"></div>
+                              <span>Query failed</span>
+                            </div>
+                          )}
+
+                          {/* Run button for when table is not selected */}
+                          {!localConfig?.table && (
+                            <Button
+                              onClick={handleRunQuery}
+                              disabled={!localConfig?.query?.trim() || isExecuting}
+                              size="sm"
+                              className="h-7 px-3 ml-auto"
+                              variant="default"
+                            >
+                              {isExecuting ? (
+                                <>
+                                  <Loader className="h-3.5 w-3.5" />
+                                  <span className="ml-1">Running...</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Play className="h-3.5 w-3.5" />
+                                  <span className="ml-1">Run Query</span>
+                                </>
+                              )}
+                            </Button>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Run button when no table is selected yet */}
+                      {(!localConfig?.table && previewData === null && !queryError) && (
+                        <div className="flex justify-end">
+                          <Button
+                            onClick={handleRunQuery}
+                            disabled={!localConfig?.query?.trim() || isExecuting}
+                            size="sm"
+                            className="h-8 px-3"
+                            variant="default"
+                          >
+                            {isExecuting ? (
+                              <>
+                                <Loader className="h-3.5 w-3.5" />
+                                <span className="ml-1.5">Running...</span>
+                              </>
+                            ) : (
+                              <>
+                                <Play className="h-3.5 w-3.5" />
+                                <span className="ml-1.5">Run Query</span>
+                              </>
+                            )}
+                          </Button>
+                        </div>
+                      )}
                     </div>
                   </div>
 

@@ -6,7 +6,7 @@
 import type { TableSchema } from "@/types";
 
 // SQL Keywords grouped by category
-export const SQL_KEYWORDS = {
+const SQL_KEYWORDS = {
   // DDL Keywords
   ddl: [
     "CREATE", "ALTER", "DROP", "TRUNCATE", "RENAME", "COMMENT"
@@ -43,7 +43,7 @@ export const SQL_KEYWORDS = {
 };
 
 // Common SQL Functions grouped by category
-export const SQL_FUNCTIONS = {
+const SQL_FUNCTIONS = {
   // Aggregate functions
   aggregate: [
     { name: "COUNT", signature: "COUNT(*)", detail: "Count rows" },
@@ -104,7 +104,7 @@ export const SQL_FUNCTIONS = {
 };
 
 // SQL Operators
-export const SQL_OPERATORS = [
+const SQL_OPERATORS = [
   "=", "!=", "<>", "<", ">", "<=", ">=", 
   "+", "-", "*", "/", "%", "||"
 ];
@@ -227,7 +227,7 @@ export function extractTableAliases(query: string): Map<string, string> {
 /**
  * Filter suggestions based on current input
  */
-export function filterSuggestions(
+function filterSuggestions(
   suggestions: any[],
   currentWord: string
 ): any[] {
@@ -242,7 +242,7 @@ export function filterSuggestions(
 /**
  * Create suggestion item for Monaco
  */
-export function createSuggestion(
+function createSuggestion(
   monaco: any,
   label: string,
   kind: any,

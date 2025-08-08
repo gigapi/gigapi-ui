@@ -8,7 +8,7 @@ import { useChat } from "@/hooks/useChat";
 import ChatInputWithMentions from "@/components/chat/ChatInputWithMentions";
 import AIConnectionSheet from "@/components/chat/AIConnectionSheet";
 import { Button } from "@/components/ui/button";
-import { Plus, Database, Bot, Zap, AlertCircle } from "lucide-react";
+import { Plus, AlertCircle } from "lucide-react";
 import Logo from "@/assets/logo.svg";
 
 interface ChatPageProps {

@@ -16,10 +16,11 @@ import {
   AlertCircle,
   BarChart3
 } from 'lucide-react';
-import type { ChatArtifact, ChatSession, ProposalArtifact } from '@/types/chat.types';
+import type { ChatSession } from '@/types/chat.types';
+import type { ProposalArtifact as ProposalArtifactType, Artifact } from '@/types/artifact.types';
 
 interface ProposalArtifactProps {
-  artifact: ChatArtifact;
+  artifact: Artifact;
   session: ChatSession;
   onApprove: (proposalId: string) => void;
   onReject: (proposalId: string) => void;
@@ -35,7 +36,7 @@ export default function ProposalArtifact({
 }: ProposalArtifactProps) {
   const [showQuery, setShowQuery] = useState(false);
   const [showNextSteps, setShowNextSteps] = useState(false);
-  const proposal = artifact.data as ProposalArtifact;
+  const proposal = artifact.data as ProposalArtifactType['data'];
 
 
   const handleApprove = () => {
@@ -53,7 +54,7 @@ export default function ProposalArtifact({
           <div className="flex-1">
             <div className="flex items-center gap-2 mb-2">
               <Badge variant="secondary" className="bg-primary/10 text-primary">
-                {proposal.type === 'chart_proposal' ? (
+                {proposal.proposal_type === 'chart_proposal' ? (
                   <>
                     <BarChart3 className="w-3 h-3 mr-1" />
                     Chart Proposal
@@ -121,7 +122,7 @@ export default function ProposalArtifact({
         </div>
 
         {/* Chart Type for Chart Proposals */}
-        {proposal.type === 'chart_proposal' && proposal.chart_type && (
+        {proposal.proposal_type === 'chart_proposal' && proposal.chart_type && (
           <div className="flex flex-wrap gap-2">
             <Badge variant="outline">
               <BarChart3 className="w-3 h-3 mr-1" />

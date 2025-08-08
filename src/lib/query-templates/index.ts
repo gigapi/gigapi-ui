@@ -17,7 +17,7 @@ export interface QueryTemplate {
   suggestedChartType: 'timeseries' | 'bar' | 'pie' | 'stat' | 'table';
 }
 
-export const QUERY_TEMPLATES: Record<string, QueryTemplate> = {
+const QUERY_TEMPLATES: Record<string, QueryTemplate> = {
   // Exploration Templates
   explore_table: {
     id: 'explore_table',

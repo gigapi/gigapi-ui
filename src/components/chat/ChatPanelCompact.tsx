@@ -20,7 +20,6 @@ import {
   Sparkles,
   Database,
   Info,
-  Plus,
   Settings,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
@@ -28,7 +27,6 @@ import { useAtom, useSetAtom } from "jotai";
 import {
   createSessionAtom,
   sendMessageAtom,
-  sessionListAtom,
   chatSessionsAtom,
   deleteSessionAtom,
   activeSessionIdAtom,
@@ -61,7 +59,6 @@ export default function ChatPanelCompact({
   // Chat atoms
   const createSession = useSetAtom(createSessionAtom);
   const sendMessage = useSetAtom(sendMessageAtom);
-  const [sessions] = useAtom(sessionListAtom);
   const [allSessions] = useAtom(chatSessionsAtom);
   const [aiConnections] = useAtom(aiConnectionsAtom);
   const deleteSession = useSetAtom(deleteSessionAtom);
@@ -179,9 +176,12 @@ export default function ChatPanelCompact({
             <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center mx-auto mb-4">
               <Bot className="h-8 w-8 text-muted-foreground" />
             </div>
-            <h3 className="text-lg font-semibold mb-2">No AI Provider Configured</h3>
+            <h3 className="text-lg font-semibold mb-2">
+              No AI Provider Configured
+            </h3>
             <p className="text-sm text-muted-foreground mb-6">
-              To use the AI assistant, you need to configure at least one AI provider.
+              To use the AI assistant, you need to configure at least one AI
+              provider.
             </p>
             <Button
               onClick={() => navigate("/chat")}
@@ -192,7 +192,8 @@ export default function ChatPanelCompact({
               Configure AI Provider
             </Button>
             <p className="text-xs text-muted-foreground mt-4">
-              You can add providers like OpenAI, Anthropic, or Ollama in the chat settings.
+              You can add providers like OpenAI, Anthropic, or Ollama in the
+              chat settings.
             </p>
           </div>
         </div>
@@ -235,9 +236,7 @@ export default function ChatPanelCompact({
               </TooltipProvider>
             </div>
             <div className="flex items-center gap-2">
-              <span className="text-xs text-orange-500">
-                Quick help mode
-              </span>
+              <span className="text-xs text-orange-500">Quick help mode</span>
               {session?.connection && (
                 <Badge variant="secondary" className="text-xs px-1.5 py-0">
                   {session.connection.model || "AI Model"}

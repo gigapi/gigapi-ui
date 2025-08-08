@@ -43,7 +43,9 @@ export class ResultFeedbackManager {
     proposal: ProposalArtifact
   ): string {
     if (!result.success) {
-      return `Query execution failed: ${result.error}. The query "${proposal.query}" could not be executed against database "${result.database}".`;
+      const query = proposal.data?.query || 'unknown query';
+      const database = proposal.data?.database || result.database || 'unknown database';
+      return `Query execution failed: ${result.error}. The query "${query}" could not be executed against database "${database}".`;
     }
 
     const rowCount = result.row_count || 0;

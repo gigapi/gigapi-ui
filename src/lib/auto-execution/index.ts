@@ -52,17 +52,29 @@ export class AutoExecutionEngine {
   ): Promise<ExecutionResult> {
     const startTime = Date.now();
     
+    // Validate proposal structure
+    if (!proposal || !proposal.data) {
+      throw new Error("Invalid proposal: missing data property");
+    }
+    
+    if (!proposal.data.query) {
+      throw new Error("Invalid proposal: missing query property");
+    }
+    
+    const query = proposal.data.query;
+    const database = proposal.data.database || 'default';
+    
     this.emitEvent({
       id: `exec-${Date.now()}`,
       type: "execution_started",
-      artifact_id: proposal.title,
+      artifact_id: proposal.title || proposal.id,
       timestamp: new Date().toISOString(),
-      data: { query: proposal.query, database: proposal.database },
+      data: { query, database },
     });
 
     try {
       // Validate and sanitize query
-      const sanitizedQuery = this.sanitizeQuery(proposal.query);
+      const sanitizedQuery = this.sanitizeQuery(query);
       
       // Check for mutations if configured
       if (this.config.require_confirmation_for_mutations && this.isMutationQuery(sanitizedQuery)) {
@@ -70,10 +82,10 @@ export class AutoExecutionEngine {
       }
 
       // Process query with time variables
-      const processedQuery = await this.processQuery(sanitizedQuery, proposal.database, context);
+      const processedQuery = await this.processQuery(sanitizedQuery, database, context);
 
       // Execute the query
-      const result = await this.executeQuery(processedQuery, proposal.database);
+      const result = await this.executeQuery(processedQuery, database);
 
       const executionTime = Date.now() - startTime;
       const executionResult: ExecutionResult = {
@@ -82,7 +94,7 @@ export class AutoExecutionEngine {
         execution_time: executionTime,
         timestamp: new Date().toISOString(),
         query: processedQuery,
-        database: proposal.database,
+        database,
         row_count: result.data?.length || 0,
         metadata: {
           columns: result.data?.[0] ? Object.keys(result.data[0]) : [],
@@ -93,7 +105,7 @@ export class AutoExecutionEngine {
       this.emitEvent({
         id: `exec-${Date.now()}`,
         type: "execution_completed",
-        artifact_id: proposal.title,
+        artifact_id: proposal.title || proposal.id,
         timestamp: new Date().toISOString(),
         data: executionResult,
       });
@@ -107,14 +119,14 @@ export class AutoExecutionEngine {
         error: error instanceof Error ? error.message : "Unknown error",
         execution_time: executionTime,
         timestamp: new Date().toISOString(),
-        query: proposal.query,
-        database: proposal.database,
+        query,
+        database,
       };
 
       this.emitEvent({
         id: `exec-${Date.now()}`,
         type: "execution_failed",
-        artifact_id: proposal.title,
+        artifact_id: proposal.title || proposal.id,
         timestamp: new Date().toISOString(),
         error: executionResult.error,
       });
@@ -138,7 +150,7 @@ export class AutoExecutionEngine {
         this.emitEvent({
           id: `retry-${Date.now()}`,
           type: "retry_attempted",
-          artifact_id: proposal.title,
+          artifact_id: proposal.title || proposal.id,
           timestamp: new Date().toISOString(),
           data: { retry_count: retryCount + 1, error: error instanceof Error ? error.message : "Unknown error" },
         });

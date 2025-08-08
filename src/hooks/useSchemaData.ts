@@ -8,7 +8,6 @@ import {
 } from "@/atoms";
 import { useDatabaseCache } from "./useDatabaseCache";
 import { useDatabaseData } from "./useDatabaseData";
-import { detectTimeFieldsFromSchema } from "@/lib/query-processor";
 import type { ColumnSchema } from "@/types";
 
 export type DataSource = "atoms" | "cache";

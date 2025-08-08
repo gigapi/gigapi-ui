@@ -30,7 +30,7 @@ interface PanelDataContextValue {
 
 const PanelDataContext = createContext<PanelDataContextValue | null>(null);
 
-export function usePanelData() {
+function usePanelData() {
   const context = useContext(PanelDataContext);
   if (!context) {
     throw new Error("usePanelData must be used within PanelDataProvider");

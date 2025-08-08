@@ -88,7 +88,7 @@ export const PANEL_TYPES: Record<PanelType, PanelTypeDefinition> = {
 };
 
 // Helper functions
-export function getPanelTypeDefinition(
+function getPanelTypeDefinition(
   type: PanelType
 ): PanelTypeDefinition | undefined {
   return PANEL_TYPES[type];

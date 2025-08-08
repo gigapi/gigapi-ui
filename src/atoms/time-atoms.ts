@@ -2,8 +2,6 @@ import { atom } from "jotai";
 import type { TimeRange } from "@/types/tab.types";
 import { currentTabTimeFieldAtom, currentTabTimeRangeAtom, currentTabTimeZoneAtom } from "./tab-atoms";
 
-// Re-export TimeRange for backward compatibility
-export type { TimeRange };
 
 // Time selection atoms - now use tab-aware versions
 export const selectedTimeFieldAtom = currentTabTimeFieldAtom;

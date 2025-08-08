@@ -48,59 +48,13 @@ export interface ChatMessage {
   };
 }
 
-export interface ChatArtifact {
-  id: string;
-  type: "query" | "chart" | "table" | "metric" | "proposal";
-  title: string;
-  data: QueryArtifact | ChartArtifact | ProposalArtifact;
-}
-
-export interface QueryArtifact {
-  query: string;
-  database?: string;
-  timeField?: string; // The timestamp column to use for time filtering
-  metadata?: any;
-}
-
-export interface ChartArtifact {
-  query: string;
-  database?: string;
-  type?: string; // Chart type (bar, line, etc)
-  chartType?: string; // Alternative property name
-  chartConfig?: any;
-  fieldMapping?: any;
-  fieldConfig?: any;
-  options?: any;
-  timeField?: string; // The timestamp column to use for time filtering
-  metadata?: any;
-}
-
-export interface ProposalArtifact {
-  type: "query_proposal" | "chart_proposal";
-  title: string;
-  description: string;
-  query: string;
-  database: string;
-  rationale: string;
-  next_steps: string[];
-  approved?: boolean;
-  executed?: boolean;
-  results?: any[];
-  
-  // Chart-related fields (optional)
-  chart_type?: string; // e.g., "bar", "line", "pie", etc.
-  x_axis?: string; // Column name for x-axis
-  y_axes?: string[]; // Column names for y-axis
-  
-  // Auto-execution fields
-  auto_execute?: boolean; // Whether to auto-execute after approval
-  execution_status?: "pending" | "executing" | "completed" | "failed"; // Current execution status
-  execution_error?: string; // Error message if execution failed
-  execution_time?: number; // Time taken to execute (ms)
-  execution_timestamp?: string; // When execution completed
-  retry_count?: number; // Number of execution retries
-  result_summary?: string; // AI-generated summary of results
-}
+// Re-export artifact types from the unified type system
+export type {
+  Artifact as ChatArtifact,
+  QueryArtifact,
+  ChartArtifact,
+  ProposalArtifact
+} from '@/types/artifact.types';
 
 // ============================================================================
 // Action Types

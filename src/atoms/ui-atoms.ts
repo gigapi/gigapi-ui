@@ -4,12 +4,6 @@ import { atom } from "jotai";
 export const commandPaletteOpenAtom = atom(false);
 
 // Actions
-export const toggleCommandPaletteAtom = atom(
-  null,
-  (get, set) => {
-    set(commandPaletteOpenAtom, !get(commandPaletteOpenAtom));
-  }
-);
 
 export const openCommandPaletteAtom = atom(
   null,
@@ -18,9 +12,3 @@ export const openCommandPaletteAtom = atom(
   }
 );
 
-export const closeCommandPaletteAtom = atom(
-  null,
-  (_get, set) => {
-    set(commandPaletteOpenAtom, false);
-  }
-);

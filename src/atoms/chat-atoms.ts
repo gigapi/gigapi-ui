@@ -1,20 +1,182 @@
 import { atom } from "jotai";
 import { atomWithStorage } from "jotai/utils";
-import { ArtifactEnhancer } from "@/lib/artifact-intelligence";
-import type {
-  QueryContext,
-  SchemaContext,
-} from "@/lib/artifact-intelligence/types";
-import {
-  buildCompleteInstructions,
-  InstructionBuilder,
-} from "@/lib/ai-instructions";
+import axios from "axios";
+import { getArtifactValidator } from "@/services/artifact-validation.service";
+import { getGigAPIInstructions } from "@/lib/ai-instructions/gigapi-ai-instructions";
 import { QuerySanitizer } from "@/lib/query-sanitizer";
-import { SchemaContextBuilder } from "@/lib/schema-context-builder";
-import { ConversationAnalyzer } from "@/lib/conversation-analyzer";
+import { safeJsonParse, validateArtifactStructure, normalizeArtifact } from "@/lib/utils/json-sanitizer";
+// Removed old imports - using new services now
 import { StorageUtils } from "@/lib/storage-utils";
+
+// ============================================================================
+// Helper Types (Simplified replacements for old types)
+// ============================================================================
+
+interface QueryContext {
+  database?: string;
+  schemaCache?: any;
+  recentQueries?: string[];
+  selectedDatabase?: string;
+  selectedTable?: string;
+  globalInstructions?: string[];
+  schemaContext?: SchemaContext | null;
+  timeContext?: any;
+}
+
+interface SchemaContext {
+  databases: Record<string, any>;
+  activeTables: string[];
+}
+
+// ============================================================================
+// Helper Functions for Schema Context Building
+// ============================================================================
+
+interface MentionInfo {
+  type: 'database' | 'table';
+  fullName: string;
+  database: string | null;
+  table: string | null;
+}
+
+function extractMentions(content: string): MentionInfo[] {
+  const mentionPattern = /@([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*)/g;
+  const mentions: MentionInfo[] = [];
+  let match;
+  
+  while ((match = mentionPattern.exec(content)) !== null) {
+    const fullName = match[1];
+    const parts = fullName.split('.');
+    
+    if (parts.length === 2) {
+      // @database.table format
+      mentions.push({
+        type: 'table',
+        fullName,
+        database: parts[0],
+        table: parts[1]
+      });
+    } else if (parts.length === 1) {
+      // @database or @table format - need to determine which
+      mentions.push({
+        type: 'database', // Default to database, will be resolved later
+        fullName,
+        database: parts[0],
+        table: null
+      });
+    }
+  }
+  
+  return mentions;
+}
+
+function buildConversationContext(messages: ChatMessage[]): string {
+  const recentMessages = messages.slice(-5); // Last 5 messages for better context
+  const context: string[] = [];
+  
+  // Find recent tables and databases discussed
+  const recentTables = new Set<string>();
+  const recentDatabases = new Set<string>();
+  
+  for (const msg of recentMessages) {
+    if (msg.role === 'user') {
+      const mentions = extractMentions(msg.content);
+      mentions.forEach(m => {
+        if (m.database) recentDatabases.add(m.database);
+        if (m.table) recentTables.add(m.table);
+      });
+    }
+    
+    // Check for artifacts with database/table info
+    if (msg.metadata?.artifacts) {
+      for (const artifact of msg.metadata.artifacts) {
+        if (artifact.data?.database) {
+          recentDatabases.add(artifact.data.database.replace('@', ''));
+        }
+      }
+    }
+  }
+  
+  if (recentDatabases.size > 0) {
+    context.push(`Recent databases: ${Array.from(recentDatabases).join(', ')}`);
+  }
+  
+  if (recentTables.size > 0) {
+    context.push(`Recent tables: ${Array.from(recentTables).join(', ')}`);
+  }
+  
+  context.push(`Conversation length: ${messages.length} messages`);
+  
+  return context.join('\n');
+}
+
+async function buildSchemaContext(
+  schemaCache: any, 
+  mentions: MentionInfo[],
+  loadSampleData?: (database: string, table: string) => Promise<any>
+): Promise<string> {
+  if (!schemaCache || mentions.length === 0) return "";
+  
+  const contextParts: string[] = [];
+  const processedTables = new Set<string>();
+  
+  for (const mention of mentions) {
+    if (mention.type === 'table' && mention.database && mention.table) {
+      const key = `${mention.database}.${mention.table}`;
+      if (processedTables.has(key)) continue;
+      processedTables.add(key);
+      
+      // Get schema for the table
+      const schema = schemaCache.databases?.[mention.database]?.schemas?.[mention.table];
+      if (schema) {
+        contextParts.push(`\n### Table: ${mention.database}.${mention.table}`);
+        contextParts.push('Columns:');
+        
+        for (const col of schema) {
+          const colName = col.column_name || col.name;
+          const colType = col.column_type || col.type || 'unknown';
+          const timeUnit = col.timeUnit ? ` (${col.timeUnit})` : '';
+          const nullable = col.null === 'YES' ? ' (nullable)' : '';
+          const key = col.key ? ` [${col.key}]` : '';
+          
+          contextParts.push(`  - ${colName}: ${colType}${timeUnit}${nullable}${key}`);
+        }
+        
+        // Try to get sample data if available
+        if (loadSampleData) {
+          try {
+            const sampleData = await loadSampleData(mention.database, mention.table);
+            if (sampleData && sampleData.data && sampleData.data.length > 0) {
+              contextParts.push('\nSample data (first 3 rows):');
+              contextParts.push('```json');
+              contextParts.push(JSON.stringify(sampleData.data.slice(0, 3), null, 2));
+              contextParts.push('```');
+            }
+          } catch (error) {
+            console.log(`Could not load sample data for ${key}:`, error);
+          }
+        }
+      }
+    } else if (mention.type === 'database' && mention.database) {
+      // Just list tables in the database
+      const tables = schemaCache.databases?.[mention.database]?.tables;
+      if (tables && tables.length > 0) {
+        contextParts.push(`\n### Database: ${mention.database}`);
+        contextParts.push(`Tables (${tables.length}): ${tables.slice(0, 10).join(', ')}${tables.length > 10 ? '...' : ''}`);
+      }
+    }
+  }
+  
+  return contextParts.join('\n');
+}
+
+// Backward compatibility alias - returns MentionInfo[] not string[]
+function extractBasicMentions(content: string): MentionInfo[] {
+  return extractMentions(content);
+}
 import { schemaCacheAtom, loadAndCacheTableSchemaAtom } from "./database-atoms";
 import { getCurrentTabData } from "./tab-atoms";
+import { apiUrlAtom } from "./connection-atoms";
 import type {
   ChatSession,
   AIConnection,
@@ -255,6 +417,7 @@ function convertSchemaCacheToContext(schemaCache: any): SchemaContext | null {
 
   const converted: SchemaContext = {
     databases: {},
+    activeTables: [],
   };
 
   // Convert each database
@@ -455,7 +618,7 @@ export const sendMessageAtom = atom(
 
       // Load schemas for any @mentions in the message
       if (options.message.includes("@")) {
-        const mentions = SchemaContextBuilder.extractMentions(options.message);
+        const mentions = extractMentions(options.message);
         console.log("[Chat] Found mentions in user message:", mentions);
 
         // Load schemas for any table mentions
@@ -534,6 +697,9 @@ export const sendMessageAtom = atom(
           : undefined,
       };
 
+      // Get API URL for streaming function
+      const apiUrl = get(apiUrlAtom);
+      
       // Send to AI with streaming
       await sendToAIStreaming(
         session.connection,
@@ -541,6 +707,7 @@ export const sendMessageAtom = atom(
         globalInstructions,
         schemaCache,
         queryContext,
+        apiUrl,
         options.isAgentic || false,
         (chunk: string) => {
           // Process chunk for thinking blocks
@@ -939,6 +1106,9 @@ export const regenerateFromMessageAtom = atom(
           : undefined,
       };
 
+      // Get API URL for streaming function
+      const apiUrl = get(apiUrlAtom);
+      
       // Send to AI with streaming (using messages up to the edited one)
       await sendToAIStreaming(
         session.connection,
@@ -946,6 +1116,7 @@ export const regenerateFromMessageAtom = atom(
         globalInstructions,
         schemaCache,
         queryContext,
+        apiUrl,
         isAgentic || false,
         (chunk: string) => {
           // Process chunk for thinking blocks (same logic as sendMessageAtom)
@@ -1189,20 +1360,9 @@ export const updateGlobalInstructionAtom = atom(
 // AI Instructions
 // ============================================================================
 
-// Get AI instructions from modular system
+// Get AI instructions from consolidated system
 const getAIInstructions = (isAgentic: boolean = false): string => {
-  if (isAgentic) {
-    return new InstructionBuilder({
-      includeCore: true,
-      includeSQL: true,
-      includeChart: true,
-      includeSchema: true,
-      includeMentions: true,
-      includeAgentic: true,
-    }).getInstructions();
-  }
-  // Use direct mode instructions when not in agentic mode
-  return buildCompleteInstructions(false);
+  return getGigAPIInstructions(isAgentic);
 };
 
 // ============================================================================
@@ -1215,6 +1375,7 @@ async function sendToAIStreaming(
   globalInstructions: string[] = [],
   schemaCache: any = null,
   queryContext: QueryContext,
+  apiUrl: string,
   isAgentic: boolean = false,
   onChunk: (chunk: string) => void,
   onComplete: (finalContent: string, artifacts?: any[]) => void,
@@ -1228,6 +1389,26 @@ async function sendToAIStreaming(
     role: "system",
     content: getAIInstructions(isAgentic),
   });
+  
+  // Add first message examples if this is the first user message
+  const userMessages = messages.filter(m => m.role === "user");
+  if (userMessages.length === 1 && !isAgentic) {
+    systemMessages.push({
+      role: "system",
+      content: `REMINDER: You MUST create artifacts for ALL queries and visualizations.
+
+Example - when user asks "show me data from users":
+\`\`\`query
+{
+  "title": "Users Data",
+  "query": "SELECT * FROM users LIMIT 100",
+  "database": "@main"
+}
+\`\`\`
+
+NEVER write SQL as plain text. ALWAYS use artifact blocks.`
+    });
+  }
 
   // Add global instructions
   if (globalInstructions.length > 0) {
@@ -1306,7 +1487,11 @@ You are currently in DIRECT MODE. This means:
 1. **DIRECTLY generate executable artifacts** (query, chart, table) as requested
 2. **DO NOT generate proposal artifacts** - execute immediately
 3. **STRIP @ symbols** from SQL queries automatically
-4. **PROVIDE results immediately** without waiting for approval
+4. **NEVER write SQL as plain text** - ALWAYS use artifact blocks
+5. **PROVIDE results immediately** without waiting for approval
+
+🔴 CRITICAL: Every SQL query MUST be in a \`\`\`query or \`\`\`chart artifact.
+Plain text SQL is USELESS to users. They CANNOT execute plain text.
 
 Example: When user asks "show me sales by month", respond with:
 - Brief explanation (optional)
@@ -1322,29 +1507,48 @@ Example: When user asks "show me sales by month", respond with:
 
   // Include schema context using the new SchemaContextBuilder
   if (schemaContext) {
-    // ALWAYS analyze conversation for context continuity (not just in agentic mode)
-    const conversationContext =
-      ConversationAnalyzer.analyzeConversation(messages);
+    // Analyze conversation for context continuity
+    const conversationContext = buildConversationContext(messages);
 
-    const schemaContextString = await SchemaContextBuilder.getSchemaContext(
-      messages,
-      schemaContext,
-      {
-        maxColumnsPerTable: 50, // Limit columns to prevent context overflow
-        includeIndices: true,
-        summaryOnly: false,
-        includeRecentContext: true, // Always include recent context for better continuity
-        isAgentic,
-        includeSampleData: true,
-        sampleDataLimit: 5,
+    // Get mentions from the last message
+    const lastMessage = messages[messages.length - 1];
+    const mentions = lastMessage ? extractMentions(lastMessage.content) : [];
+    
+    // Create sample data loader function with proper closure
+    const loadSampleData = async (database: string, table: string) => {
+      try {
+        // Check cache first
+        const cachedSample = schemaCache?.databases[database]?.sampleData?.[table];
+        if (cachedSample && Date.now() - cachedSample.timestamp < 30 * 60 * 1000) {
+          return cachedSample;
+        }
+        
+        // Load fresh sample data
+        console.log(`[Chat] Loading sample data for ${database}.${table}`);
+        const response = await axios.post(
+          `${apiUrl}?db=${database}&format=json`,
+          { query: `SELECT * FROM ${table} LIMIT 3` },
+          { timeout: 5000 }
+        );
+        
+        return {
+          data: response.data.results || [],
+          columns: response.data.results?.length > 0 ? Object.keys(response.data.results[0]) : []
+        };
+      } catch (error) {
+        console.log(`[Chat] Could not load sample data for ${database}.${table}:`, error);
+        return null;
       }
-    );
+    };
+    
+    // Build comprehensive schema context with sample data
+    const schemaContextString = await buildSchemaContext(schemaContext, mentions, loadSampleData);
 
     if (schemaContextString) {
       // Extract mentions for logging
       const lastMessage = messages[messages.length - 1];
-      const mentions = lastMessage
-        ? SchemaContextBuilder.extractMentions(lastMessage.content)
+      const mentionsForLogging = lastMessage
+        ? extractBasicMentions(lastMessage.content)
         : [];
       const isFirstMessage =
         messages.filter((m) => m.role === "user").length === 1;
@@ -1352,21 +1556,14 @@ Example: When user asks "show me sales by month", respond with:
       console.log("📊 Sending schema context to AI:", {
         isFirstMessage,
         isAgentic,
-        lastMessageContent: lastMessage?.content || "",
-        mentionsFound: mentions.length,
-        mentions: mentions.map((m) => ({
+        mentionsFound: mentionsForLogging.length,
+        mentions: mentionsForLogging.map((m) => ({
           type: m.type,
           fullName: m.fullName,
           database: m.database,
           table: m.table,
         })),
-        conversationContext: conversationContext
-          ? {
-              activeTables: conversationContext.activeTables,
-              activeDatabases: conversationContext.activeDatabases,
-              discussionTopic: conversationContext.discussionTopic,
-            }
-          : null,
+        conversationSummary: conversationContext,
         contextLength: schemaContextString.length,
         contextType:
           isFirstMessage && mentions.length > 0
@@ -1376,7 +1573,8 @@ Example: When user asks "show me sales by month", respond with:
             : mentions.length > 0
             ? "mentions"
             : "summary",
-        contextPreview: schemaContextString.substring(0, 500) + "...",
+        hasSchemaData: schemaContextString.includes("Columns:"),
+        hasSampleData: schemaContextString.includes("Sample data"),
       });
 
       systemMessages.push({
@@ -1385,31 +1583,37 @@ Example: When user asks "show me sales by month", respond with:
       });
 
       // Add conversation context for better continuity (both modes)
-      if (conversationContext && conversationContext.activeTables.length > 0) {
-        const contextSummary =
-          ConversationAnalyzer.buildContextSummary(conversationContext);
-        if (contextSummary) {
-          systemMessages.push({
-            role: "system",
-            content: `CONVERSATION CONTEXT:\n${contextSummary}\n\nIMPORTANT: When the user says "that", "it", "the schema", or uses other references, they are referring to the entities mentioned above.`,
-          });
-        }
+      if (conversationContext && conversationContext.length > 0) {
+        systemMessages.push({
+          role: "system",
+          content: `CONVERSATION CONTEXT:\n${conversationContext}\n\nIMPORTANT: When the user says "that", "it", "the schema", or uses other references, they are referring to the entities mentioned above.`,
+        });
       }
     } else {
-      console.warn("⚠️ No schema context generated for AI");
+      // Schema context is optional - not all queries need schema
+      console.log("ℹ️ No schema context needed for this query");
+      
+      // Still add conversation context if available
+      if (conversationContext && conversationContext.length > 0) {
+        systemMessages.push({
+          role: "system",
+          content: `CONVERSATION CONTEXT:\n${conversationContext}\n\nNote: No specific database schema was referenced in this query.`,
+        });
+      }
     }
   } else {
-    console.warn("⚠️ No schema cache found in localStorage");
+    // No schema cache available - this is fine for many queries
+    console.log("ℹ️ Schema cache not available - proceeding without schema context");
   }
 
   // Map messages to AI format
-  const userMessages = messages.map((msg) => ({
+  const aiFormattedMessages = messages.map((msg) => ({
     role: msg.role,
     content: msg.content,
   }));
 
   // Combine system and user messages
-  const aiMessages = [...systemMessages, ...userMessages];
+  const aiMessages = [...systemMessages, ...aiFormattedMessages];
 
   // Build endpoint URL
   let endpoint = connection.baseUrl || "";
@@ -1638,27 +1842,64 @@ async function enhanceAndAddArtifact(
   queryContext: QueryContext
 ) {
   try {
-    const enhanced = await ArtifactEnhancer.enhance(artifact, queryContext);
-    if (enhanced.validation.isValid) {
-      artifacts.push(enhanced.enhanced);
-    } else {
-      // Still add the artifact but with validation warnings
-      console.warn(
-        `${artifact.type} artifact validation failed:`,
-        enhanced.validation.errors
-      );
+    // Get the validation service
+    const validator = getArtifactValidator();
+    
+    // Build validation context
+    const validationContext = {
+      availableDatabases: queryContext.schemaContext?.databases 
+        ? Object.keys(queryContext.schemaContext.databases)
+        : [],
+      schemaCache: queryContext.schemaContext,
+      currentDatabase: queryContext.selectedDatabase
+    };
+    
+    // Validate the artifact
+    const validationResult = await validator.validateArtifact(artifact, validationContext);
+    
+    if (validationResult.valid) {
+      // Add validated artifact with metadata
       artifacts.push({
         ...artifact,
         metadata: {
           ...artifact.metadata,
-          validationErrors: enhanced.validation.errors,
-          validationWarnings: enhanced.validation.warnings,
+          validated: true,
+          validationScore: validationResult.score,
+          suggestions: validationResult.suggestions
+        }
+      });
+      
+      console.log(`✅ ${artifact.type} artifact validated successfully (score: ${validationResult.score})`);
+    } else {
+      // Still add the artifact but with validation errors/warnings
+      console.warn(
+        `⚠️ ${artifact.type} artifact validation failed:`,
+        validationResult.errors
+      );
+      
+      artifacts.push({
+        ...artifact,
+        metadata: {
+          ...artifact.metadata,
+          validated: false,
+          validationErrors: validationResult.errors,
+          validationWarnings: validationResult.warnings,
+          suggestions: validationResult.suggestions,
+          validationScore: validationResult.score
         },
       });
     }
   } catch (error) {
-    console.error(`Failed to enhance ${artifact.type} artifact:`, error);
-    artifacts.push(artifact);
+    console.error(`Failed to validate ${artifact.type} artifact:`, error);
+    // Add artifact anyway but mark as unvalidated
+    artifacts.push({
+      ...artifact,
+      metadata: {
+        ...artifact.metadata,
+        validated: false,
+        validationError: error instanceof Error ? error.message : String(error)
+      }
+    });
   }
 }
 
@@ -1693,9 +1934,10 @@ async function processAIResponse(
   );
   for (const match of chartMatches) {
     try {
-      let artifact = JSON.parse(match[1]);
-      if (artifact.type && artifact.query) {
-        // Sanitize the artifact
+      let artifact = safeJsonParse(match[1]);
+      if (artifact && validateArtifactStructure(artifact)) {
+        // Normalize and sanitize the artifact
+        artifact = normalizeArtifact(artifact);
         artifact = QuerySanitizer.sanitizeQueryArtifact(artifact);
 
         const chartArtifact = {
@@ -1704,6 +1946,7 @@ async function processAIResponse(
             .substring(2, 9)}`,
           type: "chart" as const,
           title: artifact.title || "AI Generated Chart",
+          timestamp: new Date().toISOString(),
           data: artifact,
         };
 
@@ -1720,9 +1963,10 @@ async function processAIResponse(
   );
   for (const match of queryMatches) {
     try {
-      let artifact = JSON.parse(match[1]);
-      if (artifact.query) {
-        // Sanitize the artifact
+      let artifact = safeJsonParse(match[1]);
+      if (artifact && validateArtifactStructure(artifact)) {
+        // Normalize and sanitize the artifact
+        artifact = normalizeArtifact(artifact);
         artifact = QuerySanitizer.sanitizeQueryArtifact(artifact);
 
         const queryArtifact = {
@@ -1731,6 +1975,7 @@ async function processAIResponse(
             .substring(2, 9)}`,
           type: "query" as const,
           title: artifact.title || "SQL Query",
+          timestamp: new Date().toISOString(),
           data: artifact,
         };
 
@@ -1747,9 +1992,10 @@ async function processAIResponse(
   );
   for (const match of tableMatches) {
     try {
-      let artifact = JSON.parse(match[1]);
-      if (artifact.query) {
-        // Sanitize the artifact
+      let artifact = safeJsonParse(match[1]);
+      if (artifact && validateArtifactStructure(artifact)) {
+        // Normalize and sanitize the artifact
+        artifact = normalizeArtifact(artifact);
         artifact = QuerySanitizer.sanitizeQueryArtifact(artifact);
 
         const tableArtifact = {
@@ -1758,6 +2004,7 @@ async function processAIResponse(
             .substring(2, 9)}`,
           type: "table" as const,
           title: artifact.title || "Data Table",
+          timestamp: new Date().toISOString(),
           data: artifact,
         };
 
@@ -1774,14 +2021,15 @@ async function processAIResponse(
   );
   for (const match of summaryMatches) {
     try {
-      const artifact = JSON.parse(match[1]);
-      if (artifact.summary) {
+      const artifact = safeJsonParse(match[1]);
+      if (artifact && artifact.summary) {
         const summaryArtifact = {
           id: `summary_${Date.now()}_${Math.random()
             .toString(36)
             .substring(2, 9)}`,
           type: "summary" as const,
           title: "Summary",
+          timestamp: new Date().toISOString(),
           data: artifact,
         };
 
@@ -1798,14 +2046,15 @@ async function processAIResponse(
   );
   for (const match of insightMatches) {
     try {
-      const artifact = JSON.parse(match[1]);
-      if (artifact.insights) {
+      const artifact = safeJsonParse(match[1]);
+      if (artifact && artifact.insights) {
         const insightArtifact = {
           id: `insight_${Date.now()}_${Math.random()
             .toString(36)
             .substring(2, 9)}`,
           type: "insight" as const,
           title: "Key Insights",
+          timestamp: new Date().toISOString(),
           data: artifact,
         };
 
@@ -1829,8 +2078,17 @@ async function processAIResponse(
   for (const match of proposalMatches) {
     try {
       console.log("🔍 Raw proposal match:", match[1]);
-      let artifact = JSON.parse(match[1]);
+      let artifact = safeJsonParse(match[1]);
+      
+      if (!artifact) {
+        console.error("🔍 Failed to parse proposal artifact");
+        continue;
+      }
+      
       console.log("🔍 Parsed proposal artifact:", artifact);
+      
+      // Normalize the artifact structure
+      artifact = normalizeArtifact(artifact);
 
       if (
         (artifact.type === "query_proposal" ||
@@ -1851,7 +2109,11 @@ async function processAIResponse(
             (artifact.type === "chart_proposal"
               ? "Chart Proposal"
               : "Query Proposal"),
-          data: artifact,
+          timestamp: new Date().toISOString(),
+          data: {
+            ...artifact,
+            proposal_type: artifact.type // Ensure proposal_type is set for ProposalArtifact component
+          },
         };
 
         console.log("🔍 Final proposal artifact:", proposalArtifact);
@@ -1893,6 +2155,7 @@ async function processAIResponse(
             .substring(2, 9)}`,
           type: "metric" as const,
           title: artifact.title || "Metric",
+          timestamp: new Date().toISOString(),
           data: artifact,
         };
 

@@ -6,8 +6,6 @@ import {
   fetchFreshTablesAtom,
   fetchFreshSchemaAtom,
   freshDatabasesAtom,
-  freshTablesAtom,
-  freshSchemaAtom,
   freshDatabasesLoadingAtom,
   freshTablesLoadingAtom,
   freshSchemaLoadingAtom,
@@ -85,8 +83,6 @@ export function useDynamicChatSchema(): ChatSchemaData {
   
   // Fresh data atoms
   const [freshDatabases] = useAtom(freshDatabasesAtom);
-  const [freshTables] = useAtom(freshTablesAtom);
-  const [freshSchema] = useAtom(freshSchemaAtom);
   
   // Loading states
   const [databasesLoading] = useAtom(freshDatabasesLoadingAtom);
