@@ -568,27 +568,7 @@ export const currentTabQueryLoadingAtom = atom(
   }
 );
 
-// Current tab's query execution time
-export const currentTabQueryExecutionTimeAtom = atom(
-  (get) => get(activeTabAtom)?.queryExecutionTime || 0,
-  (get, set, time: number) => {
-    const state = get(tabsStateAtom);
-    const activeTab = get(activeTabAtom);
-    if (!activeTab) return;
-
-    const updatedTabs = state.tabs.map((tab) =>
-      tab.id === activeTab.id
-        ? {
-            ...tab,
-            queryExecutionTime: time,
-            updatedAt: new Date().toISOString(),
-          }
-        : tab
-    );
-
-    set(tabsStateAtom, { ...state, tabs: updatedTabs });
-  }
-);
+// currentTabQueryExecutionTimeAtom removed - unused
 
 // Current tab's query metrics
 export const currentTabQueryMetricsAtom = atom(

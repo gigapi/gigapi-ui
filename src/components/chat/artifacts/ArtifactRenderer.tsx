@@ -179,9 +179,18 @@ export default function ArtifactRenderer({
         // Always use __timestamp for time-based queries
         timeColumn = "__timestamp";
         
+        // Create timeColumnDetails for nanosecond timestamp handling
+        const timeColumnDetails = {
+          columnName: timeColumn,
+          dataType: "BIGINT",
+          timeUnit: "ns" as const, // Common time columns are typically nanoseconds in time-series data
+        };
+        // Using hardcoded timeColumnDetails for time-based queries
+        
         log(artifact.id, "info", "Processing time variables", {
           hasTimeVariables,
           timeColumn,
+          timeColumnDetails,
           timeRange,
           originalQuery: query
         });
@@ -201,6 +210,7 @@ export default function ArtifactRenderer({
           query: finalQuery,
           timeRange,
           timeColumn,
+          timeColumnDetails,
           timeZone: "UTC",
           maxDataPoints: 1000,
         });

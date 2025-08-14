@@ -22,7 +22,7 @@ import {
   EnhancedPanel,
   PanelDataProvider,
 } from "@/components/dashboard/PanelDataProvider";
-import { DashboardTimeFilter } from "@/components/dashboard/DashboardTimeFilter";
+import TimeRangeSelector from "@/components/TimeRangeSelector";
 import { PanelConfigurationForm } from "@/components/dashboard/PanelConfigurationForm";
 import { UnifiedSchemaSelector } from "@/components/shared/UnifiedSchemaSelector";
 import { type PanelConfig } from "@/types/dashboard.types";
@@ -523,15 +523,28 @@ export default function PanelEdit(props?: PanelEditProps) {
         </div>
         <div className="flex items-center gap-2">
           {currentDashboard && (
-            <DashboardTimeFilter
-              timeRange={
-                currentDashboard.timeRange || {
+            <TimeRangeSelector
+              timeRange={(() => {
+                const dashboardTimeRange = currentDashboard.timeRange || {
                   type: "relative" as const,
                   from: "1h",
                   to: "now" as const,
+                };
+                
+                // Convert dashboard TimeRange to tab TimeRange format
+                if (dashboardTimeRange.type === 'absolute') {
+                  return {
+                    type: 'absolute' as const,
+                    from: dashboardTimeRange.from instanceof Date 
+                      ? dashboardTimeRange.from.toISOString() 
+                      : dashboardTimeRange.from,
+                    to: dashboardTimeRange.to instanceof Date 
+                      ? dashboardTimeRange.to.toISOString() 
+                      : dashboardTimeRange.to,
+                  };
                 }
-              }
-              timeZone={currentDashboard.timeZone || "UTC"}
+                return dashboardTimeRange;
+              })()}
               onTimeRangeChange={async (newTimeRange) => {
                 // Update the dashboard time range
                 await updateDashboardTimeRange(newTimeRange);
@@ -541,8 +554,7 @@ export default function PanelEdit(props?: PanelEditProps) {
                   handleRunQuery();
                 }
               }}
-              onTimeZoneChange={() => {}}
-              showTimeZone={false}
+              context="dashboard"
             />
           )}
           <Button variant="outline" onClick={handleCancel}>

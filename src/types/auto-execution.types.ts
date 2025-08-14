@@ -54,6 +54,11 @@ export interface ExecutionContext {
   table?: string;
   time_range?: any;
   selected_fields?: string[];
+  timeColumnDetails?: {
+    columnName: string;
+    dataType?: string;
+    timeUnit?: string;
+  };
   previous_results?: ExecutionResult[];
   chat_history?: any[];
 }

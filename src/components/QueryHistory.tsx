@@ -66,7 +66,9 @@ export default function QueryHistory() {
   // Load a query from history with all its context
   function loadQueryFromHistory(item: QueryHistoryItem) {
     // First set the database (this might trigger schema loading)
-    setSelectedDb(item.db);
+    if (item.db) {
+      setSelectedDb(item.db);
+    }
 
     // Restore the original query with variables
     setQuery(item.query);
@@ -116,7 +118,7 @@ export default function QueryHistory() {
     const searchLower = searchTerm.toLowerCase();
     return (
       item.query.toLowerCase().includes(searchLower) ||
-      item.db.toLowerCase().includes(searchLower) ||
+      (item.db && item.db.toLowerCase().includes(searchLower)) ||
       (item.table && item.table.toLowerCase().includes(searchLower)) ||
       (item.timeField && item.timeField.toLowerCase().includes(searchLower))
     );

@@ -49,7 +49,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
 import { DashboardSettingsSheet } from "@/components/dashboard/DashboardSettingsSheet";
-import { DashboardTimeFilter } from "@/components/dashboard/DashboardTimeFilter";
+import TimeRangeSelector from "@/components/TimeRangeSelector";
 import { DashboardErrorBoundary } from "@/components/dashboard/DashboardErrorBoundary";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -227,22 +227,6 @@ export default function DashboardView() {
     [currentDashboard, updateDashboard, refreshAllPanels]
   );
 
-  const handleTimeZoneChange = useCallback(
-    async (timeZone: string) => {
-      if (!currentDashboard) return;
-      try {
-        await updateDashboard({
-          dashboardId: currentDashboard.id,
-          updates: { timeZone },
-        });
-        await refreshAllPanels();
-        toast.success("Timezone updated");
-      } catch (err) {
-        toast.error("Failed to update timezone");
-      }
-    },
-    [currentDashboard, updateDashboard, refreshAllPanels]
-  );
 
   // Auto-refresh effect
   useEffect(() => {
@@ -366,19 +350,31 @@ export default function DashboardView() {
       )}
 
       {/* Dashboard Time Filter */}
-      <DashboardTimeFilter
-        timeRange={
-          currentDashboard.timeRange || {
+      <TimeRangeSelector
+        timeRange={(() => {
+          const dashboardTimeRange = currentDashboard.timeRange || {
             type: "relative" as const,
             from: "1h",
             to: "now" as const,
+          };
+          
+          // Convert dashboard TimeRange to tab TimeRange format
+          if (dashboardTimeRange.type === 'absolute') {
+            return {
+              type: 'absolute' as const,
+              from: dashboardTimeRange.from instanceof Date 
+                ? dashboardTimeRange.from.toISOString() 
+                : dashboardTimeRange.from,
+              to: dashboardTimeRange.to instanceof Date 
+                ? dashboardTimeRange.to.toISOString() 
+                : dashboardTimeRange.to,
+            };
           }
-        }
-        timeZone={currentDashboard.timeZone || "UTC"}
+          return dashboardTimeRange;
+        })()}
         onTimeRangeChange={handleTimeRangeChange}
-        onTimeZoneChange={handleTimeZoneChange}
         disabled={isEditMode}
-        showTimeZone={false}
+        context="dashboard"
       />
 
       {/* Refresh Controls */}

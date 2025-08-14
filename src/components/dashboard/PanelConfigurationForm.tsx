@@ -27,6 +27,7 @@ import {
 } from "@/types/dashboard.types";
 import { checkForTimeVariables } from "@/lib/query-processor";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import { Clock, ChevronDown, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -509,38 +510,64 @@ export function PanelConfigurationForm({
                 <h4 className="text-sm font-medium text-foreground">
                   Panel Options
                 </h4>
-                <div className="space-y-2">
-                  <Label className="text-sm font-medium">
-                    Legend Placement
+                {/* Legend Toggle */}
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="show-legend" className="text-sm font-medium">
+                    Show Legend
                   </Label>
-                  <Select
-                    value={config.options?.legend?.placement || "bottom"}
-                    onValueChange={(value) =>
+                  <Switch
+                    id="show-legend"
+                    checked={config.options?.legend?.showLegend ?? true}
+                    onCheckedChange={(checked) =>
                       onConfigChange({
                         options: {
                           ...config.options,
                           legend: {
                             ...config.options?.legend,
-                            placement: value as any,
-                            showLegend:
-                              config.options?.legend?.showLegend ?? true,
-                            displayMode:
-                              config.options?.legend?.displayMode ?? "list",
+                            showLegend: checked,
+                            placement: config.options?.legend?.placement || "bottom",
+                            displayMode: config.options?.legend?.displayMode || "list",
                           },
                         },
                       })
                     }
-                  >
-                    <SelectTrigger className="h-9">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="bottom">Bottom</SelectItem>
-                      <SelectItem value="top">Top</SelectItem>
-                      <SelectItem value="right">Right</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  />
                 </div>
+                {/* Legend Placement - only show if legend is enabled */}
+                {(config.options?.legend?.showLegend ?? true) && (
+                  <div className="space-y-2">
+                    <Label className="text-sm font-medium">
+                      Legend Placement
+                    </Label>
+                    <Select
+                      value={config.options?.legend?.placement || "bottom"}
+                      onValueChange={(value) =>
+                        onConfigChange({
+                          options: {
+                            ...config.options,
+                            legend: {
+                              ...config.options?.legend,
+                              placement: value as any,
+                              showLegend:
+                                config.options?.legend?.showLegend ?? true,
+                              displayMode:
+                                config.options?.legend?.displayMode ?? "list",
+                            },
+                          },
+                        })
+                      }
+                    >
+                      <SelectTrigger className="h-9">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="bottom">Bottom</SelectItem>
+                        <SelectItem value="top">Top</SelectItem>
+                        <SelectItem value="right">Right</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
               </div>
             </div>
           )}

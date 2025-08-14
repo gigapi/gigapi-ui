@@ -48,14 +48,12 @@ export function safeJsonParse<T = any>(jsonString: string): T | null {
       const sanitized = sanitizeJsonString(jsonString);
       return JSON.parse(sanitized);
     } catch (secondError) {
-      // Third attempt: more aggressive - fix multi-line strings
       try {
-        // More aggressive approach for multi-line SQL queries
         let aggressive = jsonString;
         
         // Find and fix multi-line strings (common in SQL)
         // This matches strings that might contain unescaped newlines
-        aggressive = aggressive.replace(/"([^"]*)"/g, (match, content) => {
+        aggressive = aggressive.replace(/"([^"]*)"/g, (content) => {
           // Escape newlines, tabs, and carriage returns
           const escaped = content
             .replace(/\\/g, '\\\\')  // Escape backslashes first

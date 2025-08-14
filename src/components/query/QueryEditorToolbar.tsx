@@ -24,7 +24,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import Loader from "@/components/shared/Loader";
-import { HashQueryUtils } from "@/lib/";
+import { HashQueryUtils } from "@/lib/url";
 import { toast } from "sonner";
 import type { TimeRange } from "@/types/utils.types";
 

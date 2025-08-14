@@ -41,13 +41,10 @@ export interface ExtendedValidationResult extends ArtifactValidationResult {
 
 export class ArtifactValidationService {
   private static instance: ArtifactValidationService;
-  private sqlKeywords: Set<string>;
   private dangerousPatterns: RegExp[];
 
   private constructor() {
-    this.sqlKeywords = new Set<string>();
     this.dangerousPatterns = [];
-    this.initializeSQLKeywords();
     this.initializeDangerousPatterns();
   }
 
@@ -766,30 +763,6 @@ export class ArtifactValidationService {
         "Consider optimizing query performance for better user experience"
       );
     }
-  }
-
-  private initializeSQLKeywords(): void {
-    this.sqlKeywords = new Set([
-      "SELECT",
-      "FROM",
-      "WHERE",
-      "GROUP",
-      "ORDER",
-      "HAVING",
-      "JOIN",
-      "INNER",
-      "LEFT",
-      "RIGHT",
-      "UNION",
-      "INSERT",
-      "UPDATE",
-      "DELETE",
-      "CREATE",
-      "DROP",
-      "ALTER",
-      "INDEX",
-      "TABLE",
-    ]);
   }
 
   private initializeDangerousPatterns(): void {

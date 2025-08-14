@@ -15,7 +15,7 @@ import { cn } from "@/lib/";
 import { format } from "date-fns";
 import { Card } from "@/components/ui/card";
 import { DEFAULT_TIME_RANGE } from "@/lib/";
-import { NO_TIME_FILTER, QUICK_RANGES } from "@/types/utils.types";
+import { QUICK_RANGES } from "@/types/utils.types";
 import { Badge } from "@/components/ui/badge";
 import { useAtom, useSetAtom } from "jotai";
 import { 
@@ -53,6 +53,7 @@ interface TimeRangeSelectorProps {
   disabled?: boolean; // Whether the selector should be disabled
   fieldName?: string; // The name of the field being filtered
   tableName?: string; // The name of the table being filtered
+  context?: 'query' | 'dashboard'; // Context where the selector is being used
 }
 
 // Component code uses imported utilities for time parsing and timezone handling
@@ -61,6 +62,7 @@ export default function TimeRangeSelector({
   timeRange,
   onTimeRangeChange,
   disabled = false,
+  context = 'query',
 }: TimeRangeSelectorProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [fromInput, setFromInput] = useState(
@@ -123,13 +125,43 @@ export default function TimeRangeSelector({
     // Safety check
     if (!safeTimeRange) return "Select time range";
 
-    // Check if time filtering is disabled
-    if (safeTimeRange.enabled === false) {
+    // Check if time filtering is disabled (handle both types)
+    if ('enabled' in safeTimeRange && safeTimeRange.enabled === false) {
       return "No time filter";
     }
 
+    // Check if it's an absolute time range
+    if (safeTimeRange.type === 'absolute') {
+      try {
+        // For absolute time ranges, from and to are already strings (ISO date strings)
+        const fromDate = new Date(safeTimeRange.from);
+        const toDate = new Date(safeTimeRange.to);
+        
+        // Format absolute dates nicely
+        const formatOptions: Intl.DateTimeFormatOptions = {
+          month: 'short',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit'
+        };
+        
+        const fromStr = fromDate.toLocaleString('en-US', formatOptions);
+        const toStr = toDate.toLocaleString('en-US', formatOptions);
+        
+        // If same day, show more compact format
+        if (fromDate.toDateString() === toDate.toDateString()) {
+          return `${fromStr} - ${toDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}`;
+        }
+        
+        return `${fromStr} - ${toStr}`;
+      } catch (e) {
+        console.error('Error formatting absolute time range:', e);
+      }
+    }
+
+    // For relative time ranges, check quick ranges first
     const quickRange = QUICK_RANGES.find(
-      (r: TimeRange) =>
+      (r) =>
         r.from === safeTimeRange.from && r.to === safeTimeRange.to
     );
 
@@ -137,8 +169,19 @@ export default function TimeRangeSelector({
       return quickRange.display;
     }
 
-    const fromDisplay = getDisplayTime(safeTimeRange.from);
-    const toDisplay = getDisplayTime(safeTimeRange.to);
+    // Format custom relative ranges
+    const fromDisplay = safeTimeRange.from.startsWith('now') 
+      ? safeTimeRange.from 
+      : getDisplayTime(safeTimeRange.from);
+    const toDisplay = safeTimeRange.to === 'now' 
+      ? 'now' 
+      : getDisplayTime(safeTimeRange.to);
+
+    // For relative ranges starting with "now-", format nicely
+    if (safeTimeRange.from.startsWith('now-') && safeTimeRange.to === 'now') {
+      const duration = safeTimeRange.from.replace('now-', '');
+      return `Last ${duration}`;
+    }
 
     return `${fromDisplay} to ${toDisplay}`;
   }, [safeTimeRange]);
@@ -147,21 +190,26 @@ export default function TimeRangeSelector({
   const isTimeFilterActive = useMemo(() => {
     return (
       hasTimeVariables &&
-      safeTimeRange.enabled !== false &&
+      (!('enabled' in safeTimeRange) || safeTimeRange.enabled !== false) &&
       selectedTimeFieldDetails !== null
     );
   }, [hasTimeVariables, safeTimeRange, selectedTimeFieldDetails]);
 
   // Determine if time filtering is available but unused
   const isTimeFilterUnused = useMemo(() => {
+    // Only show this warning in query context, not in dashboard context
+    if (context === 'dashboard') {
+      return false;
+    }
+    
     return (
       !hasTimeVariables &&
-      safeTimeRange.enabled !== false &&
+      (!('enabled' in safeTimeRange) || safeTimeRange.enabled !== false) &&
       selectedTimeField !== null &&
       selectedTimeField !== "_none_" &&
       query.trim() !== ""
     );
-  }, [hasTimeVariables, safeTimeRange, selectedTimeField, query]);
+  }, [hasTimeVariables, safeTimeRange, selectedTimeField, query, context]);
 
   // Function to add time filter to query
   const addTimeFilterToQuery = () => {
@@ -215,18 +263,24 @@ export default function TimeRangeSelector({
   };
 
   // Apply quick range selection
-  const applyQuickRange = (range: TimeRange) => {
+  const applyQuickRange = (range: any) => {
     // Special handling for "No time filter" option
     if (range.display === "No time filter") {
-      onTimeRangeChange({ ...NO_TIME_FILTER, raw: undefined });
+      const noTimeFilter: TimeRange = {
+        type: 'relative',
+        from: '',
+        to: '',
+        display: 'No time filter',
+      };
+      onTimeRangeChange(noTimeFilter);
       setIsOpen(false);
       return;
     }
 
-    // Add raw timestamps for better handling
-    const newRange = {
+    // Add type field and raw timestamps for better handling
+    const newRange: TimeRange = {
+      type: 'relative',
       ...range,
-      enabled: true, // Explicitly set to true for all other options
       raw: {
         from: new Date(parseRelativeTime(range.from) || Date.now()),
         to: new Date(parseRelativeTime(range.to) || Date.now()),
@@ -260,18 +314,13 @@ export default function TimeRangeSelector({
     const fromValue = convertDateInput(fromInput);
     const toValue = convertDateInput(toInput);
 
-    const fromTimestamp = parseRelativeTime(fromValue) || Date.now();
-    const toTimestamp = parseRelativeTime(toValue) || Date.now();
+    // Removed unused timestamp variables
 
-    const newRange = {
+    const newRange: TimeRange = {
+      type: 'relative',
       from: fromValue,
       to: toValue,
       display: `${getDisplayTime(fromValue)} to ${getDisplayTime(toValue)}`,
-      enabled: true,
-      raw: {
-        from: new Date(fromTimestamp),
-        to: new Date(toTimestamp),
-      },
     };
 
     onTimeRangeChange(newRange);
@@ -308,7 +357,7 @@ export default function TimeRangeSelector({
                   <CalendarIcon className="h-3.5 w-3.5 shrink-0" />
                 )}
                 <span className="truncate font-normal">
-                  {timeRange?.enabled === false
+                  {timeRange && 'enabled' in timeRange && timeRange.enabled === false
                     ? "No time filter"
                     : currentRangeDisplay}
                 </span>
@@ -328,7 +377,7 @@ export default function TimeRangeSelector({
                     unused
                   </Badge>
                 )}
-                {timeRange?.enabled === false && (
+                {timeRange && 'enabled' in timeRange && timeRange.enabled === false && (
                   <Badge
                     variant="outline"
                     className="ml-1 h-4 px-1 py-0 border-primary/20 text-[10px] bg-red-400/20"
@@ -339,7 +388,13 @@ export default function TimeRangeSelector({
               </div>
             </Button>
           </PopoverTrigger>
-          <PopoverContent className="w-full max-w-[720px] p-0" align="start">
+          <PopoverContent 
+            className="w-full max-w-[720px] p-0 max-h-[calc(100vh-100px)] overflow-y-auto" 
+            align="start"
+            sideOffset={5}
+            avoidCollisions={true}
+            collisionPadding={20}
+          >
             <Card className="border-0 shadow-none">
               <div className="flex flex-col">
                 {/* Add a section at the top showing the query status */}

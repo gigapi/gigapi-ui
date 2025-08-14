@@ -28,11 +28,15 @@ import {
 import { selectedDbAtom, selectedTableAtom } from "@/atoms";
 import { timeRangeAtom, selectedTimeFieldAtom } from "@/atoms";
 import { createDashboardAtom, addPanelAtom } from "@/atoms";
-import { currentTabPanelConfigAtom, currentTabUserModifiedFieldsAtom, currentTabAvailableFieldsAtom } from "@/atoms";
+import {
+  currentTabPanelConfigAtom,
+  currentTabUserModifiedFieldsAtom,
+  currentTabAvailableFieldsAtom,
+} from "@/atoms";
 import GigTable from "@/components/shared/GigTable";
 import Loader from "@/components/shared/Loader";
 import { Button } from "@/components/ui/button";
-import { HashQueryUtils } from "@/lib/";
+import { HashQueryUtils } from "@/lib/url";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Tooltip,
@@ -58,12 +62,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import PanelFactory from "@/lib/dashboard/panel-factory";
-import {
-  type PanelConfig,
-  type Dashboard,
-  type NDJSONRecord,
-} from "@/types/dashboard.types";
+import { type Dashboard, type NDJSONRecord } from "@/types/dashboard.types";
 import { PanelRenderer } from "@/components/dashboard/PanelRenderer";
 import { PanelPreviewContainer } from "@/components/dashboard/PanelPreviewContainer";
 import { PanelConfigurationForm } from "@/components/dashboard/PanelConfigurationForm";
@@ -96,7 +95,6 @@ export default function QueryResults() {
 
   const navigate = useNavigate();
 
-
   // Extract values from metrics
   const executionTime = queryMetrics?.executionTime || null;
   const responseSize = queryMetrics?.size || null;
@@ -110,8 +108,12 @@ export default function QueryResults() {
 
   // Panel creation states - use tab-aware atoms
   const [panelConfig, setPanelConfig] = useAtom(currentTabPanelConfigAtom);
-  const [userModifiedFields, setUserModifiedFields] = useAtom(currentTabUserModifiedFieldsAtom);
-  const [availableFields, setAvailableFields] = useAtom(currentTabAvailableFieldsAtom);
+  const [userModifiedFields, setUserModifiedFields] = useAtom(
+    currentTabUserModifiedFieldsAtom
+  );
+  const [availableFields, setAvailableFields] = useAtom(
+    currentTabAvailableFieldsAtom
+  );
   const [showSaveToDashboard, setShowSaveToDashboard] = useState(false);
   const [newDashboardName, setNewDashboardName] = useState("");
   const [selectedDashboardId, setSelectedDashboardId] = useState<string>("new");
@@ -250,28 +252,40 @@ export default function QueryResults() {
       // Only update field mapping if we actually have smart mapping suggestions
       if (smartMapping && (smartMapping.xField || smartMapping.yField)) {
         const newMapping: any = {};
-        
+
         // For xField: use existing if valid and user modified, otherwise use smart default
-        if (userModifiedFields.xField && panelConfig.fieldMapping?.xField && availableFields.includes(panelConfig.fieldMapping.xField)) {
+        if (
+          userModifiedFields.xField &&
+          panelConfig.fieldMapping?.xField &&
+          availableFields.includes(panelConfig.fieldMapping.xField)
+        ) {
           newMapping.xField = panelConfig.fieldMapping.xField;
         } else {
           newMapping.xField = smartMapping.xField;
         }
-        
+
         // For yField: use existing if valid and user modified, otherwise use smart default
-        if (userModifiedFields.yField && panelConfig.fieldMapping?.yField && availableFields.includes(panelConfig.fieldMapping.yField)) {
+        if (
+          userModifiedFields.yField &&
+          panelConfig.fieldMapping?.yField &&
+          availableFields.includes(panelConfig.fieldMapping.yField)
+        ) {
           newMapping.yField = panelConfig.fieldMapping.yField;
         } else {
           newMapping.yField = smartMapping.yField;
         }
-        
+
         // For seriesField: use existing if valid and user modified, otherwise use smart default
-        if (userModifiedFields.seriesField && panelConfig.fieldMapping?.seriesField && availableFields.includes(panelConfig.fieldMapping.seriesField)) {
+        if (
+          userModifiedFields.seriesField &&
+          panelConfig.fieldMapping?.seriesField &&
+          availableFields.includes(panelConfig.fieldMapping.seriesField)
+        ) {
           newMapping.seriesField = panelConfig.fieldMapping.seriesField;
         } else {
           newMapping.seriesField = smartMapping.seriesField;
         }
-        
+
         setPanelConfig({
           ...panelConfig,
           fieldMapping: {
@@ -306,7 +320,7 @@ export default function QueryResults() {
         database: selectedDb || "",
         // Let the smart field mapping useEffect handle field validation
       });
-      
+
       // Reset user modified flags when database changes since schema may be different
       setUserModifiedFields({});
     }
@@ -465,7 +479,7 @@ export default function QueryResults() {
               // Track which fields were manually changed
               if (updates.fieldMapping) {
                 const newUserModified = { ...userModifiedFields };
-                
+
                 // Check if field mappings were changed
                 if (updates.fieldMapping.xField !== undefined) {
                   newUserModified.xField = true;
@@ -476,10 +490,10 @@ export default function QueryResults() {
                 if (updates.fieldMapping.seriesField !== undefined) {
                   newUserModified.seriesField = true;
                 }
-                
+
                 setUserModifiedFields(newUserModified);
               }
-              
+
               setPanelConfig({ ...panelConfig, ...updates });
             }}
             availableFields={availableFields}

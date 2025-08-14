@@ -9,6 +9,7 @@ import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
 import { useAtom, useSetAtom } from "jotai";
 import "@/components/ui/toast-fixes.css";
+import "@/styles/uplot.css";
 
 // New clean atoms
 import {

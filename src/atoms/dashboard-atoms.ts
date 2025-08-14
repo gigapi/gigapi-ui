@@ -563,6 +563,38 @@ export function useDashboard() {
   // Time range management
   const updateDashboardTimeRange = (timeRange: any) => {
     if (!currentDashboard) return;
+    
+    // Validate time range
+    if (timeRange && timeRange.type === 'absolute') {
+      const from = new Date(timeRange.from);
+      const to = new Date(timeRange.to);
+      
+      // Check for invalid dates
+      if (isNaN(from.getTime()) || isNaN(to.getTime())) {
+        console.error('[Dashboard] Invalid time range received:', { 
+          from: timeRange.from, 
+          to: timeRange.to,
+          fromValid: !isNaN(from.getTime()),
+          toValid: !isNaN(to.getTime())
+        });
+        return;
+      }
+      
+      // Check if from is after to
+      if (from >= to) {
+        console.error('[Dashboard] Invalid time range: from >= to', { from, to });
+        return;
+      }
+      
+      // Log successful time range update for debugging
+      console.log('[Dashboard] Updating time range:', {
+        from: from.toISOString(),
+        to: to.toISOString(),
+        originalFrom: timeRange.from,
+        originalTo: timeRange.to
+      });
+    }
+    
     updateDashboard(currentDashboard.id, { timeRange });
   };
 

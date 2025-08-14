@@ -172,9 +172,10 @@ export class QueryProcessor {
       });
     }
 
-    // Handle table variable replacement
-    if (processedQuery.includes("$__table") && options.table) {
-      processedQuery = processedQuery.replace(/\$__table/g, options.table);
+    // Handle table variable replacement - case insensitive
+    const hasTableVar = /\$__table/gi.test(processedQuery);
+    if (hasTableVar && options.table) {
+      processedQuery = processedQuery.replace(/\$__table/gi, options.table);
       interpolatedVars.table = options.table;
     }
 
@@ -250,6 +251,14 @@ export class QueryProcessor {
   }
 
   /**
+   * Check if query contains any variables that need processing (including $__table)
+   */
+  static checkForVariables(query: string): boolean {
+    if (!query || typeof query !== "string") return false;
+    return TIME_VARIABLE_PATTERNS.ALL_VARIABLES.test(query);
+  }
+
+  /**
    * Generate time filter for the query
    */
   private static generateTimeFilter(
@@ -266,6 +275,8 @@ export class QueryProcessor {
     const timeUnit =
       timeColumnDetails?.timeUnit ||
       this.inferTimeUnitFromColumnName(columnName, timeColumnDetails?.dataType);
+    
+    // Time filter generation (debug logs removed for production)
 
     // Check if we should use epoch format
     if (this.shouldUseEpochFormat(columnName, timeUnit)) {
@@ -592,8 +603,8 @@ export class QueryProcessor {
       return "s";
     }
 
-    // 2. Special case for __timestamp (commonly nanoseconds in time-series databases)
-    if (lowerName === "__timestamp") {
+    // 2. Special cases for common time-series timestamp columns (commonly nanoseconds)
+    if (lowerName === "__timestamp" || lowerName === "time" || lowerName === "timestamp") {
       return "ns";
     }
 
@@ -724,6 +735,10 @@ export class QueryProcessor {
 // Export standalone functions for backward compatibility
 export function checkForTimeVariables(query: string): boolean {
   return QueryProcessor.checkForTimeVariables(query);
+}
+
+export function checkForVariables(query: string): boolean {
+  return QueryProcessor.checkForVariables(query);
 }
 
 export function detectTimeFieldsFromSchema(columns: ColumnSchema[]): string[] {

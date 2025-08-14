@@ -188,11 +188,27 @@ export class AutoExecutionEngine {
   ): Promise<string> {
     // Check if query has time variables
     if (QueryProcessor.checkForTimeVariables(query)) {
+      const timeColumn = context.selected_fields?.[0]; // Use first selected field as time column
+      
+      // Create timeColumnDetails if not provided but we have a time column
+      let timeColumnDetails = context.timeColumnDetails;
+      if (!timeColumnDetails && timeColumn) {
+        // Default to nanoseconds for __timestamp column
+        if (timeColumn === "__timestamp") {
+          timeColumnDetails = {
+            columnName: timeColumn,
+            dataType: "BIGINT",
+            timeUnit: "ns",
+          };
+        }
+      }
+      
       const processed = QueryProcessor.process({
         database,
         query,
         timeRange: context.time_range,
-        timeColumn: context.selected_fields?.[0], // Use first selected field as time column
+        timeColumn,
+        timeColumnDetails: timeColumnDetails || null,
         timeZone: "UTC",
         maxDataPoints: 1000,
       });

@@ -2,6 +2,7 @@ import { useRef, useEffect, useState, useCallback, useMemo } from "react";
 import { useAtom, useSetAtom } from "jotai";
 import {
   queryAtom,
+  queryResultsAtom,
   executeQueryAtom,
   queryLoadingAtom,
   setQueryAtom,
@@ -21,10 +22,11 @@ import {
 import { toast } from "sonner";
 import ChatPanelCompact from "@/components/chat/ChatPanelCompact";
 import { QueryEditorToolbar, QueryEditorSelectors, MonacoSqlEditor } from "./";
-import { checkForTimeVariables, detectTimeFieldsFromSchema } from "@/lib/";
+import { checkForTimeVariables, detectTimeFieldsFromSchema } from "@/lib/query-processor";
 
 export default function QueryEditor() {
   const [query] = useAtom(queryAtom);
+  const [queryResults] = useAtom(queryResultsAtom);
   const [isLoading] = useAtom(queryLoadingAtom);
   const [selectedDb] = useAtom(selectedDbAtom);
   const [selectedTable] = useAtom(selectedTableAtom);
@@ -77,12 +79,27 @@ export default function QueryEditor() {
 
   // Handle time range change
   const setTimeRange = useSetAtom(setTimeRangeAtom);
+  const [shouldAutoExecute, setShouldAutoExecute] = useState(false);
+  
   const handleTimeRangeChange = useCallback(
     (newTimeRange: any) => {
       setTimeRange(newTimeRange);
+      
+      // Mark that we should auto-execute if conditions are met
+      if (queryResults && queryResults.length > 0 && hasTimeVariables && query.trim()) {
+        setShouldAutoExecute(true);
+      }
     },
-    [setTimeRange]
+    [setTimeRange, queryResults, hasTimeVariables, query]
   );
+  
+  // Auto-execute query when time range changes and conditions are met
+  useEffect(() => {
+    if (shouldAutoExecute) {
+      handleRunQuery();
+      setShouldAutoExecute(false);
+    }
+  }, [shouldAutoExecute]);
 
   // Handle running query with timeout protection - NOT using useCallback to avoid stale closures
   const handleRunQuery = async () => {

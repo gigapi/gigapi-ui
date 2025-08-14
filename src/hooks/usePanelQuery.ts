@@ -124,6 +124,7 @@ export function usePanelQuery({
       const result = QueryProcessor.process({
         database,
         query: config.query,
+        table: config.table, // Add table parameter for $__table replacement
         timeRange: dashboard.timeRange,
         timeColumn,
         timeZone,

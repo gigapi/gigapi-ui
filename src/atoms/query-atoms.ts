@@ -100,9 +100,10 @@ export const executeQueryAtom = atom(null, async (get, set) => {
     let processedQuery = query;
     let hasTimeVariables = false;
 
-    // Check if we need to process time variables
-    if (QueryProcessor.checkForTimeVariables(query)) {
-      hasTimeVariables = true;
+    // Check if we need to process the query for any variables
+    if (QueryProcessor.checkForVariables(query)) {
+      // Check specifically for time variables for the hasTimeVariables flag
+      hasTimeVariables = QueryProcessor.checkForTimeVariables(query);
 
       // Get time field details from schema
       let timeFieldDetails = null;

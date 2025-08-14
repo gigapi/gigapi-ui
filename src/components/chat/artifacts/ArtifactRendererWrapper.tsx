@@ -134,6 +134,11 @@ export default function ArtifactRendererWrapper({
           id: `artifact_${Date.now()}`,
           type: artifactType,
           title: proposal.title,
+          metadata: {
+            // Mark this as a newly created artifact
+            isNewlyCreated: true,
+            createdAt: new Date().toISOString(),
+          },
           data: proposal.chart_type
             ? {
                 // Chart artifact structure
@@ -166,14 +171,6 @@ export default function ArtifactRendererWrapper({
                     placement: "bottom",
                   },
                 },
-                metadata: {
-                  execution_result: executionResult,
-                  feedback: feedback,
-                  title: proposal.title,
-                  // Mark this as a newly created artifact
-                  isNewlyCreated: true,
-                  createdAt: new Date().toISOString(),
-                },
               }
             : {
                 // Query artifact structure
@@ -181,14 +178,6 @@ export default function ArtifactRendererWrapper({
                 database: proposal.database,
                 // Always use __timestamp for time-based queries
                 timeField: hasTimeVariables ? "__timestamp" : undefined,
-                metadata: {
-                  execution_result: executionResult,
-                  feedback: feedback,
-                  title: proposal.title,
-                  // Mark this as a newly created artifact
-                  isNewlyCreated: true,
-                  createdAt: new Date().toISOString(),
-                },
               },
         };
 

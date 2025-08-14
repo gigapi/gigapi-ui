@@ -1850,7 +1850,7 @@ async function enhanceAndAddArtifact(
       availableDatabases: queryContext.schemaContext?.databases 
         ? Object.keys(queryContext.schemaContext.databases)
         : [],
-      schemaCache: queryContext.schemaContext,
+      schemaCache: queryContext.schemaContext || undefined,
       currentDatabase: queryContext.selectedDatabase
     };
     

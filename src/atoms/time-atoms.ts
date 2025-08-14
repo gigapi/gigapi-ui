@@ -14,7 +14,7 @@ export const hasTimeVariablesAtom = atom<boolean>(false);
 // Setter for time variables detection
 export const setHasTimeVariablesAtom = atom(
   null,
-  (get, set, hasTimeVars: boolean) => {
+  (_, set, hasTimeVars: boolean) => {
     set(hasTimeVariablesAtom, hasTimeVars);
   }
 );
@@ -22,7 +22,7 @@ export const setHasTimeVariablesAtom = atom(
 // Actions
 export const setTimeRangeAtom = atom(
   null,
-  (_get, set, timeRange: TimeRange) => {
+  (_, set, timeRange: TimeRange) => {
     set(timeRangeAtom, timeRange);
   }
 );

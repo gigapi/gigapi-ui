@@ -42,7 +42,10 @@ export default function QuickRanges({
               key={range.display || "no-filter"}
               variant="ghost"
               className="w-full justify-start text-sm font-normal h-8"
-              onClick={() => onRangeSelect(range)}
+              onClick={() => onRangeSelect({
+                type: 'relative',
+                ...range
+              } as TimeRange)}
             >
               {range.display || "No time filter"}
             </Button>

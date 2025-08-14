@@ -286,12 +286,9 @@ export default function ChatArtifactEnhanced({
 
         // Get column details for the time field if available
         let timeColumnDetails: any = null;
-        if (
-          (selectedTimeField || chartData?.fieldMapping?.xField) &&
-          schemaCache
-        ) {
-          const timeColumn =
-            selectedTimeField || chartData?.fieldMapping?.xField;
+        const timeColumn = selectedTimeField || chartData?.fieldMapping?.xField;
+        
+        if (timeColumn && schemaCache) {
           // Search for column details in schema cache
           const dbData = schemaCache.databases[database];
           if (dbData) {
@@ -321,6 +318,22 @@ export default function ChatArtifactEnhanced({
                 }
               }
             }
+          }
+        }
+        
+        // Fallback: Create timeColumnDetails when schema cache is unavailable
+        if (!timeColumnDetails && timeColumn) {
+          const lowerTimeColumn = timeColumn.toLowerCase();
+          // For common time-series timestamp columns, assume BIGINT nanoseconds
+          if (lowerTimeColumn === "__timestamp" || 
+              lowerTimeColumn === "time" || 
+              lowerTimeColumn === "timestamp") {
+            timeColumnDetails = {
+              columnName: timeColumn,
+              dataType: "BIGINT",
+              timeUnit: "ns",
+            };
+            // Using fallback timeColumnDetails for common time columns
           }
         }
 
@@ -699,7 +712,12 @@ export default function ChatArtifactEnhanced({
         type: (chartData.type || chartData.chartType || "timeseries") as any,
         query: query || "",
         database: database || "",
-        fieldMapping: chartData.fieldMapping || {},
+        fieldMapping: {
+          // Ensure xField is set for time series charts
+          xField: chartData.fieldMapping?.xField || 
+                  (query && query.includes("__timestamp") ? "__timestamp" : undefined),
+          ...chartData.fieldMapping,
+        },
         fieldConfig: chartData.fieldConfig || {
           defaults: {
             unit: "",
@@ -837,7 +855,12 @@ export default function ChatArtifactEnhanced({
         title: artifact.title || "Chart",
         query: query || "",
         database,
-        fieldMapping: (artifact as ChartArtifact).data.fieldMapping || {},
+        fieldMapping: {
+          // Ensure xField is set for time series charts
+          xField: (artifact as ChartArtifact).data.fieldMapping?.xField || 
+                  (query && query.includes("__timestamp") ? "__timestamp" : undefined),
+          ...(artifact as ChartArtifact).data.fieldMapping,
+        },
         fieldConfig: (artifact as ChartArtifact).data.fieldConfig || {
           defaults: { unit: "", decimals: 2 },
         },

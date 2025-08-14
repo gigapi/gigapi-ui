@@ -11,10 +11,14 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { Calendar } from "@/components/ui/calendar";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/";
@@ -118,8 +122,8 @@ export default function DateTimePicker({
         onChange={(e) => onChange(e.target.value)}
         className="h-10 pr-10"
       />
-      <Popover open={isOpen} onOpenChange={setIsOpen}>
-        <PopoverTrigger asChild>
+      <Dialog open={isOpen} onOpenChange={setIsOpen}>
+        <DialogTrigger asChild>
           <Button
             variant="ghost"
             size="icon"
@@ -128,9 +132,25 @@ export default function DateTimePicker({
           >
             <CalendarIcon className="h-4 w-4" />
           </Button>
-        </PopoverTrigger>
-        <PopoverContent className="w-auto p-0" align="end">
-          <div className="p-3">
+        </DialogTrigger>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Select Date and Time</DialogTitle>
+            <DialogDescription>
+              Choose a date and time or use a quick preset
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4 py-4">
+            {/* Current selection display */}
+            <div className="bg-muted/50 rounded-lg p-3 text-center">
+              <p className="text-sm font-medium text-muted-foreground mb-1">Selected:</p>
+              <p className="text-lg font-mono">
+                {format(date, "MMM dd, yyyy, HH:mm:ss")}
+              </p>
+            </div>
+            
+            {/* Calendar */}
             <Calendar
               mode="single"
               selected={date}
@@ -153,73 +173,82 @@ export default function DateTimePicker({
                   "bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground focus:bg-primary focus:text-primary-foreground",
               }}
             />
-          </div>
-          <div className="p-3 border-t border-border space-y-4">
+            
+            {/* Time input */}
             <div className="space-y-2">
-              <Label htmlFor="time" className="text-sm font-medium">
+              <Label htmlFor="time-input" className="text-sm font-medium">
                 Time
               </Label>
               <Input
-                id="time"
+                id="time-input"
                 type="time"
                 step="1"
                 value={timeValue}
                 onChange={handleTimeChange}
+                className="h-10"
               />
             </div>
-
+            
+            {/* Quick presets */}
             <div className="space-y-2">
-              <Label className="text-xs text-muted-foreground">
-                Quick Select
+              <Label className="text-sm text-muted-foreground">
+                Quick Presets
               </Label>
               <div className="grid grid-cols-2 gap-2">
                 <Button
                   size="sm"
                   variant="outline"
-                  className="h-8 text-xs"
+                  className="h-9"
                   onClick={() => setTimePreset("now")}
+                  type="button"
                 >
                   Now
                 </Button>
                 <Button
                   size="sm"
                   variant="outline"
-                  className="h-8 text-xs"
+                  className="h-9"
                   onClick={() => setTimePreset("startOfDay")}
+                  type="button"
                 >
                   Start of Day
                 </Button>
                 <Button
                   size="sm"
                   variant="outline"
-                  className="h-8 text-xs"
+                  className="h-9"
                   onClick={() => setTimePreset("endOfDay")}
+                  type="button"
                 >
                   End of Day
                 </Button>
                 <Button
                   size="sm"
                   variant="outline"
-                  className="h-8 text-xs"
+                  className="h-9"
                   onClick={() => setTimePreset("noon")}
+                  type="button"
                 >
                   Noon
                 </Button>
               </div>
             </div>
-
-            <div className="bg-muted/50 rounded-lg p-2 text-center">
-              <p className="text-sm font-mono">
-                {format(date, "MMM dd, yyyy, HH:mm:ss")}
-              </p>
-            </div>
-
-            <Button onClick={handleApply} className="w-full">
+          </div>
+          
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setIsOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button type="button" onClick={handleApply}>
               Apply
             </Button>
-          </div>
-        </PopoverContent>
-      </Popover>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
