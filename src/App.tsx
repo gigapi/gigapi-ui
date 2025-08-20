@@ -33,6 +33,7 @@ import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { CommandPalette } from "@/components/shared/CommandPalette";
 import { ArtifactProvider } from "@/contexts/ArtifactContext";
 import Loader from "./components/shared/Loader";
+import { useMigrateConnections } from "@/hooks/useMigrateConnections";
 
 // const VERSION = import.meta.env.PACKAGE_VERSION;
 
@@ -58,6 +59,7 @@ function AppInitializer() {
       return;
     }
 
+    // Connect to the selected connection on startup
     connect().catch((error) => {
       console.error("🔥 [AppInitializer] Connection failed:", error);
     });
@@ -146,6 +148,9 @@ class ErrorBoundary extends React.Component<
 export default function App() {
   const [connectionState] = useAtom(connectionStateAtom);
   const [isConnected] = useAtom(isConnectedAtom);
+
+  // Migrate old connections
+  useMigrateConnections();
 
   useEffect(() => {
     // Global error handler

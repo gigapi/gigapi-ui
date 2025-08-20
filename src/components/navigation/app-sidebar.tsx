@@ -1,4 +1,5 @@
 import * as React from "react";
+import { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   Home,
@@ -7,6 +8,12 @@ import {
   ExternalLink,
   MessageSquareHeart,
   Github,
+  Globe,
+  Settings,
+  CheckCircle,
+  AlertCircle,
+  ServerCrash,
+  RefreshCw,
 } from "lucide-react";
 
 import {
@@ -24,6 +31,23 @@ import { Separator } from "@/components/ui/separator";
 import QueryHistory from "@/components/QueryHistory";
 import { ModeToggle } from "@/components/mode-toggle";
 import Logo from "@/assets/logo.svg";
+import { useAtom, useSetAtom } from "jotai";
+import {
+  connectionsAtom,
+  selectedConnectionIdAtom,
+  selectedConnectionAtom,
+  connectAtom,
+  type Connection,
+} from "@/atoms/connection-atoms";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Button } from "@/components/ui/button";
+import { ConnectionModal } from "@/components/connections/ConnectionModal";
 
 const VERSION = import.meta.env.PACKAGE_VERSION;
 
@@ -82,6 +106,34 @@ const data = {
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const location = useLocation();
   const navigate = useNavigate();
+  const [connections] = useAtom(connectionsAtom);
+  const [selectedConnectionId, setSelectedConnectionId] = useAtom(selectedConnectionIdAtom);
+  const [selectedConnection] = useAtom(selectedConnectionAtom);
+  const connect = useSetAtom(connectAtom);
+  const [showConnectionModal, setShowConnectionModal] = useState(false);
+
+  const handleConnectionChange = (connectionId: string) => {
+    setSelectedConnectionId(connectionId);
+    const connection = connections.find((c) => c.id === connectionId);
+    if (connection && connection.state === "disconnected") {
+      connect({ connectionId });
+    }
+  };
+
+  const getConnectionStatusIcon = (state: Connection["state"]) => {
+    switch (state) {
+      case "connected":
+      case "empty":
+        return <CheckCircle className="h-3.5 w-3.5 text-green-500" />;
+      case "connecting":
+      case "reconnecting":
+        return <RefreshCw className="h-3.5 w-3.5 animate-spin text-blue-500" />;
+      case "failed":
+        return <ServerCrash className="h-3.5 w-3.5 text-red-500" />;
+      default:
+        return <AlertCircle className="h-3.5 w-3.5 text-gray-400" />;
+    }
+  };
 
   return (
     <Sidebar {...props}>
@@ -102,6 +154,41 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
       </SidebarHeader>
 
       <SidebarContent>
+        {/* Connection Selector */}
+        <SidebarGroup>
+          <SidebarGroupLabel>Connection</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <div className="px-2 space-y-2">
+              <Select value={selectedConnectionId} onValueChange={handleConnectionChange}>
+                <SelectTrigger className="w-full" size="sm">
+                  <SelectValue placeholder="Select connection" />
+                </SelectTrigger>
+                <SelectContent>
+                  {connections.map((connection) => (
+                    <SelectItem key={connection.id} value={connection.id}>
+                      <div className="flex items-center gap-2 w-full">
+                        {getConnectionStatusIcon(connection.state)}
+                        <span className="truncate">{connection.name}</span>
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full"
+                onClick={() => setShowConnectionModal(true)}
+              >
+                <Settings className="h-4 w-4 mr-2" />
+                Manage Connections
+              </Button>
+            </div>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        <Separator />
+
         {/* Navigation */}
         <SidebarGroup>
           <SidebarGroupLabel>Navigation</SidebarGroupLabel>
@@ -182,6 +269,12 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
+      
+      {/* Connection Modal */}
+      <ConnectionModal
+        open={showConnectionModal}
+        onOpenChange={setShowConnectionModal}
+      />
     </Sidebar>
   );
 }

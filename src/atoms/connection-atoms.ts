@@ -17,6 +17,15 @@ export interface Database {
   tables_count?: number;
 }
 
+export interface Connection {
+  id: string;
+  name: string;
+  url: string;
+  state: ConnectionState;
+  databases: Database[];
+  error?: string | null;
+}
+
 // Generate default API URL based on current location
 const getDefaultApiUrl = () => {
   const protocol = window.location.protocol || "http:";
@@ -39,32 +48,66 @@ const getInitialApiUrl = () => {
   return getDefaultApiUrl();
 };
 
-export const apiUrlAtom = atomWithStorage<string>(
-  "gigapi_connection_url",
-  getInitialApiUrl(),
-  {
-    getItem: (key) => {
-      const saved = localStorage.getItem(key);
-      if (!saved || saved === "") {
-        return getDefaultApiUrl();
-      }
-      return saved;
+// Multiple connections storage
+export const connectionsAtom = atomWithStorage<Connection[]>(
+  "gigapi_connections",
+  [
+    {
+      id: "default",
+      name: "Default Connection",
+      url: getInitialApiUrl(),
+      state: "disconnected",
+      databases: [],
+      error: null,
     },
-    setItem: (key, value) => {
-      if (value && value !== "") {
-        localStorage.setItem(key, value);
-      }
-    },
-    removeItem: (key) => {
-      localStorage.removeItem(key);
-    },
+  ]
+);
+
+// Selected connection ID
+export const selectedConnectionIdAtom = atomWithStorage<string>(
+  "gigapi_selected_connection",
+  "default"
+);
+
+// Derived atom for selected connection
+export const selectedConnectionAtom = atom<Connection | null>((get) => {
+  const connections = get(connectionsAtom);
+  const selectedId = get(selectedConnectionIdAtom);
+  return connections.find((c) => c.id === selectedId) || null;
+});
+
+// Derived atom for current API URL (for backward compatibility)
+export const apiUrlAtom = atom(
+  (get) => {
+    const selected = get(selectedConnectionAtom);
+    return selected?.url || getDefaultApiUrl();
+  },
+  (get, set, newUrl: string) => {
+    const connections = get(connectionsAtom);
+    const selectedId = get(selectedConnectionIdAtom);
+    const updatedConnections = connections.map((c) =>
+      c.id === selectedId ? { ...c, url: newUrl } : c
+    );
+    set(connectionsAtom, updatedConnections);
   }
 );
 
 // Runtime state atoms - these don't persist
-export const connectionStateAtom = atom<ConnectionState>("disconnected");
-export const databasesAtom = atom<Database[]>([]);
-export const connectionErrorAtom = atom<string | null>(null);
+export const connectionStateAtom = atom<ConnectionState>((get) => {
+  const selected = get(selectedConnectionAtom);
+  return selected?.state || "disconnected";
+});
+
+export const databasesAtom = atom<Database[]>((get) => {
+  const selected = get(selectedConnectionAtom);
+  return selected?.databases || [];
+});
+
+export const connectionErrorAtom = atom<string | null>((get) => {
+  const selected = get(selectedConnectionAtom);
+  return selected?.error || null;
+});
+
 const isConnectingAtom = atom<boolean>(false);
 
 // Derived atoms
@@ -93,94 +136,173 @@ const validateApiUrl = (url: string): boolean => {
   }
 };
 
+// Update connection state in storage
+const updateConnectionState = atom(
+  null,
+  (get, set, update: Partial<Connection> & { id: string }) => {
+    const connections = get(connectionsAtom);
+    const updatedConnections = connections.map((c) =>
+      c.id === update.id ? { ...c, ...update } : c
+    );
+    set(connectionsAtom, updatedConnections);
+  }
+);
+
 // Main connection action atom
-export const connectAtom = atom(null, async (get, set, apiUrl?: string) => {
-  const url = apiUrl || get(apiUrlAtom);
-  const previousUrl = get(apiUrlAtom);
+export const connectAtom = atom(
+  null,
+  async (get, set, options?: { connectionId?: string; url?: string }) => {
+    const connectionId = options?.connectionId || get(selectedConnectionIdAtom);
+    const connection = get(connectionsAtom).find((c) => c.id === connectionId);
+    
+    if (!connection) {
+      toast.error("Connection not found");
+      return;
+    }
 
-  // Validate URL
-  if (!validateApiUrl(url)) {
-    set(connectionErrorAtom, "Invalid API URL format");
-    set(connectionStateAtom, "failed");
-    toast.error("Invalid API URL format");
-    return;
-  }
+    const url = options?.url || connection.url;
+    const previousUrl = connection.url;
 
-  // Don't reconnect if already connected to same URL
-  if (get(connectionStateAtom) === "connected" && !apiUrl) {
-    return;
-  }
+    // Validate URL
+    if (!validateApiUrl(url)) {
+      set(updateConnectionState, {
+        id: connectionId,
+        state: "failed",
+        error: "Invalid API URL format",
+      });
+      toast.error("Invalid API URL format");
+      return;
+    }
 
-  // Don't connect if already connecting
-  if (get(isConnectingAtom)) {
-    return;
-  }
+    // Don't reconnect if already connected to same URL
+    if (connection.state === "connected" && !options?.url) {
+      return;
+    }
 
-  // Clear schema cache if connecting to a different instance
-  if (apiUrl && apiUrl !== previousUrl) {
-    set(schemaCacheAtom, null);
-    // Also clear related atoms
-    set(databaseListForAIAtom, []);
-  }
+    // Don't connect if already connecting
+    if (get(isConnectingAtom)) {
+      return;
+    }
 
-  set(isConnectingAtom, true);
-  set(connectionStateAtom, "connecting");
-  set(connectionErrorAtom, null);
+    // Clear schema cache if connecting to a different instance
+    if (options?.url && options.url !== previousUrl) {
+      set(schemaCacheAtom, null);
+      // Also clear related atoms
+      set(databaseListForAIAtom, []);
+    }
 
-  try {
-    const response = await axios.post(`${url}?format=json`, {
-      query: "SHOW DATABASES",
+    set(isConnectingAtom, true);
+    set(updateConnectionState, {
+      id: connectionId,
+      state: "connecting",
+      error: null,
     });
 
-    const databases =
-      response.data.results?.map((item: any) => item.database_name) || [];
+    try {
+      const response = await axios.post(`${url}?format=json`, {
+        query: "SHOW DATABASES",
+      });
 
-    if (databases.length === 0) {
-      set(connectionStateAtom, "empty");
-      set(databasesAtom, []);
-      toast.warning("Connected but no databases found");
-    } else {
-      set(connectionStateAtom, "connected");
-      set(
-        databasesAtom,
-        databases.map((name: string) => ({ database_name: name }))
-      );
+      const databases =
+        response.data.results?.map((item: any) => item.database_name) || [];
 
-      set(databaseListForAIAtom, databases);
-      toast.success(`Connected! Found ${databases.length} databases`);
-
-      // Update stored URL if different
-      if (apiUrl && apiUrl !== get(apiUrlAtom)) {
-        set(apiUrlAtom, apiUrl);
-      }
-
-      const directCacheCheck = get(getLocalStorageCacheAtom);
-
-      if (directCacheCheck) {
-        // Make sure the atom has the cache loaded
-        const atomCache = get(schemaCacheAtom);
-        if (!atomCache) {
-          set(schemaCacheAtom, directCacheCheck);
-        }
+      if (databases.length === 0) {
+        set(updateConnectionState, {
+          id: connectionId,
+          state: "empty",
+          databases: [],
+        });
+        toast.warning("Connected but no databases found");
       } else {
-        // No valid cache, initialize lightweight cache structure
+        set(updateConnectionState, {
+          id: connectionId,
+          state: "connected",
+          databases: databases.map((name: string) => ({
+            database_name: name,
+          })),
+          url: url,
+        });
 
-        await set(initializeSchemaCacheAtom);
+        set(databaseListForAIAtom, databases);
+        toast.success(`Connected! Found ${databases.length} databases`);
+
+        const directCacheCheck = get(getLocalStorageCacheAtom);
+
+        if (directCacheCheck) {
+          // Make sure the atom has the cache loaded
+          const atomCache = get(schemaCacheAtom);
+          if (!atomCache) {
+            set(schemaCacheAtom, directCacheCheck);
+          }
+        } else {
+          // No valid cache, initialize lightweight cache structure
+          await set(initializeSchemaCacheAtom);
+        }
       }
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : "Connection failed";
+
+      console.error("🔥 [Connection] Failed:", errorMessage);
+
+      set(updateConnectionState, {
+        id: connectionId,
+        state: "failed",
+        databases: [],
+        error: errorMessage,
+      });
+
+      toast.error(`Connection failed: ${errorMessage}`);
+      throw error;
+    } finally {
+      set(isConnectingAtom, false);
     }
-  } catch (error) {
-    const errorMessage =
-      error instanceof Error ? error.message : "Connection failed";
-
-    console.error("🔥 [Connection] Failed:", errorMessage);
-
-    set(connectionStateAtom, "failed");
-    set(databasesAtom, []);
-    set(connectionErrorAtom, errorMessage);
-
-    toast.error(`Connection failed: ${errorMessage}`);
-    throw error;
-  } finally {
-    set(isConnectingAtom, false);
   }
+);
+
+// Actions for managing connections
+export const addConnectionAtom = atom(
+  null,
+  (get, set, connection: Omit<Connection, "id" | "state" | "databases" | "error">) => {
+    const connections = get(connectionsAtom);
+    const newConnection: Connection = {
+      ...connection,
+      id: Date.now().toString(),
+      state: "disconnected",
+      databases: [],
+      error: null,
+    };
+    set(connectionsAtom, [...connections, newConnection]);
+    return newConnection.id;
+  }
+);
+
+export const removeConnectionAtom = atom(null, (get, set, connectionId: string) => {
+  const connections = get(connectionsAtom);
+  const filtered = connections.filter((c) => c.id !== connectionId);
+  
+  // Ensure at least one connection remains
+  if (filtered.length === 0) {
+    toast.error("Cannot remove the last connection");
+    return;
+  }
+  
+  // If removing selected connection, switch to first available
+  if (get(selectedConnectionIdAtom) === connectionId) {
+    set(selectedConnectionIdAtom, filtered[0].id);
+  }
+  
+  set(connectionsAtom, filtered);
+  toast.success("Connection removed");
 });
+
+export const updateConnectionAtom = atom(
+  null,
+  (get, set, connectionId: string, updates: Partial<Omit<Connection, "id">>) => {
+    const connections = get(connectionsAtom);
+    const updated = connections.map((c) =>
+      c.id === connectionId ? { ...c, ...updates } : c
+    );
+    set(connectionsAtom, updated);
+  }
+);

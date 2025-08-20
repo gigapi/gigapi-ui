@@ -6,6 +6,8 @@ import {
   CheckCircle,
   AlertCircle,
   Globe,
+  Server,
+  Settings,
 } from "lucide-react";
 import { useAtom, useSetAtom } from "jotai";
 import {
@@ -14,22 +16,29 @@ import {
   apiUrlAtom,
   connectAtom,
   databasesAtom,
+  connectionsAtom,
+  selectedConnectionIdAtom,
+  type Connection,
 } from "@/atoms";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardFooter } from "@/components/ui/card";
+import { Card, CardContent, CardFooter, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import Loader from "@/components/shared/Loader";
+import { ConnectionModal } from "@/components/connections/ConnectionModal";
 
 export default function ConnectionStatus() {
   const [connectionState] = useAtom(connectionStateAtom);
   const [connectionError] = useAtom(connectionErrorAtom);
   const [apiUrl] = useAtom(apiUrlAtom);
   const [databases] = useAtom(databasesAtom);
+  const [connections] = useAtom(connectionsAtom);
+  const [selectedConnectionId, setSelectedConnectionId] = useAtom(selectedConnectionIdAtom);
   const setApiUrl = useSetAtom(apiUrlAtom);
   const connect = useSetAtom(connectAtom);
   const inputRef = useRef<HTMLInputElement>(null);
   const [isRetrying, setIsRetrying] = useState(false);
+  const [showConnectionModal, setShowConnectionModal] = useState(false);
 
   // Set initial value when component mounts
   useEffect(() => {
@@ -46,7 +55,7 @@ export default function ConnectionStatus() {
       // Automatically try connecting with the new URL
       setIsRetrying(true);
       try {
-        await connect(newUrl);
+        await connect({ url: newUrl });
       } catch (error) {
         // Error is already handled by the connect atom
       } finally {
@@ -63,6 +72,33 @@ export default function ConnectionStatus() {
       // Error is already handled by the connect atom
     } finally {
       setIsRetrying(false);
+    }
+  };
+
+  const handleSwitchConnection = async (connectionId: string) => {
+    setSelectedConnectionId(connectionId);
+    const connection = connections.find(c => c.id === connectionId);
+    if (connection && connection.state === "disconnected") {
+      try {
+        await connect({ connectionId });
+      } catch (error) {
+        // Error is already handled by the connect atom
+      }
+    }
+  };
+
+  const getConnectionStatusIcon = (state: Connection["state"]) => {
+    switch (state) {
+      case "connected":
+      case "empty":
+        return <CheckCircle className="h-4 w-4 text-green-500" />;
+      case "connecting":
+      case "reconnecting":
+        return <RefreshCw className="h-4 w-4 animate-spin text-blue-500" />;
+      case "failed":
+        return <ServerCrash className="h-4 w-4 text-red-500" />;
+      default:
+        return <AlertCircle className="h-4 w-4 text-gray-400" />;
     }
   };
 
@@ -127,7 +163,9 @@ export default function ConnectionStatus() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-background to-muted/90 flex items-center justify-center p-4">
-      <Card className="w-full max-w-md border shadow-lg overflow-hidden">
+      <div className="w-full max-w-2xl space-y-4">
+        {/* Main Connection Status Card */}
+        <Card className="border shadow-lg overflow-hidden">
         <div
           className={`p-6 ${statusInfo.color} transition-colors duration-300`}
         >
@@ -218,10 +256,10 @@ export default function ConnectionStatus() {
               {isRetrying ? (
                 <>
                   <Loader className="h-4 w-4 mr-2" />
-                  Connecting...
+                  Testing...
                 </>
               ) : (
-                "Update & Connect"
+                "Test Connection"
               )}
             </Button>
           </div>
@@ -245,6 +283,96 @@ export default function ConnectionStatus() {
           </Button>
         </CardFooter>
       </Card>
+
+      {/* Other Connections Card */}
+      {connections.length > 1 && (
+        <Card className="border shadow-lg">
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-medium">Other Connections</h3>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowConnectionModal(true)}
+              >
+                <Settings className="h-4 w-4 mr-1" />
+                Manage
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className="pb-4">
+            <div className="space-y-2">
+              {connections
+                .filter(c => c.id !== selectedConnectionId)
+                .map((connection) => (
+                  <div
+                    key={connection.id}
+                    className="flex items-center justify-between p-3 rounded-lg border hover:bg-muted/50 transition-colors"
+                  >
+                    <div className="flex items-center gap-3 flex-1">
+                      {getConnectionStatusIcon(connection.state)}
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-sm">{connection.name}</p>
+                        <p className="text-xs text-muted-foreground font-mono truncate">
+                          {connection.url}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex gap-1">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={async () => {
+                          try {
+                            await connect({ connectionId: connection.id });
+                          } catch (error) {
+                            // Error handled by connect atom
+                          }
+                        }}
+                        title="Test this connection"
+                      >
+                        <RefreshCw className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant={connection.state === "connected" || connection.state === "empty" ? "default" : "outline"}
+                        onClick={() => handleSwitchConnection(connection.id)}
+                        disabled={connection.state === "failed" || connection.state === "disconnected"}
+                        title={connection.state === "failed" ? "Test connection first" : "Switch to this connection"}
+                      >
+                        <Server className="h-4 w-4 mr-1" />
+                        Use
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Single connection - show manage button */}
+      {connections.length === 1 && (
+        <Card className="border shadow-lg">
+          <CardContent className="p-4">
+            <Button
+              variant="outline"
+              className="w-full"
+              onClick={() => setShowConnectionModal(true)}
+            >
+              <Settings className="h-4 w-4 mr-2" />
+              Manage Connections
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Connection Modal */}
+      <ConnectionModal
+        open={showConnectionModal}
+        onOpenChange={setShowConnectionModal}
+      />
+    </div>
     </div>
   );
 }

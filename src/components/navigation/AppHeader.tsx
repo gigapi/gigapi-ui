@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React from "react";
 import { Link } from "react-router-dom";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Separator } from "@/components/ui/separator";
@@ -11,18 +11,12 @@ import {
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
-  Globe,
-  Edit,
-  Save,
-  X,
   Database,
   Search,
   RefreshCw,
 } from "lucide-react";
 import { useAtom, useSetAtom, useAtomValue } from "jotai";
-import { apiUrlAtom, connectAtom } from "@/atoms";
 import {
   selectedDbAtom,
   setSelectedDbAtom,
@@ -56,57 +50,12 @@ export default function AppHeader({
   actions,
   showDatabaseControls = true,
 }: AppHeaderProps) {
-  const [apiUrl] = useAtom(apiUrlAtom);
   const [selectedDb] = useAtom(selectedDbAtom);
-  const setApiUrl = useSetAtom(apiUrlAtom);
-  const connect = useSetAtom(connectAtom);
   const setSelectedDb = useSetAtom(setSelectedDbAtom);
   const refreshSchemaCache = useSetAtom(refreshSchemaCacheAtom);
   const isCacheLoading = useAtomValue(isCacheLoadingAtom);
   const cacheProgress = useAtomValue(cacheProgressAtom);
   const openCommandPalette = useSetAtom(openCommandPaletteAtom);
-  const [isEndpointEditing, setIsEndpointEditing] = useState(false);
-  const [tempApiUrl, setTempApiUrl] = useState(apiUrl);
-
-  // Update temp URL when apiUrl changes
-  useEffect(() => {
-    setTempApiUrl(apiUrl);
-  }, [apiUrl]);
-
-  // Handle saving the endpoint
-  const handleSaveEndpoint = async () => {
-    const newUrl = tempApiUrl.trim();
-
-    if (newUrl === apiUrl) {
-      setIsEndpointEditing(false);
-      return;
-    }
-
-    if (!newUrl) {
-      toast.error("API endpoint cannot be empty");
-      return;
-    }
-
-    // Update the URL and trigger connection
-    setApiUrl(newUrl);
-    setIsEndpointEditing(false);
-
-    try {
-      await connect(newUrl);
-    } catch (error) {
-      // Error is handled by the connection atom
-    }
-  };
-
-  // Handle API URL input key press
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter") {
-      handleSaveEndpoint();
-    } else if (e.key === "Escape") {
-      setTempApiUrl(apiUrl);
-      setIsEndpointEditing(false);
-    }
-  };
 
   return (
     <header className="flex h-16 shrink-0 items-center gap-2 px-4 border-b bg-background">
@@ -165,91 +114,6 @@ export default function AppHeader({
         {/* Page-specific actions */}
         {actions}
 
-        {/* API Endpoint Control - Always visible */}
-        <div className="hidden md:flex items-center">
-          {isEndpointEditing ? (
-            <div className="flex items-center gap-2">
-              <div className="relative">
-                <Globe className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  value={tempApiUrl}
-                  onChange={(e) => setTempApiUrl(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  className="font-mono text-sm pl-10 min-w-[350px]"
-                  placeholder="https://api.example.com"
-                  autoFocus
-                />
-              </div>
-              <Button
-                size="sm"
-                onClick={handleSaveEndpoint}
-                disabled={!tempApiUrl.trim()}
-              >
-                <Save className="h-4 w-4" />
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  setTempApiUrl(apiUrl);
-                  setIsEndpointEditing(false);
-                }}
-              >
-                <X className="h-4 w-4" />
-              </Button>
-            </div>
-          ) : (
-            <div
-              className="group cursor-pointer border border-transparent hover:border-border rounded-lg px-3 py-1.5 bg-muted/20 hover:bg-muted/40 transition-colors"
-              onClick={() => setIsEndpointEditing(true)}
-              title="Click to edit API endpoint"
-            >
-              <div className="flex items-center gap-2 text-sm">
-                <Globe className="h-4 w-4 text-muted-foreground" />
-                <span className="font-mono truncate max-w-[250px]">
-                  {apiUrl}
-                </span>
-                <Edit className="h-3.5 w-3.5 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground" />
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Mobile API Endpoint Control - Always visible */}
-        <div className="md:hidden">
-          <Popover>
-            <PopoverTrigger asChild>
-              <Button variant="outline" size="sm">
-                <Globe className="h-4 w-4" />
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-80" align="end">
-              <div className="space-y-2">
-                <h4 className="font-medium">API Endpoint</h4>
-                <div className="flex items-center gap-2">
-                  <div className="relative flex-1">
-                    <Globe className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                    <Input
-                      value={tempApiUrl}
-                      onChange={(e) => setTempApiUrl(e.target.value)}
-                      onKeyDown={handleKeyDown}
-                      className="font-mono text-sm pl-10"
-                      placeholder="https://api.example.com"
-                    />
-                  </div>
-                  <Button
-                    size="sm"
-                    onClick={handleSaveEndpoint}
-                    disabled={tempApiUrl.trim() === apiUrl}
-                  >
-                    <Save className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
-            </PopoverContent>
-          </Popover>
-        </div>
-
         {/* Database Controls */}
         {showDatabaseControls && (
           <>
@@ -300,7 +164,7 @@ export default function AppHeader({
                 <PopoverContent className="w-80" align="end">
                   <div className="space-y-4">
                     <div className="space-y-2">
-                      <h4 className="font-medium">Database Connection</h4>
+                      <h4 className="font-medium">Database</h4>
                       <UnifiedSchemaSelector
                         type="database"
                         dataSource="atoms"
