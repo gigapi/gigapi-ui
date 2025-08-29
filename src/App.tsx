@@ -17,6 +17,8 @@ import {
   isConnectedAtom,
   connectAtom,
   apiUrlAtom,
+  initializeConnectionsAtom,
+  isInitialLoadingAtom,
 } from "@/atoms";
 
 // Pages
@@ -47,6 +49,8 @@ function ChatRoute() {
 function AppInitializer() {
   const connect = useSetAtom(connectAtom);
   const [apiUrl] = useAtom(apiUrlAtom);
+  const initializeConnections = useSetAtom(initializeConnectionsAtom);
+  const setIsInitialLoading = useSetAtom(isInitialLoadingAtom);
   const initRef = useRef(false);
 
   useEffect(() => {
@@ -56,14 +60,35 @@ function AppInitializer() {
 
     // Wait for apiUrl to be loaded from storage
     if (!apiUrl || apiUrl === "") {
+      // If no API URL, we're not loading anymore
+      setIsInitialLoading(false);
       return;
     }
 
-    // Connect to the selected connection on startup
-    connect().catch((error) => {
-      console.error("🔥 [AppInitializer] Connection failed:", error);
-    });
-  }, [connect, apiUrl]);
+    // Start the initialization process
+    const initialize = async () => {
+      // Keep loading state while we initialize
+      setIsInitialLoading(true);
+      
+      // First reset connection states to ensure we're not showing stale data
+      initializeConnections();
+      
+      // Small delay to ensure state is updated
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      // Attempt to connect
+      try {
+        await connect();
+      } catch (error) {
+        console.error("🔥 [AppInitializer] Connection failed:", error);
+      } finally {
+        // Always clear loading state after connection attempt
+        setIsInitialLoading(false);
+      }
+    };
+
+    initialize();
+  }, [connect, apiUrl, initializeConnections, setIsInitialLoading]);
 
   return null;
 }
@@ -148,6 +173,7 @@ class ErrorBoundary extends React.Component<
 export default function App() {
   const [connectionState] = useAtom(connectionStateAtom);
   const [isConnected] = useAtom(isConnectedAtom);
+  const [isInitialLoading] = useAtom(isInitialLoadingAtom);
 
   // Migrate old connections
   useMigrateConnections();
@@ -185,8 +211,17 @@ export default function App() {
         <ArtifactProvider>
           <AppInitializer />
 
-          {/* Show connection page for non-connected states */}
-          {!isConnected ? (
+          {/* Show loader during initial app loading */}
+          {isInitialLoading ? (
+            <div className="h-screen flex items-center justify-center">
+              <div className="flex flex-col items-center gap-4">
+                <Loader />
+                <p className="text-muted-foreground">
+                  Initializing...
+                </p>
+              </div>
+            </div>
+          ) : !isConnected ? (
             <>
               {connectionState === "connecting" ? (
                 <div className="h-screen flex items-center justify-center">

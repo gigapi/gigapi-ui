@@ -37,6 +37,7 @@ import {
   selectedConnectionIdAtom,
   selectedConnectionAtom,
   connectAtom,
+  switchConnectionAndResetAtom,
   type Connection,
 } from "@/atoms/connection-atoms";
 import {
@@ -107,17 +108,14 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const location = useLocation();
   const navigate = useNavigate();
   const [connections] = useAtom(connectionsAtom);
-  const [selectedConnectionId, setSelectedConnectionId] = useAtom(selectedConnectionIdAtom);
+  const [selectedConnectionId] = useAtom(selectedConnectionIdAtom);
   const [selectedConnection] = useAtom(selectedConnectionAtom);
   const connect = useSetAtom(connectAtom);
+  const switchConnectionAndReset = useSetAtom(switchConnectionAndResetAtom);
   const [showConnectionModal, setShowConnectionModal] = useState(false);
 
   const handleConnectionChange = (connectionId: string) => {
-    setSelectedConnectionId(connectionId);
-    const connection = connections.find((c) => c.id === connectionId);
-    if (connection && connection.state === "disconnected") {
-      connect({ connectionId });
-    }
+    switchConnectionAndReset(connectionId);
   };
 
   const getConnectionStatusIcon = (state: Connection["state"]) => {

@@ -18,6 +18,7 @@ import {
   databasesAtom,
   connectionsAtom,
   selectedConnectionIdAtom,
+  switchConnectionAndResetAtom,
   type Connection,
 } from "@/atoms";
 import { Input } from "@/components/ui/input";
@@ -33,9 +34,10 @@ export default function ConnectionStatus() {
   const [apiUrl] = useAtom(apiUrlAtom);
   const [databases] = useAtom(databasesAtom);
   const [connections] = useAtom(connectionsAtom);
-  const [selectedConnectionId, setSelectedConnectionId] = useAtom(selectedConnectionIdAtom);
+  const [selectedConnectionId] = useAtom(selectedConnectionIdAtom);
   const setApiUrl = useSetAtom(apiUrlAtom);
   const connect = useSetAtom(connectAtom);
+  const switchConnectionAndReset = useSetAtom(switchConnectionAndResetAtom);
   const inputRef = useRef<HTMLInputElement>(null);
   const [isRetrying, setIsRetrying] = useState(false);
   const [showConnectionModal, setShowConnectionModal] = useState(false);
@@ -76,15 +78,7 @@ export default function ConnectionStatus() {
   };
 
   const handleSwitchConnection = async (connectionId: string) => {
-    setSelectedConnectionId(connectionId);
-    const connection = connections.find(c => c.id === connectionId);
-    if (connection && connection.state === "disconnected") {
-      try {
-        await connect({ connectionId });
-      } catch (error) {
-        // Error is already handled by the connect atom
-      }
-    }
+    await switchConnectionAndReset(connectionId);
   };
 
   const getConnectionStatusIcon = (state: Connection["state"]) => {

@@ -864,6 +864,40 @@ export const addToTabQueryHistoryByIdAtom = atom(
 );
 
 // ============================================================================
+// Reset Atoms for Connection Switching
+// ============================================================================
+
+// Reset all tabs' database-related selections when switching connections
+export const resetAllTabsDatabaseSelectionsAtom = atom(null, (get, set) => {
+  const state = get(tabsStateAtom);
+  
+  // Reset database, table, and timeField for all tabs
+  const updatedTabs = state.tabs.map((tab) => ({
+    ...tab,
+    database: "",
+    table: "",
+    timeField: "",
+    // Also reset panel config to default
+    panelConfig: {
+      ...tab.panelConfig,
+      database: "",
+      table: "",
+      fieldMapping: {}, // Reset field mappings
+    },
+    userModifiedFields: {}, // Reset user modifications
+    availableFields: [], // Clear available fields
+    updatedAt: new Date().toISOString(),
+  }));
+
+  set(tabsStateAtom, { ...state, tabs: updatedTabs });
+  
+  // Also clear runtime state for all tabs
+  set(tabsRuntimeStateAtom, {});
+  
+  console.log("[Tab Reset] Cleared all tabs' database selections for connection switch");
+});
+
+// ============================================================================
 // Helper Functions for External Access
 // ============================================================================
 

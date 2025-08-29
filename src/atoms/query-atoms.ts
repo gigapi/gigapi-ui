@@ -74,6 +74,7 @@ export const executeQueryAtom = atom(null, async (get, set) => {
   const timeRange = executeTab.timeRange;
   const tableSchema = get(tableSchemaAtom);
   const apiUrl = get(apiUrlAtom);
+  const selectedConnection = get(selectedConnectionAtom);
 
   if (!query.trim()) {
     toast.error("Please enter a query");
@@ -145,12 +146,19 @@ export const executeQueryAtom = atom(null, async (get, set) => {
       set(updateTabProcessedQueryByIdAtom, { tabId: executeTabId, query: processedQuery });
     }
 
-    // Execute the processed query
+    // Execute the processed query with API key configuration
+    const { url: requestUrl, headers } = buildApiRequestConfig(
+      selectedConnection, 
+      apiUrl, 
+      { db: selectedDb, format: 'ndjson' }
+    );
+    
     const response = await axios.post(
-      `${apiUrl}?db=${selectedDb}&format=ndjson`,
+      requestUrl,
       {
         query: processedQuery,
-      }
+      },
+      { headers }
     );
 
     const result = response.data;
@@ -306,4 +314,4 @@ export const clearQueryHistoryAtom = atom(null, (_get, set) => {
 
 // Import atoms that this depends on
 import { tableSchemaAtom } from "./database-atoms";
-import { apiUrlAtom } from "./connection-atoms";
+import { apiUrlAtom, selectedConnectionAtom, buildApiRequestConfig } from "./connection-atoms";

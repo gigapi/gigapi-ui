@@ -8,7 +8,7 @@ import {
   type PanelConfig,
 } from "@/atoms/dashboard-atoms";
 import { apiUrlAtom, isConnectedAtom } from "@/atoms/connection-atoms";
-import { selectedDbAtom } from "@/atoms/database-atoms";
+import { selectedDbAtom, schemaCacheAtom } from "@/atoms/database-atoms";
 import { QueryProcessor } from "@/lib/query-processor";
 import type { TimeUnit } from "@/types";
 import parseNDJSON from "@/lib/parsers/ndjson";
@@ -55,6 +55,7 @@ export function usePanelQuery({
   const selectedDb = useAtomValue(selectedDbAtom);
   const timeZone = useAtomValue(selectedTimeZoneAtom);
   const selectedTimeField = useAtomValue(selectedTimeFieldAtom);
+  const schemaCache = useAtomValue(schemaCacheAtom);
 
   const [panelData, setPanelData] = useAtom(panelDataAtom);
   const [loadingStates, setLoadingStates] = useAtom(panelLoadingStatesAtom);
@@ -121,6 +122,19 @@ export function usePanelQuery({
       // Process query with time variables using the unified processor
       const timeColumn =
         config.fieldMapping?.timeField || config.timeField || selectedTimeField;
+      
+      // Get actual column data type from schema cache
+      let columnDataType: string | undefined;
+      if (timeColumn && config.table && schemaCache?.databases[database]?.schemas[config.table]) {
+        const tableSchema = schemaCache.databases[database].schemas[config.table];
+        const columnInfo = tableSchema.find((col: any) => 
+          col.column_name === timeColumn || col.columnName === timeColumn || col.name === timeColumn
+        );
+        if (columnInfo) {
+          columnDataType = columnInfo.column_type || columnInfo.dataType || columnInfo.type;
+        }
+      }
+
       const result = QueryProcessor.process({
         database,
         query: config.query,
@@ -128,11 +142,11 @@ export function usePanelQuery({
         timeRange: dashboard.timeRange,
         timeColumn,
         timeZone,
-        timeColumnDetails: config.fieldMapping?.timeUnit
+        timeColumnDetails: config.fieldMapping?.timeUnit || columnDataType
           ? {
-              timeUnit: config.fieldMapping.timeUnit as TimeUnit,
+              timeUnit: config.fieldMapping?.timeUnit as TimeUnit,
               columnName: timeColumn || "",
-              dataType: "BIGINT",
+              dataType: columnDataType || "BIGINT", // Use actual type or fallback to BIGINT
             }
           : null,
       });
@@ -234,10 +248,12 @@ export function usePanelQuery({
       selectedDb,
       timeZone,
       selectedTimeField,
+      schemaCache,
       setPanelData,
       setLoadingStates,
       onSuccess,
       onError,
+      cancel,
     ]
   );
 

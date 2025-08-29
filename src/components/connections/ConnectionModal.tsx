@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import  { useState } from "react";
 import { useAtom, useSetAtom } from "jotai";
 import {
   Dialog,
@@ -22,6 +22,9 @@ import {
   ServerCrash,
   RefreshCw,
   Server,
+  Shield,
+  Key,
+  Lock,
 } from "lucide-react";
 import {
   connectionsAtom,
@@ -30,9 +33,20 @@ import {
   removeConnectionAtom,
   updateConnectionAtom,
   connectAtom,
+  switchConnectionAndResetAtom,
   type Connection,
+  type AuthType,
+  type Credentials,
 } from "@/atoms/connection-atoms";
 import { Separator } from "@/components/ui/separator";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -51,28 +65,39 @@ interface ConnectionModalProps {
 
 export function ConnectionModal({ open, onOpenChange }: ConnectionModalProps) {
   const [connections] = useAtom(connectionsAtom);
-  const [selectedConnectionId, setSelectedConnectionId] = useAtom(selectedConnectionIdAtom);
+  const [selectedConnectionId] = useAtom(selectedConnectionIdAtom);
   const addConnection = useSetAtom(addConnectionAtom);
   const removeConnection = useSetAtom(removeConnectionAtom);
   const updateConnection = useSetAtom(updateConnectionAtom);
   const connect = useSetAtom(connectAtom);
+  const switchConnectionAndReset = useSetAtom(switchConnectionAndResetAtom);
 
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingConnection, setEditingConnection] = useState<{
+    name: string;
+    url: string;
+    authType: AuthType;
+    credentials?: Credentials;
+  }>({ name: "", url: "", authType: "none", credentials: undefined });
   const [newConnection, setNewConnection] = useState<{
     name: string;
     url: string;
-  }>({ name: "", url: "" });
+    authType: AuthType;
+    credentials?: Credentials;
+  }>({ name: "", url: "", authType: "none", credentials: undefined });
   const [isAdding, setIsAdding] = useState(false);
   const [testingId, setTestingId] = useState<string | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
   const handleAddConnection = () => {
     if (newConnection.name && newConnection.url) {
-      const id = addConnection({
+      addConnection({
         name: newConnection.name,
         url: newConnection.url,
+        authType: newConnection.authType,
+        credentials: newConnection.credentials,
       });
-      setNewConnection({ name: "", url: "" });
+      setNewConnection({ name: "", url: "", authType: "none", credentials: undefined });
       setIsAdding(false);
       // Don't auto-select, let user test first
     }
@@ -90,6 +115,26 @@ export function ConnectionModal({ open, onOpenChange }: ConnectionModalProps) {
   const handleUpdateConnection = (connectionId: string, updates: Partial<Connection>) => {
     updateConnection(connectionId, updates);
     setEditingId(null);
+  };
+
+  const getAuthTypeLabel = (authType: AuthType) => {
+    switch (authType) {
+      case 'none': return 'None';
+      case 'api-key': return 'API Key';
+      case 'basic-auth': return 'Basic Auth (Key + Secret)';
+      case 'api-key-secret': return 'API Key + Secret Headers';
+      default: return 'Unknown';
+    }
+  };
+
+  const getAuthIcon = (authType: AuthType) => {
+    switch (authType) {
+      case 'none': return null;
+      case 'api-key': return <Key className="h-3.5 w-3.5" />;
+      case 'basic-auth': return <Lock className="h-3.5 w-3.5" />;
+      case 'api-key-secret': return <Shield className="h-3.5 w-3.5" />;
+      default: return null;
+    }
   };
 
   const getStatusIcon = (state: Connection["state"]) => {
@@ -127,7 +172,7 @@ export function ConnectionModal({ open, onOpenChange }: ConnectionModalProps) {
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
+        <DialogContent className="max-w-4xl max-h-[80vh] overflow-hidden flex flex-col">
           <DialogHeader>
             <DialogTitle>Manage Connections</DialogTitle>
             <DialogDescription>
@@ -154,17 +199,13 @@ export function ConnectionModal({ open, onOpenChange }: ConnectionModalProps) {
                           <Label htmlFor={`name-${connection.id}`}>Name</Label>
                           <Input
                             id={`name-${connection.id}`}
-                            defaultValue={connection.name}
+                            value={editingConnection.name}
+                            onChange={(e) => 
+                              setEditingConnection({ ...editingConnection, name: e.target.value })
+                            }
                             onKeyDown={(e) => {
                               if (e.key === "Enter") {
-                                const urlInput = document.getElementById(
-                                  `url-${connection.id}`
-                                ) as HTMLInputElement;
-                                const nameInput = e.target as HTMLInputElement;
-                                handleUpdateConnection(connection.id, {
-                                  name: nameInput.value,
-                                  url: urlInput.value,
-                                });
+                                handleUpdateConnection(connection.id, editingConnection);
                               }
                             }}
                           />
@@ -173,37 +214,152 @@ export function ConnectionModal({ open, onOpenChange }: ConnectionModalProps) {
                           <Label htmlFor={`url-${connection.id}`}>URL</Label>
                           <Input
                             id={`url-${connection.id}`}
-                            defaultValue={connection.url}
+                            value={editingConnection.url}
+                            onChange={(e) => 
+                              setEditingConnection({ ...editingConnection, url: e.target.value })
+                            }
                             onKeyDown={(e) => {
                               if (e.key === "Enter") {
-                                const input = e.target as HTMLInputElement;
-                                const nameInput = document.getElementById(
-                                  `name-${connection.id}`
-                                ) as HTMLInputElement;
-                                handleUpdateConnection(connection.id, {
-                                  name: nameInput.value,
-                                  url: input.value,
-                                });
+                                handleUpdateConnection(connection.id, editingConnection);
                               }
                             }}
                           />
                         </div>
+                        <div>
+                          <Label htmlFor={`auth-type-${connection.id}`}>Authentication Type</Label>
+                          <Select
+                            value={editingConnection.authType}
+                            onValueChange={(value: AuthType) => 
+                              setEditingConnection({ 
+                                ...editingConnection, 
+                                authType: value,
+                                credentials: value === 'none' ? undefined : (editingConnection.credentials || {})
+                              })
+                            }
+                          >
+                            <SelectTrigger id={`auth-type-${connection.id}`}>
+                              <SelectValue placeholder="Select authentication type" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">None</SelectItem>
+                              <SelectItem value="api-key">API Key</SelectItem>
+                              <SelectItem value="basic-auth">Basic Auth (Key + Secret)</SelectItem>
+                              <SelectItem value="api-key-secret">API Key + Secret Headers</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        
+                        {editingConnection.authType === 'api-key' && (
+                          <>
+                            <div>
+                              <Label htmlFor={`api-key-${connection.id}`}>API Key</Label>
+                              <Input
+                                id={`api-key-${connection.id}`}
+                                type="password"
+                                placeholder="Enter your API key"
+                                value={editingConnection.credentials?.apiKey || ''}
+                                onChange={(e) => 
+                                  setEditingConnection({ 
+                                    ...editingConnection, 
+                                    credentials: { 
+                                      ...editingConnection.credentials, 
+                                      apiKey: e.target.value 
+                                    }
+                                  })
+                                }
+                              />
+                            </div>
+                            <div>
+                              <Label>Delivery Method</Label>
+                              <RadioGroup
+                                value={editingConnection.credentials?.deliveryMethod || 'header'}
+                                onValueChange={(value) => 
+                                  setEditingConnection({ 
+                                    ...editingConnection, 
+                                    credentials: { 
+                                      ...editingConnection.credentials, 
+                                      deliveryMethod: value as 'header' | 'url' 
+                                    }
+                                  })
+                                }
+                                className="flex gap-6 mt-2"
+                              >
+                                <div className="flex items-center space-x-2">
+                                  <RadioGroupItem value="header" id={`edit-header-${connection.id}`} />
+                                  <Label htmlFor={`edit-header-${connection.id}`} className="font-normal cursor-pointer">
+                                    Send as Header (X-API-Key)
+                                  </Label>
+                                </div>
+                                <div className="flex items-center space-x-2">
+                                  <RadioGroupItem value="url" id={`edit-url-param-${connection.id}`} />
+                                  <Label htmlFor={`edit-url-param-${connection.id}`} className="font-normal cursor-pointer">
+                                    Send as URL Parameter (api_key)
+                                  </Label>
+                                </div>
+                              </RadioGroup>
+                            </div>
+                          </>
+                        )}
+                        
+                        {(editingConnection.authType === 'basic-auth' || editingConnection.authType === 'api-key-secret') && (
+                          <>
+                            <div>
+                              <Label htmlFor={`api-key-${connection.id}`}>
+                                {editingConnection.authType === 'basic-auth' ? 'API Key (Username)' : 'API Key'}
+                              </Label>
+                              <Input
+                                id={`api-key-${connection.id}`}
+                                type="password"
+                                placeholder="Enter your API key"
+                                value={editingConnection.credentials?.apiKey || ''}
+                                onChange={(e) => 
+                                  setEditingConnection({ 
+                                    ...editingConnection, 
+                                    credentials: { 
+                                      ...editingConnection.credentials, 
+                                      apiKey: e.target.value 
+                                    }
+                                  })
+                                }
+                              />
+                            </div>
+                            <div>
+                              <Label htmlFor={`api-secret-${connection.id}`}>
+                                {editingConnection.authType === 'basic-auth' ? 'API Secret (Password)' : 'API Secret'}
+                              </Label>
+                              <Input
+                                id={`api-secret-${connection.id}`}
+                                type="password"
+                                placeholder="Enter your API secret"
+                                value={editingConnection.credentials?.apiSecret || ''}
+                                onChange={(e) => 
+                                  setEditingConnection({ 
+                                    ...editingConnection, 
+                                    credentials: { 
+                                      ...editingConnection.credentials, 
+                                      apiSecret: e.target.value 
+                                    }
+                                  })
+                                }
+                              />
+                            </div>
+                            {editingConnection.authType === 'basic-auth' && (
+                              <div className="text-sm text-muted-foreground">
+                                Will be sent as Basic Authentication header (base64 encoded)
+                              </div>
+                            )}
+                            {editingConnection.authType === 'api-key-secret' && (
+                              <div className="text-sm text-muted-foreground">
+                                Will be sent as X-API-Key and X-API-Secret headers
+                              </div>
+                            )}
+                          </>
+                        )}
                       </div>
                       <div className="flex gap-2">
                         <Button
                           size="sm"
-                          onClick={() => {
-                            const nameInput = document.getElementById(
-                              `name-${connection.id}`
-                            ) as HTMLInputElement;
-                            const urlInput = document.getElementById(
-                              `url-${connection.id}`
-                            ) as HTMLInputElement;
-                            handleUpdateConnection(connection.id, {
-                              name: nameInput.value,
-                              url: urlInput.value,
-                            });
-                          }}
+                          onClick={() => handleUpdateConnection(connection.id, editingConnection)}
                         >
                           Save
                         </Button>
@@ -233,6 +389,12 @@ export function ConnectionModal({ open, onOpenChange }: ConnectionModalProps) {
                           <Globe className="h-3.5 w-3.5 flex-shrink-0" />
                           <p className="font-mono truncate min-w-0">{connection.url}</p>
                         </div>
+                        {connection.authType !== 'none' && (
+                          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                            {getAuthIcon(connection.authType)}
+                            <span>{getAuthTypeLabel(connection.authType)}</span>
+                          </div>
+                        )}
                         {connection.databases.length > 0 && (
                           <div className="text-xs text-muted-foreground">
                             {connection.databases.length} database(s) available
@@ -262,10 +424,7 @@ export function ConnectionModal({ open, onOpenChange }: ConnectionModalProps) {
                             size="sm"
                             variant={connection.state === "connected" || connection.state === "empty" ? "default" : "outline"}
                             onClick={() => {
-                              setSelectedConnectionId(connection.id);
-                              if (connection.state === "disconnected") {
-                                connect({ connectionId: connection.id });
-                              }
+                              switchConnectionAndReset(connection.id);
                             }}
                             disabled={connection.state === "failed" || connection.state === "disconnected"}
                             title={connection.state === "failed" ? "Test connection first" : "Switch to this connection"}
@@ -277,7 +436,15 @@ export function ConnectionModal({ open, onOpenChange }: ConnectionModalProps) {
                         <Button
                           size="sm"
                           variant="ghost"
-                          onClick={() => setEditingId(connection.id)}
+                          onClick={() => {
+                            setEditingId(connection.id);
+                            setEditingConnection({
+                              name: connection.name,
+                              url: connection.url,
+                              authType: connection.authType || 'none',
+                              credentials: connection.credentials,
+                            });
+                          }}
                           title="Edit connection"
                         >
                           <Edit2 className="h-4 w-4" />
@@ -327,6 +494,136 @@ export function ConnectionModal({ open, onOpenChange }: ConnectionModalProps) {
                       }
                     />
                   </div>
+                  <div>
+                    <Label htmlFor="new-auth-type">Authentication Type</Label>
+                    <Select
+                      value={newConnection.authType}
+                      onValueChange={(value: AuthType) => 
+                        setNewConnection({ 
+                          ...newConnection, 
+                          authType: value,
+                          credentials: value === 'none' ? undefined : (newConnection.credentials || {})
+                        })
+                      }
+                    >
+                      <SelectTrigger id="new-auth-type">
+                        <SelectValue placeholder="Select authentication type" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">None</SelectItem>
+                        <SelectItem value="api-key">API Key</SelectItem>
+                        <SelectItem value="basic-auth">Basic Auth (Key + Secret)</SelectItem>
+                        <SelectItem value="api-key-secret">API Key + Secret Headers</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  
+                  {newConnection.authType === 'api-key' && (
+                    <>
+                      <div>
+                        <Label htmlFor="new-api-key">API Key</Label>
+                        <Input
+                          id="new-api-key"
+                          type="password"
+                          placeholder="Enter your API key"
+                          value={newConnection.credentials?.apiKey || ''}
+                          onChange={(e) =>
+                            setNewConnection({ 
+                              ...newConnection, 
+                              credentials: { 
+                                ...newConnection.credentials, 
+                                apiKey: e.target.value 
+                              }
+                            })
+                          }
+                        />
+                      </div>
+                      <div>
+                        <Label>Delivery Method</Label>
+                        <RadioGroup
+                          value={newConnection.credentials?.deliveryMethod || 'header'}
+                          onValueChange={(value) =>
+                            setNewConnection({ 
+                              ...newConnection, 
+                              credentials: { 
+                                ...newConnection.credentials, 
+                                deliveryMethod: value as 'header' | 'url' 
+                              }
+                            })
+                          }
+                          className="flex gap-6 mt-2"
+                        >
+                          <div className="flex items-center space-x-2">
+                            <RadioGroupItem value="header" id="new-header" />
+                            <Label htmlFor="new-header" className="font-normal cursor-pointer">
+                              Send as Header (X-API-Key)
+                            </Label>
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            <RadioGroupItem value="url" id="new-url-param" />
+                            <Label htmlFor="new-url-param" className="font-normal cursor-pointer">
+                              Send as URL Parameter (api_key)
+                            </Label>
+                          </div>
+                        </RadioGroup>
+                      </div>
+                    </>
+                  )}
+                  
+                  {(newConnection.authType === 'basic-auth' || newConnection.authType === 'api-key-secret') && (
+                    <>
+                      <div>
+                        <Label htmlFor="new-api-key">
+                          {newConnection.authType === 'basic-auth' ? 'API Key (Username)' : 'API Key'}
+                        </Label>
+                        <Input
+                          id="new-api-key"
+                          type="password"
+                          placeholder="Enter your API key"
+                          value={newConnection.credentials?.apiKey || ''}
+                          onChange={(e) =>
+                            setNewConnection({ 
+                              ...newConnection, 
+                              credentials: { 
+                                ...newConnection.credentials, 
+                                apiKey: e.target.value 
+                              }
+                            })
+                          }
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="new-api-secret">
+                          {newConnection.authType === 'basic-auth' ? 'API Secret (Password)' : 'API Secret'}
+                        </Label>
+                        <Input
+                          id="new-api-secret"
+                          type="password"
+                          placeholder="Enter your API secret"
+                          value={newConnection.credentials?.apiSecret || ''}
+                          onChange={(e) =>
+                            setNewConnection({ 
+                              ...newConnection, 
+                              credentials: { 
+                                ...newConnection.credentials, 
+                                apiSecret: e.target.value 
+                              }
+                            })
+                          }
+                        />
+                      </div>
+                      {newConnection.authType === 'basic-auth' && (
+                        <div className="text-sm text-muted-foreground">
+                          Will be sent as Basic Authentication header (base64 encoded)
+                        </div>
+                      )}
+                      {newConnection.authType === 'api-key-secret' && (
+                        <div className="text-sm text-muted-foreground">
+                          Will be sent as X-API-Key and X-API-Secret headers
+                        </div>
+                      )}
+                    </>
+                  )}
                 </div>
                 <div className="flex gap-2">
                   <Button
@@ -341,7 +638,7 @@ export function ConnectionModal({ open, onOpenChange }: ConnectionModalProps) {
                     variant="outline"
                     onClick={() => {
                       setIsAdding(false);
-                      setNewConnection({ name: "", url: "" });
+                      setNewConnection({ name: "", url: "", authType: "none", credentials: undefined });
                     }}
                   >
                     Cancel

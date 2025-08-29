@@ -111,6 +111,45 @@ export const cacheProgressAtom = atom<{ current: number; total: number }>({
   total: 0,
 });
 
+// Helper function to validate and filter cache against current databases
+export const validateSchemaCacheAtom = (cache: SchemaCache | null, currentDatabases: string[]): SchemaCache | null => {
+  if (!cache) return null;
+  
+  // Check age validity
+  const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
+  const isAgeValid = Date.now() - cache.timestamp < TWENTY_FOUR_HOURS;
+  if (!isAgeValid) {
+    console.log("[SchemaCache] Cache expired (older than 24 hours)");
+    return null;
+  }
+  
+  // Filter out databases that no longer exist
+  const cachedDatabases = Object.keys(cache.databases);
+  const invalidDatabases = cachedDatabases.filter(db => !currentDatabases.includes(db));
+  
+  if (invalidDatabases.length > 0) {
+    console.log(`[SchemaCache] Removing ${invalidDatabases.length} non-existent databases from cache:`, invalidDatabases);
+    
+    // Create filtered cache
+    const filteredCache: SchemaCache = {
+      ...cache,
+      databases: {},
+      timestamp: cache.timestamp,
+    };
+    
+    // Only keep databases that still exist
+    for (const db of currentDatabases) {
+      if (cache.databases[db]) {
+        filteredCache.databases[db] = cache.databases[db];
+      }
+    }
+    
+    return filteredCache;
+  }
+  
+  return cache;
+};
+
 // Synchronous cache check - directly from localStorage
 export const getLocalStorageCacheAtom = atom(() => {
   try {
@@ -132,6 +171,8 @@ import {
   availableDatabasesAtom,
   isConnectedAtom,
   apiUrlAtom,
+  selectedConnectionAtom,
+  buildApiRequestConfig,
 } from "./connection-atoms";
 
 // Actions
@@ -170,11 +211,18 @@ export const setSelectedDbAtom = atom(
       } else {
         // Fallback to API if cache miss
         const apiUrl = get(apiUrlAtom);
+        const selectedConnection = get(selectedConnectionAtom);
+        const { url: requestUrl, headers } = buildApiRequestConfig(
+          selectedConnection,
+          apiUrl,
+          { db: database, format: 'json' }
+        );
         const response = await axios.post(
-          `${apiUrl}?db=${database}&format=json`,
+          requestUrl,
           {
             query: "SHOW TABLES",
-          }
+          },
+          { headers }
         );
         tables =
           response.data.results
@@ -383,11 +431,18 @@ const loadTablesForCurrentDbAtom = atom(null, async (get, set) => {
     } else {
       // Fallback to API if cache miss
       const apiUrl = get(apiUrlAtom);
+      const selectedConnection = get(selectedConnectionAtom);
+      const { url: requestUrl, headers } = buildApiRequestConfig(
+        selectedConnection,
+        apiUrl,
+        { db: currentDb, format: 'json' }
+      );
       const response = await axios.post(
-        `${apiUrl}?db=${currentDb}&format=json`,
+        requestUrl,
         {
           query: "SHOW TABLES",
-        }
+        },
+        { headers }
       );
       tables =
         response.data.results
@@ -572,11 +627,18 @@ export const loadSchemaForDbAtom = atom(
 
     try {
       // First, get all tables for the database
+      const selectedConnection = get(selectedConnectionAtom);
+      const { url: requestUrl, headers } = buildApiRequestConfig(
+        selectedConnection,
+        apiUrl,
+        { db: database, format: 'json' }
+      );
       const tablesResponse = await axios.post(
-        `${apiUrl}?db=${database}&format=json`,
+        requestUrl,
         {
           query: "SHOW TABLES",
-        }
+        },
+        { headers }
       );
       const tables =
         tablesResponse.data.results
@@ -586,11 +648,17 @@ export const loadSchemaForDbAtom = atom(
       // Load schema for each table
       const schemaPromises = tables.map(async (table: string) => {
         try {
+          const { url: schemaUrl, headers: schemaHeaders } = buildApiRequestConfig(
+            selectedConnection,
+            apiUrl,
+            { db: database, format: 'json' }
+          );
           const schemaResponse = await axios.post(
-            `${apiUrl}?db=${database}&format=json`,
+            schemaUrl,
             {
               query: `DESCRIBE SELECT * FROM ${table} LIMIT 1`,
-            }
+            },
+            { headers: schemaHeaders }
           );
           const tableSchema = schemaResponse.data.results || [];
           return { table, schema: tableSchema };
@@ -632,7 +700,19 @@ export const initializeSchemaCacheAtom = atom(null, async (get, set) => {
   const databases = get(availableDatabasesAtom);
 
   if (!databases.length) {
+    console.log("[SchemaCache] No databases available, skipping cache initialization");
     return;
+  }
+
+  // Check if we have an existing cache and validate it first
+  const existingCache = get(schemaCacheAtom);
+  if (existingCache) {
+    const validatedCache = validateSchemaCacheAtom(existingCache, databases);
+    if (validatedCache && Object.keys(validatedCache.databases).length === databases.length) {
+      console.log("[SchemaCache] Existing cache is valid and complete, skipping initialization");
+      set(schemaCacheAtom, validatedCache);
+      return;
+    }
   }
 
   const cache: SchemaCache = {
@@ -643,6 +723,7 @@ export const initializeSchemaCacheAtom = atom(null, async (get, set) => {
 
   // Only load table lists, not schemas
   let networkCallsMade = 0;
+  let skippedDatabases = 0;
   const totalDatabases = databases.length;
   
   console.log(`[SchemaCache] Initializing cache for ${totalDatabases} databases`);
@@ -663,9 +744,16 @@ export const initializeSchemaCacheAtom = atom(null, async (get, set) => {
         console.log(`[SchemaCache] Fetching tables for ${database}...`);
         const requestStart = Date.now();
         
+        const selectedConnection = get(selectedConnectionAtom);
+        const { url: requestUrl, headers } = buildApiRequestConfig(
+          selectedConnection,
+          apiUrl,
+          { db: database, format: 'json' }
+        );
         const tablesResponse = await axios.post(
-          `${apiUrl}?db=${database}&format=json`,
-          { query: "SHOW TABLES" }
+          requestUrl,
+          { query: "SHOW TABLES" },
+          { headers }
         );
         
         networkCallsMade++;
@@ -691,7 +779,17 @@ export const initializeSchemaCacheAtom = atom(null, async (get, set) => {
           [database]: tables,
         });
       }
-    } catch (error) {
+    } catch (error: any) {
+      // Check if it's a 404/500 error indicating database doesn't exist
+      if (error?.response?.status === 404 || error?.response?.status === 500) {
+        console.warn(
+          `[SchemaCache] Database '${database}' no longer exists on backend, skipping`
+        );
+        skippedDatabases++;
+        // Don't add to cache if database doesn't exist
+        continue;
+      }
+      
       console.error(
         `[SchemaCache] Failed to load tables for ${database}:`,
         error
@@ -704,7 +802,7 @@ export const initializeSchemaCacheAtom = atom(null, async (get, set) => {
     }
   }
   
-  console.log(`[SchemaCache] Cache initialization complete: ${networkCallsMade} network calls made`);
+  console.log(`[SchemaCache] Cache initialization complete: ${networkCallsMade} network calls made, ${skippedDatabases} databases skipped`);
 
   // Save lightweight cache
   set(schemaCacheAtom, cache);
@@ -736,11 +834,18 @@ export const loadAndCacheTableSchemaAtom = atom(
     }
 
     try {
+      const selectedConnection = get(selectedConnectionAtom);
+      const { url: requestUrl, headers } = buildApiRequestConfig(
+        selectedConnection,
+        apiUrl,
+        { db: database, format: 'json' }
+      );
       const response = await axios.post(
-        `${apiUrl}?db=${database}&format=json`,
+        requestUrl,
         {
           query: `DESCRIBE SELECT * FROM ${table} LIMIT 1`,
-        }
+        },
+        { headers }
       );
 
       const schema = response.data.results || [];
@@ -886,11 +991,18 @@ export const forceReloadCurrentTableSchemaAtom = atom(
 
       // Force reload from API
       const apiUrl = get(apiUrlAtom);
+      const selectedConnection = get(selectedConnectionAtom);
+      const { url: requestUrl, headers } = buildApiRequestConfig(
+        selectedConnection,
+        apiUrl,
+        { db: database, format: 'json' }
+      );
       const response = await axios.post(
-        `${apiUrl}?db=${database}&format=json`,
+        requestUrl,
         {
           query: `DESCRIBE SELECT * FROM ${table} LIMIT 1`,
-        }
+        },
+        { headers }
       );
 
       const schema = response.data.results || [];
@@ -987,9 +1099,16 @@ export const fetchFreshDatabasesAtom = atom(
     set(freshDatabasesLoadingAtom, true);
     
     try {
+      const selectedConnection = get(selectedConnectionAtom);
+      const { url: requestUrl, headers } = buildApiRequestConfig(
+        selectedConnection,
+        apiUrl,
+        { format: 'json' }
+      );
       const response = await axios.post(
-        `${apiUrl}?format=json`,
-        { query: "SHOW DATABASES" }
+        requestUrl,
+        { query: "SHOW DATABASES" },
+        { headers }
       );
       
       const databases = response.data.results
@@ -1025,9 +1144,16 @@ export const fetchFreshTablesAtom = atom(
     set(freshTablesLoadingAtom, true);
     
     try {
+      const selectedConnection = get(selectedConnectionAtom);
+      const { url: requestUrl, headers } = buildApiRequestConfig(
+        selectedConnection,
+        apiUrl,
+        { db: database, format: 'json' }
+      );
       const response = await axios.post(
-        `${apiUrl}?db=${database}&format=json`,
-        { query: "SHOW TABLES" }
+        requestUrl,
+        { query: "SHOW TABLES" },
+        { headers }
       );
       
       const tables = response.data.results
@@ -1076,9 +1202,16 @@ export const fetchFreshSchemaAtom = atom(
     set(freshSchemaLoadingAtom, true);
     
     try {
+      const selectedConnection = get(selectedConnectionAtom);
+      const { url: requestUrl, headers } = buildApiRequestConfig(
+        selectedConnection,
+        apiUrl,
+        { db: database, format: 'json' }
+      );
       const response = await axios.post(
-        `${apiUrl}?db=${database}&format=json`,
-        { query: `DESCRIBE SELECT * FROM ${table} LIMIT 1` }
+        requestUrl,
+        { query: `DESCRIBE SELECT * FROM ${table} LIMIT 1` },
+        { headers }
       );
       
       const schema = response.data.results || [];
@@ -1146,3 +1279,32 @@ export const freshTablesLoadedForAtom = atom<Set<string>>(new Set<string>());
 
 // Track which schemas have been loaded (key: "database.table")
 export const freshSchemasLoadedForAtom = atom<Set<string>>(new Set<string>());
+
+// ============================================================================
+// Reset Atom for Connection Switching
+// ============================================================================
+
+// Reset all database-related state when switching connections
+export const resetDatabaseStateAtom = atom(null, (_get, set) => {
+  // Clear table-related state
+  set(availableTablesAtom, []);
+  set(tableSchemaAtom, []);
+  set(autoCompleteSchemaAtom, {});
+  
+  // Clear fresh data tracking
+  set(freshDatabasesLoadedAtom, false);
+  set(freshTablesLoadedForAtom, new Set<string>());
+  set(freshSchemasLoadedForAtom, new Set<string>());
+  set(freshDatabasesAtom, []);
+  set(freshTablesAtom, {});
+  set(freshSchemaAtom, {});
+  
+  // Clear loading states
+  set(tablesLoadingAtom, false);
+  set(schemaLoadingAtom, false);
+  set(freshDatabasesLoadingAtom, false);
+  set(freshTablesLoadingAtom, false);
+  set(freshSchemaLoadingAtom, false);
+  
+  console.log("[Database Reset] Cleared all database state for connection switch");
+});
