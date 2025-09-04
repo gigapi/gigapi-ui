@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import "@/loader.css";
+import "@/styles/loader.css";
 
 const Loader = ({ className, ...props }: { className?: string }) => {
   const pathRef = useRef<SVGPathElement>(null);

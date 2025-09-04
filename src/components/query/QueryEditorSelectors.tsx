@@ -1,7 +1,7 @@
 import { useCallback } from "react";
 import { useAtom } from "jotai";
 import { UnifiedSchemaSelector } from "@/components/shared/UnifiedSchemaSelector";
-import TimeRangeSelector from "@/components/TimeRangeSelector";
+import TimeRangeSelector from "@/components/shared/TimeRangeSelector";
 import { 
   schemaLoadingAtom,
   currentTabDatabaseAtom,

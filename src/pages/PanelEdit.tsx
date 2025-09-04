@@ -22,7 +22,7 @@ import {
   EnhancedPanel,
   PanelDataProvider,
 } from "@/components/dashboard/PanelDataProvider";
-import TimeRangeSelector from "@/components/TimeRangeSelector";
+import TimeRangeSelector from "@/components/shared/TimeRangeSelector";
 import { PanelConfigurationForm } from "@/components/dashboard/PanelConfigurationForm";
 import { UnifiedSchemaSelector } from "@/components/shared/UnifiedSchemaSelector";
 import { type PanelConfig } from "@/types/dashboard.types";

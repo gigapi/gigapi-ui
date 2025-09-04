@@ -5,7 +5,7 @@ import {
   Route,
   useParams,
 } from "react-router-dom";
-import { ThemeProvider } from "@/components/theme-provider";
+import { ThemeProvider } from "@/components/shared/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
 import { useAtom, useSetAtom } from "jotai";
 import "@/components/ui/toast-fixes.css";

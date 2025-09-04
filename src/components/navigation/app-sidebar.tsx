@@ -8,7 +8,6 @@ import {
   ExternalLink,
   MessageSquareHeart,
   Github,
-  Globe,
   Settings,
   CheckCircle,
   AlertCircle,
@@ -28,8 +27,8 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
 import { Separator } from "@/components/ui/separator";
-import QueryHistory from "@/components/QueryHistory";
-import { ModeToggle } from "@/components/mode-toggle";
+import QueryHistory from "@/components/query/QueryHistory";
+import { ModeToggle } from "@/components/shared/mode-toggle";
 import Logo from "@/assets/logo.svg";
 import { useAtom, useSetAtom } from "jotai";
 import {

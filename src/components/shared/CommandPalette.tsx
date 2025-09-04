@@ -20,7 +20,7 @@ import {
   Bot,
   Settings,
 } from "lucide-react";
-import { useTheme } from "@/components/theme-provider";
+import { useTheme } from "@/components/shared/theme-provider";
 
 interface Command {
   id: string;

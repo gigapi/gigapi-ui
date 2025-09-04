@@ -26,7 +26,6 @@ import {
   openCommandPaletteAtom,
 } from "@/atoms";
 import { UnifiedSchemaSelector } from "@/components/shared/UnifiedSchemaSelector";
-import { toast } from "sonner";
 
 import {
   Popover,

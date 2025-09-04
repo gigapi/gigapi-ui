@@ -2,7 +2,7 @@ import { useRef, useEffect, useState, useCallback, useMemo } from "react";
 import Editor, { useMonaco } from "@monaco-editor/react";
 import { Skeleton } from "@/components/ui/skeleton";
 import Loader from "@/components/shared/Loader";
-import { useTheme } from "@/components/theme-provider";
+import { useTheme } from "@/components/shared/theme-provider";
 import type { SchemaInfo } from "@/types";
 import {
   analyzeQueryContext,

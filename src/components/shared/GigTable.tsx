@@ -14,20 +14,30 @@ import {
 } from "@tanstack/react-table";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { formatBytes, formatDuration } from "@/lib/";
-import { Download, Search, X, Clock, SlidersHorizontal } from "lucide-react";
+import {
+  Download,
+  Search,
+  X,
+  Clock,
+  SlidersHorizontal,
+  Grid3X3,
+  Copy,
+  MousePointer,
+  MoreHorizontal,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent } from "@/components/ui/card";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { toast } from "sonner";
 
 // Define a generic type for the data row
 type DataRow = Record<string, any>;
+
+// Types for cell selection
+type CellPosition = { row: number; col: string };
+type ContextMenuPosition = { x: number; y: number };
 
 // Type for the component props
 interface GigTableProps {
@@ -50,6 +60,45 @@ const globalFilterFn: FilterFn<DataRow> = (row, columnId, value) => {
 const DEFAULT_COLUMN_WIDTH = 150;
 const MIN_COLUMN_WIDTH = 50;
 const MAX_COLUMN_WIDTH = 1000; // Generous max for "free" resizing
+const DEFAULT_MAX_AUTO_WIDTH = 250;
+const DEFAULT_MIN_AUTO_WIDTH = 80;
+const DEFAULT_SAMPLE_SIZE = 100;
+
+// Calculate optimal column width based on content
+const calculateOptimalWidth = (
+  data: DataRow[],
+  columnKey: string,
+  minWidth: number = DEFAULT_MIN_AUTO_WIDTH,
+  maxWidth: number = DEFAULT_MAX_AUTO_WIDTH,
+  sampleSize: number = DEFAULT_SAMPLE_SIZE
+): number => {
+  if (!data.length) return DEFAULT_COLUMN_WIDTH;
+
+  // Sample data for performance
+  const sample = data.slice(0, Math.min(sampleSize, data.length));
+
+  // Calculate based on content length
+  let maxLength = columnKey.length; // Start with header length
+
+  sample.forEach((row) => {
+    const value = row[columnKey];
+    const strValue =
+      value === null || value === undefined
+        ? "null"
+        : typeof value === "object"
+        ? JSON.stringify(value)
+        : String(value);
+    maxLength = Math.max(maxLength, strValue.length);
+  });
+
+  // Rough estimation: 8px per character + padding
+  const estimatedWidth = Math.max(
+    minWidth,
+    Math.min(maxWidth, maxLength * 8 + 20)
+  );
+
+  return estimatedWidth;
+};
 
 const GigTable: React.FC<GigTableProps> = ({
   data,
@@ -80,6 +129,25 @@ const GigTable: React.FC<GigTableProps> = ({
   >({});
   const [columnSelectorFilter, setColumnSelectorFilter] = useState("");
   // const [sorting, setSorting] = useState<SortingState>([]); // REMOVED
+
+  // New spreadsheet features
+  const [showRowNumbers, setShowRowNumbers] = useState(false);
+  const [zebraStripes, setZebraStripes] = useState(true);
+  const [showGridLines, setShowGridLines] = useState(false);
+  const [showSpreadsheetOptions, setShowSpreadsheetOptions] = useState(false);
+
+  // Cell selection state
+  const [selectedCells, setSelectedCells] = useState<Set<string>>(new Set());
+  const [lastSelectedCell, setLastSelectedCell] = useState<CellPosition | null>(
+    null
+  );
+  const [contextMenu, setContextMenu] = useState<ContextMenuPosition | null>(
+    null
+  );
+  // Drag selection state
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStart, setDragStart] = useState<CellPosition | null>(null);
+  const [dragEnd, setDragEnd] = useState<CellPosition | null>(null);
 
   const columnResizeMode = "onChange" as ColumnResizeMode;
 
@@ -139,8 +207,36 @@ const GigTable: React.FC<GigTableProps> = ({
   const columns = useMemo<ColumnDef<DataRow>[]>(() => {
     if (!data || !data.length || !data[0]) return [];
     const keys = Object.keys(data[0]);
+    const cols: ColumnDef<DataRow>[] = [];
 
-    return keys
+    // Add row numbers column if enabled
+    if (showRowNumbers) {
+      cols.push({
+        id: "__row_number__",
+        accessorFn: (_, index) => index + 1,
+        minSize: 50,
+        maxSize: 70,
+        size: 60,
+        header: () => (
+          <div
+            className="h-7 text-xs w-full flex items-center justify-center text-muted-foreground font-medium bg-muted cursor-pointer hover:brightness-95"
+            title="Click to select all"
+          >
+            #
+          </div>
+        ),
+        cell: ({ row }) => (
+          <div className="text-xs text-center text-muted-foreground font-mono bg-muted cursor-pointer hover:brightness-95">
+            {row.index + 1}
+          </div>
+        ),
+        enableColumnFilter: false,
+        enableSorting: false,
+        enableResizing: false,
+      });
+    }
+
+    const dataCols = keys
       .map((key): ColumnDef<DataRow> => {
         return {
           accessorKey: key,
@@ -185,35 +281,14 @@ const GigTable: React.FC<GigTableProps> = ({
             }
 
             return (
-              <Tooltip delayDuration={300}>
-                <TooltipTrigger asChild>
-                  <div 
-                    className={`p-1 px-2 align-middle text-xs overflow-hidden whitespace-nowrap ${
-                      typeof value === "object" ? "font-mono text-blue-500" : ""
-                    }`}
-                    data-copy-text={titleAttribute}
-                    onCopy={(e) => {
-                      // Ensure proper string is copied instead of "[object Object]"
-                      const selection = window.getSelection();
-                      if (selection && selection.toString()) {
-                        e.preventDefault();
-                        e.clipboardData?.setData('text/plain', titleAttribute);
-                      }
-                    }}
-                    // Add plain text for reliable copying
-                    suppressContentEditableWarning={true}
-                  >
-                    {displayValue}
-                  </div>
-                </TooltipTrigger>
-                <TooltipContent
-                  side="top"
-                  align="start"
-                  className="max-w-md break-all bg-popover text-popover-foreground p-2 rounded-md shadow-md border text-xs"
-                >
-                  <p>{titleAttribute}</p>
-                </TooltipContent>
-              </Tooltip>
+              <div
+                className={`p-1 px-2 align-middle text-xs overflow-hidden whitespace-nowrap select-text ${
+                  typeof value === "object" ? "font-mono text-blue-500" : ""
+                }`}
+                title={titleAttribute}
+              >
+                {displayValue}
+              </div>
             );
           },
           enableColumnFilter: false,
@@ -226,7 +301,9 @@ const GigTable: React.FC<GigTableProps> = ({
           accessorKey === undefined || enabledColumns[accessorKey] !== false
         );
       });
-  }, [data, enabledColumns, columnRenderers]);
+
+    return [...cols, ...dataCols];
+  }, [data, enabledColumns, columnRenderers, showRowNumbers]);
 
   const handleColumnSizeChange = (
     updater: React.SetStateAction<ColumnSizingState>
@@ -265,6 +342,161 @@ const GigTable: React.FC<GigTableProps> = ({
 
   const { rows } = table.getRowModel();
   const ROW_HEIGHT = 32; // Must match CSS and cell content height
+
+  // Helper function to create selection range between two points
+  const createSelectionRange = (
+    start: CellPosition,
+    end: CellPosition
+  ): Set<string> => {
+    const selection = new Set<string>();
+    if (!data || !data[0]) return selection;
+
+    const columns = Object.keys(data[0]);
+    const minRow = Math.min(start.row, end.row);
+    const maxRow = Math.max(start.row, end.row);
+    const startColIndex = columns.indexOf(start.col);
+    const endColIndex = columns.indexOf(end.col);
+    const minColIndex = Math.min(startColIndex, endColIndex);
+    const maxColIndex = Math.max(startColIndex, endColIndex);
+
+    for (let row = minRow; row <= maxRow && row < data.length; row++) {
+      for (
+        let colIdx = minColIndex;
+        colIdx <= maxColIndex && colIdx < columns.length;
+        colIdx++
+      ) {
+        const col = columns[colIdx];
+        if (col !== "__row_number__") {
+          selection.add(`${row}::${col}`);
+        }
+      }
+    }
+
+    return selection;
+  };
+
+  // Keyboard handlers
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ctrl/Cmd + C to copy selected cells
+      if ((e.ctrlKey || e.metaKey) && e.key === "c" && selectedCells.size > 0) {
+        e.preventDefault();
+
+        // Get selected cells data organized by row and column
+        const cellsByPosition = new Map<string, any>();
+        const rowIndices = new Set<number>();
+        const columnIds = new Set<string>();
+
+        selectedCells.forEach((cellKey) => {
+          const [rowStr, colId] = cellKey.split("::");
+          const rowIndex = parseInt(rowStr);
+          rowIndices.add(rowIndex);
+          columnIds.add(colId);
+
+          const row = rows[rowIndex];
+          if (row) {
+            const cell = row.getAllCells().find((c) => c.column.id === colId);
+            if (cell) {
+              cellsByPosition.set(cellKey, cell.getValue());
+            }
+          }
+        });
+
+        // Sort rows and columns
+        const sortedRows = Array.from(rowIndices).sort((a, b) => a - b);
+        const sortedCols = Array.from(columnIds);
+
+        // Build TSV string for Excel/Sheets compatibility
+        const tsvRows: string[] = [];
+        sortedRows.forEach((rowIndex) => {
+          const rowValues: string[] = [];
+          sortedCols.forEach((colId) => {
+            const cellKey = `${rowIndex}::${colId}`;
+            const value = cellsByPosition.get(cellKey);
+            if (value !== undefined) {
+              const strValue =
+                value === null
+                  ? ""
+                  : typeof value === "object"
+                  ? JSON.stringify(value)
+                  : String(value);
+              rowValues.push(strValue);
+            } else if (selectedCells.has(cellKey)) {
+              rowValues.push("");
+            }
+          });
+          if (rowValues.length > 0) {
+            tsvRows.push(rowValues.join("\t"));
+          }
+        });
+
+        const tsvContent = tsvRows.join("\n");
+        navigator.clipboard.writeText(tsvContent).then(() => {
+          toast.success(`Copied ${selectedCells.size} cells to clipboard`);
+
+          // Visual feedback - flash selected cells
+          const tempCells = new Set(selectedCells);
+          setSelectedCells(new Set());
+          setTimeout(() => setSelectedCells(tempCells), 100);
+        });
+      }
+
+      // Ctrl/Cmd + A to select all
+      if ((e.ctrlKey || e.metaKey) && e.key === "a") {
+        e.preventDefault();
+        const allCells = new Set<string>();
+        rows.forEach((row, rowIndex) => {
+          row.getVisibleCells().forEach((cell) => {
+            if (cell.column.id !== "__row_number__") {
+              allCells.add(`${rowIndex}::${cell.column.id}`);
+            }
+          });
+        });
+        setSelectedCells(allCells);
+      }
+
+      // Escape to clear selection
+      if (e.key === "Escape") {
+        setSelectedCells(new Set());
+        setContextMenu(null);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [selectedCells, rows]);
+
+  // Handle mouse up globally for drag selection
+  useEffect(() => {
+    const handleMouseUp = () => {
+      if (isDragging) {
+        setIsDragging(false);
+        if (dragEnd) {
+          setLastSelectedCell(dragEnd);
+        }
+      }
+    };
+
+    if (isDragging) {
+      document.addEventListener("mouseup", handleMouseUp);
+      return () => document.removeEventListener("mouseup", handleMouseUp);
+    }
+  }, [isDragging, dragEnd, setLastSelectedCell]);
+
+  // Auto-size columns when data changes
+  useEffect(() => {
+    if (data && data.length > 0 && data[0]) {
+      const newSizing: ColumnSizingState = {};
+      const keys = Object.keys(data[0]);
+
+      keys.forEach((key) => {
+        newSizing[key] = calculateOptimalWidth(data, key);
+      });
+
+      setColumnSizing(newSizing);
+      setUserResizedColumns(newSizing);
+    }
+  }, [data]); // Trigger when data changes
 
   const rowVirtualizer = useVirtualizer({
     count: rows.length,
@@ -438,6 +670,156 @@ const GigTable: React.FC<GigTableProps> = ({
     );
   };
 
+  const SpreadsheetOptions = () => {
+    return (
+      <Card className="absolute right-0 top-12 z-20 w-[300px] bg-background shadow-lg rounded-md border p-2">
+        <CardContent className="p-2">
+          <div className="flex justify-between items-center mb-3">
+            <h3 className="text-sm font-semibold">Spreadsheet Options</h3>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 w-7 p-0"
+              onClick={() => setShowSpreadsheetOptions(false)}
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+          <div className="space-y-3">
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id="show-row-numbers"
+                checked={showRowNumbers}
+                onCheckedChange={(checked) => setShowRowNumbers(checked === true)}
+              />
+              <label
+                htmlFor="show-row-numbers"
+                className="text-xs cursor-pointer"
+              >
+                Show row numbers
+              </label>
+            </div>
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id="zebra-stripes"
+                checked={zebraStripes}
+                onCheckedChange={(checked) => setZebraStripes(checked === true)}
+              />
+              <label htmlFor="zebra-stripes" className="text-xs cursor-pointer">
+                Zebra stripes
+              </label>
+            </div>
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id="show-grid-lines"
+                checked={showGridLines}
+                onCheckedChange={(checked) => setShowGridLines(checked === true)}
+              />
+              <label
+                htmlFor="show-grid-lines"
+                className="text-xs cursor-pointer"
+              >
+                Show grid lines
+              </label>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  };
+
+  const ContextMenu = () => {
+    if (!contextMenu) return null;
+
+    return (
+      <div
+        className="fixed z-50 bg-background border border-border rounded-md shadow-lg py-1 min-w-[160px]"
+        style={{ left: contextMenu.x, top: contextMenu.y }}
+        onMouseLeave={() => setContextMenu(null)}
+      >
+        <button
+          className="w-full text-left px-3 py-1.5 text-xs hover:bg-accent hover:text-accent-foreground flex items-center gap-2"
+          onClick={() => {
+            // Trigger copy
+            const e = new KeyboardEvent("keydown", { key: "c", ctrlKey: true });
+            window.dispatchEvent(e);
+            setContextMenu(null);
+          }}
+        >
+          <Copy className="h-3 w-3" />
+          Copy
+        </button>
+        <button
+          className="w-full text-left px-3 py-1.5 text-xs hover:bg-accent hover:text-accent-foreground flex items-center gap-2"
+          onClick={() => {
+            // Select all
+            const e = new KeyboardEvent("keydown", { key: "a", ctrlKey: true });
+            window.dispatchEvent(e);
+            setContextMenu(null);
+          }}
+        >
+          <MousePointer className="h-3 w-3" />
+          Select All
+        </button>
+        <button
+          className="w-full text-left px-3 py-1.5 text-xs hover:bg-accent hover:text-accent-foreground flex items-center gap-2"
+          onClick={() => {
+            // Select row
+            if (selectedCells.size > 0) {
+              const firstCell = Array.from(selectedCells)[0];
+              const rowIndex = parseInt(firstCell.split("::")[0]);
+              if (data[0]) {
+                const rowCells = new Set<string>();
+                Object.keys(data[0]).forEach((key) => {
+                  if (key !== "__row_number__") {
+                    rowCells.add(`${rowIndex}::${key}`);
+                  }
+                });
+                setSelectedCells(rowCells);
+              }
+            }
+            setContextMenu(null);
+          }}
+        >
+          <MoreHorizontal className="h-3 w-3" />
+          Select Row
+        </button>
+        <button
+          className="w-full text-left px-3 py-1.5 text-xs hover:bg-accent hover:text-accent-foreground flex items-center gap-2"
+          onClick={() => {
+            // Select column
+            if (selectedCells.size > 0) {
+              const firstCell = Array.from(selectedCells)[0];
+              const colId = firstCell.split("::")[1];
+              if (colId) {
+                const colCells = new Set<string>();
+                for (let i = 0; i < data.length; i++) {
+                  colCells.add(`${i}::${colId}`);
+                }
+                setSelectedCells(colCells);
+              }
+            }
+            setContextMenu(null);
+          }}
+        >
+          <MoreHorizontal className="h-3 w-3 rotate-90" />
+          Select Column
+        </button>
+        <hr className="my-1 border-border" />
+        <button
+          className="w-full text-left px-3 py-1.5 text-xs hover:bg-accent hover:text-accent-foreground flex items-center gap-2"
+          onClick={() => {
+            exportToCSV();
+            setContextMenu(null);
+          }}
+        >
+          <Download className="h-3 w-3" />
+          Export CSV
+        </button>
+      </div>
+    );
+  };
+
   if (!data || data.length === 0) {
     return (
       <div className="flex justify-center items-center h-32 text-muted-foreground">
@@ -512,6 +894,21 @@ const GigTable: React.FC<GigTableProps> = ({
               </Button>
               {showColumnSelector && <ColumnSelector />}
             </div>
+            <div className="relative">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() =>
+                  setShowSpreadsheetOptions(!showSpreadsheetOptions)
+                }
+                className="h-8 text-xs"
+                title="Spreadsheet display options"
+              >
+                <Grid3X3 className="h-3.5 w-3.5 mr-1" />
+                View
+              </Button>
+              {showSpreadsheetOptions && <SpreadsheetOptions />}
+            </div>
             {Object.keys(userResizedColumns).length > 0 && (
               <Button
                 variant="ghost"
@@ -534,11 +931,32 @@ const GigTable: React.FC<GigTableProps> = ({
               <Download className="mr-1 h-3.5 w-3.5" />
               Export CSV
             </Button>
+            
+            {/* Selection indicator */}
+            {selectedCells.size > 0 && (
+              <div className="flex items-center gap-2 ml-4 px-3 py-1 bg-primary/10 rounded-md border">
+                <span className="text-xs text-muted-foreground">
+                  {selectedCells.size} cell{selectedCells.size !== 1 ? "s" : ""} selected
+                </span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setSelectedCells(new Set())}
+                  className="h-6 px-2 text-xs hover:bg-primary/20"
+                >
+                  Clear
+                </Button>
+              </div>
+            )}
           </div>
         </div>
 
         {/* Main table area */}
-        <div className="flex-1 border rounded-md bg-card relative overflow-hidden">
+        <div
+          className={`flex-1 rounded-md bg-card relative overflow-hidden ${
+            showGridLines ? "border-2" : "border"
+          } border-border`}
+        >
           <div
             ref={horizontalScrollRef}
             className="h-full w-full overflow-auto"
@@ -550,8 +968,16 @@ const GigTable: React.FC<GigTableProps> = ({
             }}
           >
             <div style={{ width: table.getTotalSize(), position: "relative" }}>
-              <table className="w-full border-collapse table-fixed">
-                <thead className="sticky top-0 z-10 bg-muted/70 backdrop-blur-sm shadow-sm">
+              <table
+                className={`w-full border-collapse table-fixed ${
+                  showGridLines ? "border-spacing-0" : ""
+                }`}
+              >
+                <thead
+                  className={`sticky top-0 z-10 bg-muted/70 backdrop-blur-sm ${
+                    showGridLines ? "border-b-2 border-border" : "shadow-sm"
+                  }`}
+                >
                   {table.getHeaderGroups().map((headerGroup) => (
                     <tr
                       key={headerGroup.id}
@@ -560,7 +986,9 @@ const GigTable: React.FC<GigTableProps> = ({
                       {headerGroup.headers.map((header) => (
                         <th
                           key={header.id}
-                          className="h-9 px-0 text-left align-middle font-medium text-muted-foreground whitespace-nowrap text-xs relative select-none"
+                          className={`h-9 px-0 text-left align-middle font-medium text-muted-foreground whitespace-nowrap text-xs relative select-none ${
+                            showGridLines ? "border-r border-border/50" : ""
+                          }`}
                           style={{
                             width: header.getSize(),
                             minWidth: header.column.columnDef.minSize, // From columnDef
@@ -598,7 +1026,10 @@ const GigTable: React.FC<GigTableProps> = ({
                     </tr>
                   ))}
                 </thead>
-                <tbody className="bg-card text-card-foreground relative">
+                <tbody
+                  className="bg-card text-card-foreground relative"
+                  style={{ userSelect: isDragging ? "none" : "auto" }}
+                >
                   {paddingTop > 0 && (
                     <tr style={{ height: `${paddingTop}px` }}>
                       <td colSpan={table.getVisibleLeafColumns().length} />
@@ -611,27 +1042,118 @@ const GigTable: React.FC<GigTableProps> = ({
                       <tr
                         key={virtualRow.key}
                         data-index={virtualRow.index}
-                        className={`transition-colors hover:bg-muted/30 ${
-                          row.getIsSelected() ? "bg-muted" : ""
-                        }`}
+                        className={`transition-colors ${
+                          zebraStripes && virtualRow.index % 2 === 0
+                            ? "hover:bg-muted/40" // Stronger hover for zebra striped rows
+                            : "hover:bg-muted/20" // Subtle hover for regular rows
+                        } ${row.getIsSelected() ? "bg-muted" : ""} ${
+                          zebraStripes && virtualRow.index % 2 === 0
+                            ? "bg-muted/20"
+                            : "bg-background"
+                        } ${showGridLines ? "border-b border-border/30" : ""}`}
                         style={{ height: `${ROW_HEIGHT}px` }} // Use fixed ROW_HEIGHT
                       >
-                        {row.getVisibleCells().map((cell) => (
-                          <td
-                            key={cell.id}
-                            className="align-middle overflow-hidden"
-                            style={{
-                              width: cell.column.getSize(),
-                              minWidth: cell.column.columnDef.minSize,
-                              maxWidth: cell.column.columnDef.maxSize,
-                            }}
-                          >
-                            {flexRender(
-                              cell.column.columnDef.cell,
-                              cell.getContext()
-                            )}
-                          </td>
-                        ))}
+                        {row.getVisibleCells().map((cell) => {
+                          const cellKey = `${virtualRow.index}::${cell.column.id}`;
+                          const isSelected = selectedCells.has(cellKey);
+
+                          return (
+                            <td
+                              key={cell.id}
+                              className={`align-middle overflow-hidden relative ${
+                                showGridLines ? "border-r border-border/30" : ""
+                              } ${
+                                isSelected
+                                  ? "bg-primary/20 ring-1 ring-primary/30"
+                                  : ""
+                              } ${
+                                isDragging ? "cursor-crosshair" : "cursor-cell"
+                              }`}
+                              style={{
+                                width: cell.column.getSize(),
+                                minWidth: cell.column.columnDef.minSize,
+                                maxWidth: cell.column.columnDef.maxSize,
+                              }}
+                              onMouseDown={(e) => {
+                                if (
+                                  cell.column.id !== "__row_number__" &&
+                                  e.button === 0
+                                ) {
+                                  e.preventDefault();
+                                  const currentPosition = {
+                                    row: virtualRow.index,
+                                    col: cell.column.id,
+                                  };
+
+                                  if (e.shiftKey && lastSelectedCell) {
+                                    // Shift+click: select rectangular range using helper function
+                                    const rangeSelection = createSelectionRange(
+                                      lastSelectedCell,
+                                      currentPosition
+                                    );
+                                    setSelectedCells(rangeSelection);
+                                  } else if (e.ctrlKey || e.metaKey) {
+                                    // Ctrl/Cmd+click: toggle cell in selection
+                                    const newSelection = new Set(selectedCells);
+                                    if (newSelection.has(cellKey)) {
+                                      newSelection.delete(cellKey);
+                                    } else {
+                                      newSelection.add(cellKey);
+                                    }
+                                    setSelectedCells(newSelection);
+                                    setLastSelectedCell(currentPosition);
+                                  } else {
+                                    // Regular click: select only this cell and start drag
+                                    setSelectedCells(new Set([cellKey]));
+                                    setLastSelectedCell(currentPosition);
+
+                                    // Start drag selection
+                                    setIsDragging(true);
+                                    setDragStart(currentPosition);
+                                    setDragEnd(currentPosition);
+                                  }
+                                }
+                              }}
+                              onMouseEnter={() => {
+                                if (
+                                  isDragging &&
+                                  dragStart &&
+                                  cell.column.id !== "__row_number__"
+                                ) {
+                                  const currentPosition = {
+                                    row: virtualRow.index,
+                                    col: cell.column.id,
+                                  };
+                                  setDragEnd(currentPosition);
+
+                                  // Update selection during drag
+                                  const dragSelection = createSelectionRange(
+                                    dragStart,
+                                    currentPosition
+                                  );
+                                  setSelectedCells(dragSelection);
+                                }
+                              }}
+                              onContextMenu={(e) => {
+                                if (cell.column.id !== "__row_number__") {
+                                  e.preventDefault();
+                                  setContextMenu({
+                                    x: e.clientX,
+                                    y: e.clientY,
+                                  });
+                                  if (!selectedCells.has(cellKey)) {
+                                    setSelectedCells(new Set([cellKey]));
+                                  }
+                                }
+                              }}
+                            >
+                              {flexRender(
+                                cell.column.columnDef.cell,
+                                cell.getContext()
+                              )}
+                            </td>
+                          );
+                        })}
                       </tr>
                     );
                   })}
@@ -721,6 +1243,10 @@ const GigTable: React.FC<GigTableProps> = ({
             </select>
           </div>
         </div>
+
+        {/* Context Menu */}
+        <ContextMenu />
+
         {/* Mobile stats */}
         <div className="md:hidden flex items-center justify-between text-xs text-muted-foreground py-2 border-t border-border/30 mt-2 flex-shrink-0">
           <span>

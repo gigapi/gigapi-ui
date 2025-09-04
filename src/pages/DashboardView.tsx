@@ -49,7 +49,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
 import { DashboardSettingsSheet } from "@/components/dashboard/DashboardSettingsSheet";
-import TimeRangeSelector from "@/components/TimeRangeSelector";
+import TimeRangeSelector from "@/components/shared/TimeRangeSelector";
 import { DashboardErrorBoundary } from "@/components/dashboard/DashboardErrorBoundary";
 import { Badge } from "@/components/ui/badge";
 import {
