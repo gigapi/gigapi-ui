@@ -551,13 +551,19 @@ export class QueryProcessor {
     const lowerName = columnName.toLowerCase();
     const lowerType = dataType.toLowerCase();
 
-    // Handle explicit timestamp types (DuckDB, PostgreSQL, etc.)
-    // These are NOT epoch values - they're ISO string timestamps
+    // For DuckDB TIMESTAMP types, return the precision for UI display
+    // The shouldUseEpochFormat function will handle using ISO format for these
     if (lowerType.includes("timestamp_ns")) {
-      return "ms"; // Return ms but shouldUseEpochFormat will handle it correctly
+      return "ns"; // Nanosecond precision
+    }
+    if (lowerType.includes("timestamp_s")) {
+      return "s"; // Second precision
+    }
+    if (lowerType.includes("timestamp_ms")) {
+      return "ms"; // Millisecond precision
     }
     if (lowerType.includes("timestamp") || lowerType.includes("datetime")) {
-      return "ms"; // Return ms but shouldUseEpochFormat will handle it correctly
+      return "ms"; // Default millisecond precision for generic timestamps
     }
 
     // For BIGINT columns that look like time fields
@@ -607,7 +613,16 @@ export class QueryProcessor {
     const lowerName = columnName.toLowerCase();
     const lowerType = dataType?.toLowerCase() || "";
 
+    // IMPORTANT: DuckDB TIMESTAMP types are ISO string timestamps, NOT epoch values
+    // Don't return a time unit for database timestamp types - they don't use epoch format
+    if (lowerType.includes("timestamp") || lowerType.includes("datetime")) {
+      // Return a default value since this function must return a TimeUnit
+      // But shouldUseEpochFormat will check the dataType and use ISO format
+      return "ms";
+    }
+
     // 1. Check for explicit time unit suffixes in column name (highest priority)
+    // These are for epoch value columns (BIGINT, INT64, etc.)
     if (lowerName.includes("_ns")) {
       return "ns";
     } else if (lowerName.includes("_us") || lowerName.includes("_μs")) {
@@ -616,18 +631,6 @@ export class QueryProcessor {
       return "ms";
     } else if (lowerName.includes("_s") && !lowerName.includes("_ms")) {
       return "s";
-    }
-
-    // 2. Analyze data type for precision hints - HIGHEST PRIORITY for DuckDB
-    if (lowerType.includes("timestamp_ns")) {
-      // DuckDB TIMESTAMP_NS - string format with nanosecond precision
-      // Return ms as a default, but shouldUseEpochFormat will handle it correctly
-      return "ms";
-    }
-    if (lowerType.includes("timestamp") || lowerType.includes("datetime")) {
-      // Database native timestamp types - string format
-      // Return ms as a default, but shouldUseEpochFormat will handle it correctly
-      return "ms";
     }
 
     // 3. Special cases for common time-series timestamp columns (only if not a string type)
@@ -685,23 +688,38 @@ export class QueryProcessor {
     const lowerName = columnName.toLowerCase();
     const lowerType = dataType?.toLowerCase() || "";
 
-    // Check if it's a DuckDB TIMESTAMP type - these should use ISO string format
+    // HIGHEST PRIORITY: Check if it's a database TIMESTAMP type
+    // These should ALWAYS use ISO string format, regardless of precision
     if (lowerType.includes("timestamp") || lowerType.includes("datetime")) {
-      return false; // Use ISO string format for DuckDB timestamps
+      return false; // Always use ISO string format for database timestamps
     }
 
-    // Use epoch if we have a specific numeric time unit
+    // FALLBACK: If no dataType but column name suggests DuckDB timestamp column
+    // DuckDB commonly uses __timestamp, __ingest_timestamp for TIMESTAMP columns
+    if (!dataType && (
+      lowerName === "__timestamp" || 
+      lowerName === "__ingest_timestamp" ||
+      lowerName === "timestamp" ||
+      lowerName === "ingest_timestamp"
+    )) {
+      return false; // Assume it's a DuckDB TIMESTAMP column - use ISO format
+    }
+
+    // For non-timestamp columns, check if we have a numeric time unit
+    // This is for integer columns that store epoch values
     if (timeUnit && ["ns", "us", "μs", "ms", "s"].includes(timeUnit)) {
-      // But only if it's not a DuckDB timestamp type
-      if (!lowerType.includes("timestamp")) {
-        return true;
+      // But skip this if it looks like a DuckDB timestamp column name
+      if (lowerName === "__timestamp" || lowerName === "__ingest_timestamp") {
+        return false; // These are DuckDB TIMESTAMP columns, not epoch integers
       }
+      return true; // Use epoch format for integer time columns
     }
 
     // Use epoch for columns that explicitly look like epoch timestamps
+    // But exclude __timestamp and __ingest_timestamp which are DuckDB columns
     if (
       lowerName.includes("epoch") ||
-      lowerName.includes("_ts") ||
+      (lowerName.includes("_ts") && lowerName !== "__timestamp" && lowerName !== "__ingest_timestamp") ||
       lowerName.includes("_ns") ||
       lowerName.includes("_ms") ||
       lowerName.includes("_us")
