@@ -767,14 +767,21 @@ export class ArtifactValidationService {
 
   private initializeDangerousPatterns(): void {
     this.dangerousPatterns = [
-      /;\s*DROP\s+TABLE/gi,
-      /;\s*DELETE\s+FROM/gi,
-      /;\s*UPDATE\s+.*SET/gi,
-      /;\s*INSERT\s+INTO/gi,
-      /;\s*CREATE\s+/gi,
-      /;\s*ALTER\s+/gi,
-      /EXEC\s*\(/gi,
-      /EXECUTE\s*\(/gi,
+      // Destructive DDL/DML anywhere in the string
+      /\bDROP\s+TABLE\b/gi,
+      /\bTRUNCATE\s+TABLE\b/gi,
+      /\bDELETE\s+FROM\b/gi,
+      /\bUPDATE\s+\S+\s+SET\b/gi,
+      /\bINSERT\s+INTO\b/gi,
+      /\bCREATE\s+(TABLE|VIEW|SCHEMA|DATABASE)\b/gi,
+      /\bALTER\s+(TABLE|VIEW|SCHEMA|DATABASE)\b/gi,
+      /\bATTACH\s+DATABASE\b/gi,
+      /\bDETACH\s+DATABASE\b/gi,
+      /\bVACUUM\b/gi,
+      /\bCOPY\s+(TO|FROM)\b/gi,
+      // Exec/shell
+      /\bEXEC\s*\(/gi,
+      /\bEXECUTE\s*\(/gi,
       /xp_cmdshell/gi,
     ];
   }

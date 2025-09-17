@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useAtom, useSetAtom } from "jotai";
 import { apiUrlAtom } from "@/atoms";
+import { selectedConnectionAtom, buildApiRequestConfig } from "@/atoms/connection-atoms";
 import { setQueryAtom } from "@/atoms/query-atoms";
 import {
   dashboardListAtom,
@@ -110,6 +111,7 @@ export default function ChatArtifactEnhanced({
   const addPanel = useSetAtom(addPanelAtom);
   const [chatSessions, setChatSessions] = useAtom(chatSessionsAtom);
   const [schemaCache] = useAtom(schemaCacheAtom);
+  const [selectedConnection] = useAtom(selectedConnectionAtom);
 
   // Navigate
   const navigation = useNavigate();
@@ -364,16 +366,23 @@ export default function ChatArtifactEnhanced({
         });
       }
 
+      // Safe Mode removed: no client-side blocking here
+
       // Execute query
       log(artifact.id, "info", "Executing query against API", {
         url: apiUrl,
         database,
       });
 
+      const { url: requestUrl, headers } = buildApiRequestConfig(
+        selectedConnection,
+        apiUrl,
+        { db: database, format: 'ndjson' }
+      );
       const response = await axios.post(
-        `${apiUrl}?db=${encodeURIComponent(database)}&format=ndjson`,
+        requestUrl,
         { query: finalQuery },
-        { responseType: "text", timeout: 30000 }
+        { responseType: "text", timeout: 30000, headers }
       );
 
       // Parse NDJSON response

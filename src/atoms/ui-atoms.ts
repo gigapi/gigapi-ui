@@ -12,3 +12,4 @@ export const openCommandPaletteAtom = atom(
   }
 );
 
+// (Safe Mode removed by request)

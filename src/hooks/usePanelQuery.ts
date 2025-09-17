@@ -7,7 +7,7 @@ import {
   type Dashboard,
   type PanelConfig,
 } from "@/atoms/dashboard-atoms";
-import { apiUrlAtom, isConnectedAtom } from "@/atoms/connection-atoms";
+import { apiUrlAtom, isConnectedAtom, selectedConnectionAtom, buildApiRequestConfig } from "@/atoms/connection-atoms";
 import { selectedDbAtom, schemaCacheAtom } from "@/atoms/database-atoms";
 import { QueryProcessor } from "@/lib/query-processor";
 import type { TimeUnit } from "@/types";
@@ -52,6 +52,7 @@ export function usePanelQuery({
 }: PanelQueryOptions): PanelQueryResult {
   const apiUrl = useAtomValue(apiUrlAtom);
   const isConnected = useAtomValue(isConnectedAtom);
+  const selectedConnection = useAtomValue(selectedConnectionAtom);
   const selectedDb = useAtomValue(selectedDbAtom);
   const timeZone = useAtomValue(selectedTimeZoneAtom);
   const selectedTimeField = useAtomValue(selectedTimeFieldAtom);
@@ -187,15 +188,19 @@ export function usePanelQuery({
       setLoadingStates((prev) => new Map(prev).set(panelId, true));
 
       try {
-        // Use axios for consistent query execution
+        // Use axios for consistent query execution with auth-aware request config
+        const { url: requestUrl, headers } = buildApiRequestConfig(
+          selectedConnection,
+          apiUrl,
+          { db: database, format: 'ndjson' }
+        );
         const response = await axios.post(
-          `${apiUrl}?db=${database}&format=ndjson`,
-          {
-            query: processedQuery,
-          },
+          requestUrl,
+          { query: processedQuery },
           {
             signal: abortControllerRef.current!.signal,
             responseType: 'text', // Ensure we get raw text for NDJSON parsing
+            headers,
           }
         );
 

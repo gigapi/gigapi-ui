@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useAtom } from "jotai";
 import { apiUrlAtom } from "@/atoms";
+import { selectedConnectionAtom, buildApiRequestConfig } from "@/atoms/connection-atoms";
 import { useArtifact } from "@/contexts/ArtifactContext";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -60,6 +61,7 @@ export default function ArtifactRenderer({
   config = {},
 }: ArtifactRendererProps) {
   const [apiUrl] = useAtom(apiUrlAtom);
+  const [selectedConnection] = useAtom(selectedConnectionAtom);
   const { log, startOperation, endOperation } = useArtifact();
 
   const [data, setData] = useState<any[]>([]);
@@ -240,16 +242,23 @@ export default function ArtifactRenderer({
         });
       }
 
+      // Safe Mode removed: no client-side blocking here
+
       log(artifact.id, "info", "Executing final query", {
         finalQuery,
         database,
         apiUrl: `${apiUrl}?db=${encodeURIComponent(database)}&format=ndjson`
       });
 
+      const { url: requestUrl, headers } = buildApiRequestConfig(
+        selectedConnection,
+        apiUrl,
+        { db: database, format: 'ndjson' }
+      );
       const response = await axios.post(
-        `${apiUrl}?db=${encodeURIComponent(database)}&format=ndjson`,
+        requestUrl,
         { query: finalQuery },
-        { responseType: "text", timeout: 30000 }
+        { responseType: "text", timeout: 30000, headers }
       );
 
       const parseResult = parseNDJSON(response.data);

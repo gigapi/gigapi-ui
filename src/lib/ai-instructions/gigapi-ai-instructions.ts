@@ -34,7 +34,7 @@ ${
 **NEVER write SQL as plain text. ALWAYS use artifact blocks:**
 
 ### Query Artifact (for data exploration)
-\`\`\`query
+\`\`\`query json
 {
   "title": "Descriptive Title",
   "query": "SELECT * FROM table_name LIMIT 100",
@@ -43,7 +43,7 @@ ${
 \`\`\`
 
 ### Chart Artifact (for visualizations)
-\`\`\`chart
+\`\`\`chart json
 {
   "type": "timeseries",  // timeseries, bar, pie, scatter, stat, table, heatmap
   "title": "Chart Title",
@@ -60,7 +60,7 @@ ${
   isAgentic
     ? `
 ### Proposal Artifact (AGENTIC MODE ONLY)
-\`\`\`proposal
+\`\`\`proposal json
 {
   "type": "query_proposal",  // or "chart_proposal"
   "title": "What This Will Do",
@@ -197,30 +197,30 @@ When user mentions tables:
 ## 🚀 Advanced DuckDB Examples
 
 ### Time Series with Query Variables
-\`\`\`chart
+\`\`\`chart json
 {
   "type": "timeseries",
   "title": "Hourly Transaction Volume",
-  "query": "WITH hourly_stats AS (\n  SELECT \n     $__timeField as time,\n    COUNT(*) as transactions,\n    SUM(amount) as total_amount,\n    PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY amount) as median_amount\n  FROM transactions\n  WHERE $__timeFilter\n  GROUP BY time\n)\nSELECT * FROM hourly_stats ORDER BY hour",
+  "query": "WITH hourly_stats AS (\n  SELECT $__timeField AS time,\n         COUNT(*) AS transactions,\n         SUM(amount) AS total_amount,\n         PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY amount) AS median_amount\n  FROM transactions\n  WHERE $__timeFilter\n  GROUP BY time\n)\nSELECT * FROM hourly_stats ORDER BY time",
   "database": "analytics",
   "fieldMapping": {
-    "xField": "hour",
+    "xField": "time",
     "yField": ["transactions", "total_amount"]
   }
 }
 \`\`\`
 
 ### Window Functions for Running Totals
-\`\`\`query
+\`\`\`query json
 {
   "title": "Cumulative Revenue with Moving Average",
-  "query": "SELECT \n   __timestamp ,\n  SUM(revenue) as daily_revenue,\n  SUM(SUM(revenue)) OVER (ORDER BY  __timestamp) as cumulative_revenue,\n  AVG(SUM(revenue)) OVER (\n    ORDER BY  __timestamp \n    ROWS BETWEEN 6 PRECEDING AND CURRENT ROW\n  ) as moving_avg_7d\nFROM sales\nWHERE $__timeFilter\nGROUP BY __timestamp\nORDER BY day",
+  "query": "SELECT $__timeField AS time,\n  SUM(revenue) AS daily_revenue,\n  SUM(SUM(revenue)) OVER (ORDER BY time) AS cumulative_revenue,\n  AVG(SUM(revenue)) OVER (ORDER BY time ROWS BETWEEN 6 PRECEDING AND CURRENT ROW) AS moving_avg_7d\nFROM sales\nWHERE $__timeFilter\nGROUP BY time\nORDER BY time",
   "database": "sales"
 }
 \`\`\`
 
 ### Cohort Analysis with Arrays
-\`\`\`query
+\`\`\`query json
 {
   "title": "User Cohort Retention",
   "query": "WITH cohorts AS (\n  SELECT \n    $__timeField as time,\n    user_id,\n    ARRAY_AGG(DISTINCT date_trunc('month', event_time)) as active_months\n  FROM user_events\n  WHERE $__timeFilter\n  GROUP BY  $__timeField, user_id\n)\nSELECT \n   $__timeField ,\n  COUNT(DISTINCT user_id) as cohort_size,\n  COUNT(DISTINCT CASE \n    WHEN array_contains(active_months, cohort_month + INTERVAL '1 month') \n    THEN user_id END) as month_1_retained,\n  COUNT(DISTINCT CASE \n    WHEN array_contains(active_months, cohort_month + INTERVAL '2 months') \n    THEN user_id END) as month_2_retained\nFROM cohorts\nGROUP BY cohort_month\nORDER BY cohort_month",
@@ -229,7 +229,7 @@ When user mentions tables:
 \`\`\`
 
 ### Funnel Analysis with CTEs
-\`\`\`chart
+\`\`\`chart json
 {
   "type": "bar",
   "title": "Conversion Funnel",
@@ -243,7 +243,7 @@ When user mentions tables:
 \`\`\`
 
 ### JSON Data Processing
-\`\`\`query
+\`\`\`query json
 {
   "title": "Extract and Analyze JSON Properties",
   "query": "SELECT \n  json_extract_string(properties, '$.category') as category,\n  json_extract_string(properties, '$.source') as source,\n  COUNT(*) as event_count,\n  AVG(CAST(json_extract(properties, '$.value') AS DOUBLE)) as avg_value\nFROM events\nWHERE $__timeFilter\n  AND json_extract_string(properties, '$.type') = 'conversion'\nGROUP BY category, source\nHAVING COUNT(*) > 10\nORDER BY avg_value DESC\nLIMIT 20",
@@ -277,6 +277,8 @@ When user mentions tables:
 8. **Optimize for performance** - use LIMIT, sample large datasets, filter early
 9. **Test queries mentally** before providing them
 10. **Format for readability** - indent CTEs, use clear aliases
+11. **Code fences MUST declare JSON** — use \`\`\`query json / \`\`\`chart json / \`\`\`proposal json so the JSON validates cleanly
+12. **Keep text concise** — focus on artifacts; only short explanations outside artifacts
 
 ## 🎭 Mode-Specific Behavior
 

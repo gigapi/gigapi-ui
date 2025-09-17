@@ -1398,11 +1398,11 @@ async function sendToAIStreaming(
       content: `REMINDER: You MUST create artifacts for ALL queries and visualizations.
 
 Example - when user asks "show me data from users":
-\`\`\`query
+\`\`\`query json
 {
   "title": "Users Data",
   "query": "SELECT * FROM users LIMIT 100",
-  "database": "@main"
+  "database": "main"
 }
 \`\`\`
 
@@ -1435,7 +1435,7 @@ You are currently in AGENTIC MODE. This means:
 ## EXACT PROPOSAL FORMAT REQUIRED:
 
 For queries:
-\`\`\`proposal
+\`\`\`proposal json
 {
   "type": "query_proposal",
   "title": "Clear descriptive title",
@@ -1448,7 +1448,7 @@ For queries:
 \`\`\`
 
 For charts:
-\`\`\`proposal
+\`\`\`proposal json
 {
   "type": "chart_proposal",
   "title": "Chart title",
@@ -1930,7 +1930,7 @@ async function processAIResponse(
 
   // Extract chart artifacts
   const chartMatches = processedContent.matchAll(
-    /\`\`\`chart\n([\s\S]*?)\`\`\`/g
+    /\`\`\`chart(?:\s+\w+)?\n([\s\S]*?)\`\`\`/g
   );
   for (const match of chartMatches) {
     try {
@@ -1959,7 +1959,7 @@ async function processAIResponse(
 
   // Extract query artifacts
   const queryMatches = processedContent.matchAll(
-    /\`\`\`query\n([\s\S]*?)\`\`\`/g
+    /\`\`\`query(?:\s+\w+)?\n([\s\S]*?)\`\`\`/g
   );
   for (const match of queryMatches) {
     try {
@@ -1988,7 +1988,7 @@ async function processAIResponse(
 
   // Extract table artifacts
   const tableMatches = processedContent.matchAll(
-    /\`\`\`table\n([\s\S]*?)\`\`\`/g
+    /\`\`\`table(?:\s+\w+)?\n([\s\S]*?)\`\`\`/g
   );
   for (const match of tableMatches) {
     try {
@@ -2017,7 +2017,7 @@ async function processAIResponse(
 
   // Extract summary artifacts
   const summaryMatches = processedContent.matchAll(
-    /\`\`\`summary\n([\s\S]*?)\`\`\`/g
+    /\`\`\`summary(?:\s+\w+)?\n([\s\S]*?)\`\`\`/g
   );
   for (const match of summaryMatches) {
     try {
@@ -2042,7 +2042,7 @@ async function processAIResponse(
 
   // Extract insight artifacts
   const insightMatches = processedContent.matchAll(
-    /\`\`\`insight\n([\s\S]*?)\`\`\`/g
+    /\`\`\`insight(?:\s+\w+)?\n([\s\S]*?)\`\`\`/g
   );
   for (const match of insightMatches) {
     try {
@@ -2066,7 +2066,7 @@ async function processAIResponse(
   }
 
   // Extract proposal artifacts
-  const proposalRegex = /\`\`\`proposal\n([\s\S]*?)\`\`\`/g;
+  const proposalRegex = /\`\`\`proposal(?:\s+\w+)?\n([\s\S]*?)\`\`\`/g;
   const proposalMatches = Array.from(processedContent.matchAll(proposalRegex));
 
   console.log("🔍 Processing proposal artifacts:", {
@@ -2138,7 +2138,7 @@ async function processAIResponse(
 
   // Extract metric artifacts
   const metricMatches = processedContent.matchAll(
-    /\`\`\`metric\n([\s\S]*?)\`\`\`/g
+    /\`\`\`metric(?:\s+\w+)?\n([\s\S]*?)\`\`\`/g
   );
   for (const match of metricMatches) {
     try {

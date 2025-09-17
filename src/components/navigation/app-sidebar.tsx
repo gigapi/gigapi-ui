@@ -29,6 +29,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import QueryHistory from "@/components/query/QueryHistory";
 import { ModeToggle } from "@/components/shared/mode-toggle";
+// Safe Mode removed
 import Logo from "@/assets/logo.svg";
 import { useAtom, useSetAtom } from "jotai";
 import {
@@ -112,6 +113,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const connect = useSetAtom(connectAtom);
   const switchConnectionAndReset = useSetAtom(switchConnectionAndResetAtom);
   const [showConnectionModal, setShowConnectionModal] = useState(false);
+  // Safe Mode removed
 
   const handleConnectionChange = (connectionId: string) => {
     switchConnectionAndReset(connectionId);
@@ -236,6 +238,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                 <span className="text-xs text-muted-foreground">Theme</span>
                 <ModeToggle />
               </div>
+              {/* Safe Mode removed */}
             </div>
           </SidebarGroupContent>
         </SidebarGroup>
