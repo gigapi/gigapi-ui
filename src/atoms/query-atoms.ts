@@ -45,9 +45,41 @@ export const processedQueryAtom = currentTabProcessedQueryAtom;
 // Alias the tab-aware query history atom for backward compatibility
 export const queryHistoryAtom = currentTabQueryHistoryAtom;
 
+// Store abort controllers for each tab's running query
+const abortControllersAtom = atom<Map<string, AbortController>>(new Map());
+
 // Actions
 export const setQueryAtom = atom(null, (_get, set, query: string) => {
   set(queryAtom, query);
+});
+
+// Cancel query action
+export const cancelQueryAtom = atom(null, (get, set, tabId?: string) => {
+  const activeTabId = tabId || get(activeTabIdAtom);
+  if (!activeTabId) return;
+
+  const controllers = get(abortControllersAtom);
+  const controller = controllers.get(activeTabId);
+
+  if (controller) {
+    // Actual query is running, cancel it
+    controller.abort();
+    controllers.delete(activeTabId);
+    set(abortControllersAtom, new Map(controllers));
+    toast.info("Query cancelled");
+  } else {
+    // No controller means it's a stale loading state
+    // Just reset the UI state
+    const getTabById = get(getTabByIdAtom);
+    const tab = getTabById(activeTabId);
+    if (tab?.queryLoading) {
+      toast.info("Clearing stale query state");
+    }
+  }
+
+  // Always update UI state, whether there was a controller or not
+  set(updateTabQueryLoadingByIdAtom, { tabId: activeTabId, loading: false });
+  set(removeRunningQueryAtom, activeTabId);
 });
 
 export const executeQueryAtom = atom(null, async (get, set) => {
@@ -93,6 +125,12 @@ export const executeQueryAtom = atom(null, async (get, set) => {
   
   // Mark this tab as having a running query
   set(addRunningQueryAtom, executeTabId);
+
+  // Create abort controller for this query
+  const abortController = new AbortController();
+  const controllers = get(abortControllersAtom);
+  controllers.set(executeTabId, abortController);
+  set(abortControllersAtom, new Map(controllers));
 
   const startTime = Date.now();
 
@@ -158,7 +196,11 @@ export const executeQueryAtom = atom(null, async (get, set) => {
       {
         query: processedQuery,
       },
-      { headers }
+      {
+        headers,
+        signal: abortController.signal,
+        timeout: 300000 // 5 minute timeout
+      }
     );
 
     const result = response.data;
@@ -248,6 +290,12 @@ export const executeQueryAtom = atom(null, async (get, set) => {
     // Add to the specific tab's history
     set(addToTabQueryHistoryByIdAtom, { tabId: executeTabId, historyItem });
   } catch (error: any) {
+    // Handle cancellation
+    if (axios.isCancel(error)) {
+      // Query was cancelled, don't show error
+      return;
+    }
+
     let errorMessage = "Query failed";
 
     // Extract detailed error message from axios response
@@ -266,21 +314,42 @@ export const executeQueryAtom = atom(null, async (get, set) => {
             const parsed = JSON.parse(error.response.data);
             if (parsed.error) {
               errorMessage = parsed.error;
+            } else {
+              // Use the string as is if no error field
+              errorMessage = error.response.data || "Query failed with unknown error";
             }
           } catch {
             // If not JSON, use as is
-            errorMessage = error.response.data;
+            errorMessage = error.response.data || "Query failed with unknown error";
           }
+        } else {
+          // If data is another type, try to stringify it
+          errorMessage = JSON.stringify(error.response.data) || "Query failed with unknown error";
         }
       } else if (error.response.statusText) {
         errorMessage = `${error.response.status}: ${error.response.statusText}`;
+      } else {
+        errorMessage = `HTTP Error ${error.response.status || 'unknown'}`;
       }
     } else if (error.message) {
       errorMessage = error.message;
     }
 
+    // Ensure errorMessage is never empty
+    if (!errorMessage || errorMessage.trim() === "") {
+      errorMessage = "Query failed with unknown error";
+      console.error("Query execution error:", error); // Log full error for debugging
+    }
+
     set(updateTabQueryErrorByIdAtom, { tabId: executeTabId, error: errorMessage });
     set(updateTabQueryResultsByIdAtom, { tabId: executeTabId, results: null }); // Clear results on error
+
+    // Show toast with validated error message
+    if (errorMessage && errorMessage.trim() !== "") {
+      toast.error(errorMessage);
+    } else {
+      toast.error("Query failed. Check console for details.");
+    }
 
     // Add failed query to history with full context
     const historyItem: QueryHistoryItem = {
@@ -301,9 +370,14 @@ export const executeQueryAtom = atom(null, async (get, set) => {
   } finally {
     // Update loading state for the specific tab
     set(updateTabQueryLoadingByIdAtom, { tabId: executeTabId, loading: false });
-    
+
     // Remove this tab from running queries
     set(removeRunningQueryAtom, executeTabId);
+
+    // Clean up abort controller
+    const controllers = get(abortControllersAtom);
+    controllers.delete(executeTabId);
+    set(abortControllersAtom, new Map(controllers));
   }
 });
 

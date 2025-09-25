@@ -4,6 +4,7 @@ import {
   queryAtom,
   queryResultsAtom,
   executeQueryAtom,
+  cancelQueryAtom,
   queryLoadingAtom,
   setQueryAtom,
   selectedDbAtom,
@@ -37,6 +38,7 @@ export default function QueryEditor() {
   const [autoCompleteSchema] = useAtom(autoCompleteSchemaAtom);
   const setQuery = useSetAtom(setQueryAtom);
   const executeQuery = useSetAtom(executeQueryAtom);
+  const cancelQuery = useSetAtom(cancelQueryAtom);
   const setSelectedTableAction = useSetAtom(setSelectedTableAtom);
   const setSelectedTimeField = useSetAtom(setSelectedTimeFieldAtom);
   const setHasTimeVariables = useSetAtom(setHasTimeVariablesAtom);
@@ -80,26 +82,33 @@ export default function QueryEditor() {
   // Handle time range change
   const setTimeRange = useSetAtom(setTimeRangeAtom);
   const [shouldAutoExecute, setShouldAutoExecute] = useState(false);
-  
+  const [isInitialMount, setIsInitialMount] = useState(true);
+
   const handleTimeRangeChange = useCallback(
     (newTimeRange: any) => {
       setTimeRange(newTimeRange);
-      
+
       // Mark that we should auto-execute if conditions are met
-      if (queryResults && queryResults.length > 0 && hasTimeVariables && query.trim()) {
+      // But not on initial mount to prevent auto-execution on page refresh
+      if (!isInitialMount && queryResults && queryResults.length > 0 && hasTimeVariables && query.trim()) {
         setShouldAutoExecute(true);
       }
     },
-    [setTimeRange, queryResults, hasTimeVariables, query]
+    [setTimeRange, queryResults, hasTimeVariables, query, isInitialMount]
   );
-  
+
+  // Mark initial mount as complete after first render
+  useEffect(() => {
+    setIsInitialMount(false);
+  }, []);
+
   // Auto-execute query when time range changes and conditions are met
   useEffect(() => {
-    if (shouldAutoExecute) {
+    if (shouldAutoExecute && !isInitialMount && !isLoading) {
       handleRunQuery();
       setShouldAutoExecute(false);
     }
-  }, [shouldAutoExecute]);
+  }, [shouldAutoExecute, isInitialMount, isLoading]);
 
   // Handle running query with timeout protection - NOT using useCallback to avoid stale closures
   const handleRunQuery = async () => {
@@ -134,6 +143,11 @@ export default function QueryEditor() {
       editorRef.current.setValue("");
     }
   }, [setQuery]);
+
+  // Handle canceling query
+  const handleCancelQuery = useCallback(() => {
+    cancelQuery();
+  }, [cancelQuery]);
 
   // Handle refreshing schema
   const handleRefreshSchema = useCallback(() => {
@@ -251,6 +265,7 @@ export default function QueryEditor() {
           showChatPanel={showChatPanel}
           chatSessionsCount={0}
           onRunQuery={handleRunQuery}
+          onCancelQuery={handleCancelQuery}
           onClearQuery={handleClearQuery}
           onToggleChat={() => {
             setShowChatPanel(!showChatPanel);

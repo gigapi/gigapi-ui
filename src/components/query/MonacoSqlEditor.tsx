@@ -379,10 +379,16 @@ export default function MonacoSqlEditor({
   const editorTheme = theme === "light" ? "light" : "vs-dark";
 
   return (
-    <div className="h-full w-full border rounded-md overflow-hidden bg-background relative">
+    <div className={`h-full w-full border rounded-md overflow-hidden bg-background relative ${isLoading ? 'border-blue-500 animate-pulse' : ''}`}>
       {!isEditorReady && (
         <div className="absolute inset-0 z-10">
           <Skeleton className="h-full w-full" />
+        </div>
+      )}
+      {isLoading && (
+        <div className="absolute top-2 right-2 z-20 bg-blue-500/90 text-white px-3 py-1 rounded-md text-xs font-medium flex items-center gap-2">
+          <Loader className="h-3 w-3" />
+          Query running...
         </div>
       )}
       <Editor
@@ -407,7 +413,7 @@ export default function MonacoSqlEditor({
           tabSize: 2,
           wordWrap: "on",
           automaticLayout: true,
-          readOnly: isLoading,
+          // Remove readOnly: isLoading to allow editing during query execution
         }}
         loading={<Loader className="h-10 w-10" />}
       />

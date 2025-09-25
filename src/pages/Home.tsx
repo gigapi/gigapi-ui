@@ -8,15 +8,16 @@ import {
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
 import AppLayout from "@/components/navigation/AppLayout";
-import { 
-  initializeDatabaseAtom, 
+import {
+  initializeDatabaseAtom,
   isConnectedAtom,
   setQueryAtom,
   setSelectedDbAtom,
   setSelectedTableAtom,
   selectedTimeFieldAtom,
   setTimeRangeAtom,
-  cleanupOldLocalStorageAtom
+  cleanupOldLocalStorageAtom,
+  resetStaleLoadingStatesAtom,
 } from "@/atoms";
 import { HashQueryUtils } from "@/lib/url/hash-query-utils";
 import { TabBar } from "@/components/tabs/TabBar";
@@ -25,10 +26,12 @@ function Home() {
   const initializeDatabase = useSetAtom(initializeDatabaseAtom);
   const isConnected = useAtomValue(isConnectedAtom);
   const cleanupOldStorage = useSetAtom(cleanupOldLocalStorageAtom);
+  const resetStaleLoadingStates = useSetAtom(resetStaleLoadingStatesAtom);
   const initializedRef = useRef(false);
   const urlParamsLoadedRef = useRef(false);
   const cleanupDoneRef = useRef(false);
-  
+  const staleStateCleanedRef = useRef(false);
+
   // Atoms for setting query parameters
   const setQuery = useSetAtom(setQueryAtom);
   const setSelectedDb = useSetAtom(setSelectedDbAtom);
@@ -37,11 +40,20 @@ function Home() {
   const setTimeRange = useSetAtom(setTimeRangeAtom);
 
 
+  // Clean up stale loading states on mount (BEFORE loading URL params)
+  useEffect(() => {
+    if (!staleStateCleanedRef.current) {
+      staleStateCleanedRef.current = true;
+      // Reset any stale loading states from previous session
+      resetStaleLoadingStates();
+    }
+  }, [resetStaleLoadingStates]);
+
   // Load query parameters from URL on mount
   useEffect(() => {
-    if (!urlParamsLoadedRef.current) {
+    if (!urlParamsLoadedRef.current && staleStateCleanedRef.current) {
       urlParamsLoadedRef.current = true;
-      
+
       const params = HashQueryUtils.decodeHashQuery();
       if (params) {
         // Apply the parameters
@@ -49,7 +61,7 @@ function Home() {
         if (params.db) setSelectedDb(params.db);
         if (params.table) setSelectedTable(params.table);
         if (params.timeField) setSelectedTimeField(params.timeField);
-        
+
         // Handle time range
         if (params.timeFrom && params.timeTo) {
           setTimeRange({
@@ -60,7 +72,7 @@ function Home() {
         }
       }
     }
-  }, [setQuery, setSelectedDb, setSelectedTable, setSelectedTimeField, setTimeRange]);
+  }, [setQuery, setSelectedDb, setSelectedTable, setSelectedTimeField, setTimeRange, staleStateCleanedRef]);
 
   // Initialize database and tables when connected (only once)
   useEffect(() => {

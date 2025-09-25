@@ -26,7 +26,18 @@ function migrateOldData(): TabsState {
   const existingTabs = localStorage.getItem("gigapi_tabs");
   if (existingTabs) {
     try {
-      return JSON.parse(existingTabs);
+      const state = JSON.parse(existingTabs);
+      // ALWAYS reset loading states on app initialization to prevent stale state
+      if (state.tabs) {
+        state.tabs = state.tabs.map((tab: QueryTab) => ({
+          ...tab,
+          queryLoading: false, // Always reset loading state on page refresh
+          queryError: null // Also clear any stale errors
+        }));
+      }
+      // Save the cleaned state back to localStorage
+      localStorage.setItem("gigapi_tabs", JSON.stringify(state));
+      return state;
     } catch (e) {
       console.error("Failed to parse existing tabs:", e);
     }
@@ -552,7 +563,19 @@ export const currentTabQueryErrorAtom = atom(
 
 // Current tab's query loading state
 export const currentTabQueryLoadingAtom = atom(
-  (get) => get(activeTabAtom)?.queryLoading || false,
+  (get) => {
+    const activeTab = get(activeTabAtom);
+    if (!activeTab) return false;
+
+    // Check for stale loading state - if loading but no running query, it's stale
+    const runningQueries = get(runningQueriesAtom);
+    if (activeTab.queryLoading && !runningQueries.has(activeTab.id)) {
+      // Stale loading state detected, return false
+      return false;
+    }
+
+    return activeTab.queryLoading || false;
+  },
   (get, set, loading: boolean) => {
     const state = get(tabsStateAtom);
     const activeTab = get(activeTabAtom);
@@ -716,7 +739,26 @@ export const currentTabAvailableFieldsAtom = atom(
 // ============================================================================
 
 // Track which tabs have running queries
+// Always starts empty on page load to prevent stale state
 export const runningQueriesAtom = atom<Set<string>>(new Set<string>());
+
+// Reset all stale loading states on initialization
+export const resetStaleLoadingStatesAtom = atom(null, (get, set) => {
+  const state = get(tabsStateAtom);
+  const runningQueries = get(runningQueriesAtom);
+
+  // Clear loading state for all tabs that aren't actually running
+  const updatedTabs = state.tabs.map((tab) => {
+    if (tab.queryLoading && !runningQueries.has(tab.id)) {
+      return { ...tab, queryLoading: false };
+    }
+    return tab;
+  });
+
+  if (JSON.stringify(updatedTabs) !== JSON.stringify(state.tabs)) {
+    set(tabsStateAtom, { ...state, tabs: updatedTabs });
+  }
+});
 
 // Add a tab to running queries
 export const addRunningQueryAtom = atom(null, (get, set, tabId: string) => {

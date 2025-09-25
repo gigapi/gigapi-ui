@@ -9,6 +9,7 @@ import {
   Share2,
   RefreshCw,
   MoreVertical,
+  X,
 } from "lucide-react";
 import {
   Tooltip,
@@ -39,6 +40,7 @@ interface QueryEditorToolbarProps {
   showChatPanel: boolean;
   chatSessionsCount?: number;
   onRunQuery: () => void;
+  onCancelQuery?: () => void;
   onClearQuery: () => void;
   onToggleChat: () => void;
   onRefreshSchema?: () => void;
@@ -55,6 +57,7 @@ export default function QueryEditorToolbar({
   showChatPanel,
   chatSessionsCount = 0,
   onRunQuery,
+  onCancelQuery,
   onClearQuery,
   onToggleChat,
   onRefreshSchema,
@@ -105,33 +108,53 @@ export default function QueryEditorToolbar({
       {/* Desktop Layout */}
       <div className="hidden lg:flex items-center p-2">
         <div className="flex items-center gap-2">
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  onClick={onRunQuery}
-                  disabled={isLoading || !selectedDb}
-                  className="h-8 px-3"
-                  variant="default"
-                >
-                  {isLoading ? (
-                    <>
-                      <Loader className="h-4 w-4" />
-                      <span className="ml-1">Running...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Play className="mr-1.5 h-3.5 w-3.5" />
-                      Run Query
-                    </>
-                  )}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">
-                <p className="text-xs">⌘R or ⌘Enter</p>
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+          {isLoading && onCancelQuery ? (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    onClick={onCancelQuery}
+                    className="h-8 px-3"
+                    variant="destructive"
+                  >
+                    <X className="mr-1.5 h-3.5 w-3.5" />
+                    Cancel Query
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">
+                  <p className="text-xs">Cancel running query</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          ) : (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    onClick={onRunQuery}
+                    disabled={isLoading || !selectedDb}
+                    className="h-8 px-3"
+                    variant="default"
+                  >
+                    {isLoading ? (
+                      <>
+                        <Loader className="h-4 w-4" />
+                        <span className="ml-1">Running...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Play className="mr-1.5 h-3.5 w-3.5" />
+                        Run Query
+                      </>
+                    )}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">
+                  <p className="text-xs">⌘R or ⌘Enter</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          )}
 
           <div className="flex items-center gap-1">
             <TooltipProvider>
